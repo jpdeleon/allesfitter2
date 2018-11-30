@@ -104,6 +104,28 @@ np.savetxt('Michelangelo.csv', X, delimiter=',', header=header)
 
 
 
+#::: also simulate it with a +5 minute TTV
+inst = 'Michelangelo'
+time_Michelangelo = np.arange(52,52.25,2./60./24.)[::2] + 5./60./24.
+flux_Michelangelo = ellc.lc(
+                      t_obs =       time_Michelangelo, 
+                      radius_1 =    params[planet+'_radius_1'], 
+                      radius_2 =    params[planet+'_radius_2'], 
+                      sbratio =     params[planet+'_sbratio'],
+                      incl =        params[planet+'_incl'],
+                      t_zero =      params[planet+'_epoch'],
+                      period =      params[planet+'_period'],
+                      ld_1 =        params['ld_1_'+inst],
+                      ldc_1 =       params['ldc_1_'+inst]
+                      )
+flux_Michelangelo += np.random.normal(0,5e-4,size=len(flux_Michelangelo))
+flux_Michelangelo += 2e-3*np.sin(time_Michelangelo*8)
+flux_err_Michelangelo = 5e-4*np.ones_like(flux_Michelangelo)
+header = 'time,flux,flux_err'
+X = np.column_stack(( time_Michelangelo, flux_Michelangelo, flux_err_Michelangelo ))
+np.savetxt('Michelangelo_TTV.csv', X, delimiter=',', header=header)
+
+
 inst = 'Donatello'
 time_Donatello = [37.1, 38, 42, 55, 56, 58]
 rv_Donatello = ellc.rv(
