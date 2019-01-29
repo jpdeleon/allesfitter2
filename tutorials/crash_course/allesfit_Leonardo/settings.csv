@@ -4,7 +4,7 @@
 ###############################################################################,
 companions_phot,b
 companions_rv,
-inst_phot,Leonardo Michelangelo
+inst_phot,Leonardo
 inst_rv,
 ###############################################################################,
 # Fit performance settings,
@@ -39,7 +39,6 @@ ns_tol,0.01
 # if 'sing' three corresponding parameter called 'ldc_q1_inst'; 'ldc_q2_inst' and 'ldc_q3_inst' have to be given in params.csv,
 ###############################################################################,
 host_ld_law_Leonardo,quad
-host_ld_law_Michelangelo,quad
 ###############################################################################,
 # Baseline settings per instrument,
 # baseline params per instrument: sample_offset / sample_linear / sample_GP / hybrid_offset / hybrid_poly_1 / hybrid_poly_2 / hybrid_poly_3 / hybrid_pol_4 / hybrid_spline / hybrid_GP,
@@ -47,22 +46,19 @@ host_ld_law_Michelangelo,quad
 # if 'sample_linear' two corresponding parameters called 'baseline_a_key_inst' and 'baseline_b_key_inst' have to be given in params.csv,
 # if 'sample_GP' two corresponding parameters called 'baseline_gp1_key_inst' and 'baseline_gp2_key_inst' have to be given in params.csv,
 ###############################################################################,
-baseline_flux_Leonardo,hybrid_spline
-baseline_flux_Michelangelo,hybrid_spline
+baseline_flux_Leonardo,sample_GP
 ###############################################################################,
 # Error settings per instrument,
 # errors (overall scaling) per instrument: sample / hybrid,
 # if 'sample' one corresponding parameter called 'log_err_key_inst' (photometry) or 'log_jitter_key_inst' (RV) has to be given in params.csv,
 ###############################################################################,
 error_flux_Leonardo,sample
-error_flux_Michelangelo,sample
 ###############################################################################,
 # Exposure times for interpolation,
 # needs to be in the same units as the time series,
 # if not given the observing times will not be interpolated leading to biased results,
 ###############################################################################,
 t_exp_Leonardo,
-t_exp_Michelangelo,
 ###############################################################################,
 # Number of points for exposure interpolation,
 # Sample as fine as possible; generally at least with a 2 min sampling for photometry,
@@ -71,30 +67,22 @@ t_exp_Michelangelo,
 # the impact on RV is not as drastic and generally n_int=5 is fine enough,
 ###############################################################################,
 t_exp_n_int_Leonardo,
-t_exp_n_int_Michelangelo,
 ###############################################################################,
 # Number of spots per object and instrument,
 ###############################################################################,
 host_N_spots_Leonardo,
-host_N_spots_Michelangelo,
 ###############################################################################,
 # Number of flares (in total),
 ###############################################################################,
 N_flares,
 ###############################################################################,
-# TTVs,
-###############################################################################,
-fit_ttvs,True
-###############################################################################,
 # Stellar grid per object and instrument,
 ###############################################################################,
 host_grid_Leonardo,default
-host_grid_Michelangelo,default
 ###############################################################################,
 # Stellar shape per object and instrument,
 ###############################################################################,
 host_shape_Leonardo,sphere
-host_shape_Michelangelo,sphere
 ###############################################################################,
 # Flux weighted RVs per object and instrument,
 # ("Yes" for Rossiter-McLaughlin effect),
