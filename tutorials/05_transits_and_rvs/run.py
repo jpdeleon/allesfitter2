@@ -19,6 +19,10 @@ import allesfitter
 
 
 
+# allesfitter.show_initial_guess('allesfit')
+# allesfitter.mcmc_fit('allesfit')
+# allesfitter.mcmc_output('allesfit')
+
 allesfitter.show_initial_guess('allesfit')
-allesfitter.mcmc_fit('allesfit')
-allesfitter.mcmc_output('allesfit')
+allesfitter.ns_fit('allesfit')
+allesfitter.ns_output('allesfit')

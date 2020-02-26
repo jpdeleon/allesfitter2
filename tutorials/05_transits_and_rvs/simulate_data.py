@@ -52,6 +52,16 @@ a_1 = 0.019771142 * params['b_K'] * params['b_period']
 params['b_a'] = (1.+1./params['b_q'])*a_1
 pprint(params)
 
+q1 = (0.3 + 0.1)**2
+q2 = 0.5*0.3*(0.3 + 0.1)**(-1)
+print('Leonardo q1 = '+str(q1))
+print('Leonardo q1 = '+str(q2))
+
+q1 = (0.5 + 0.4)**2
+q2 = 0.5*0.5*(0.5 + 0.4)**(-1)
+print('Michelangelo q1 = '+str(q1))
+print('Michelangelo q1 = '+str(q2))
+
 
 
 ###############################################################################
@@ -73,9 +83,9 @@ flux_Leonardo = ellc.lc(
                       ld_1 =        params['ld_1_'+inst],
                       ldc_1 =       params['ldc_1_'+inst]
                       )
-flux_Leonardo += np.random.normal(0,2e-3,size=len(flux_Leonardo))
-flux_Leonardo += 3e-4*np.sin(time_Leonardo/2.7)
-flux_err_Leonardo = 2e-3*np.ones_like(flux_Leonardo)
+flux_Leonardo += 3e-4*np.sin(time_Leonardo/2.7) #red noise
+flux_Leonardo += np.random.normal(0,2e-3,size=len(flux_Leonardo)) #white noise
+flux_err_Leonardo = 2e-3*np.ones_like(flux_Leonardo) #white noise
 header = 'time,flux,flux_err'
 X = np.column_stack(( time_Leonardo, flux_Leonardo, flux_err_Leonardo ))
 np.savetxt('allesfit/Leonardo.csv', X, delimiter=',', header=header)
@@ -95,9 +105,9 @@ flux_Michelangelo = ellc.lc(
                       ld_1 =        params['ld_1_'+inst],
                       ldc_1 =       params['ldc_1_'+inst]
                       )
-flux_Michelangelo += np.random.normal(0,5e-4,size=len(flux_Michelangelo))
-flux_Michelangelo += 2e-3*np.sin(time_Michelangelo*8)
-flux_err_Michelangelo = 5e-4*np.ones_like(flux_Michelangelo)
+flux_Michelangelo += 2e-3*np.sin(time_Michelangelo*8) #red noise
+flux_Michelangelo += np.random.normal(0,5e-4,size=len(flux_Michelangelo)) #white noise
+flux_err_Michelangelo = 5e-4*np.ones_like(flux_Michelangelo) #white noise
 header = 'time,flux,flux_err'
 X = np.column_stack(( time_Michelangelo, flux_Michelangelo, flux_err_Michelangelo ))
 np.savetxt('allesfit/Michelangelo.csv', X, delimiter=',', header=header)
@@ -115,8 +125,8 @@ rv_Donatello = ellc.rv(
                       q =           params[planet+'_q'],
                       flux_weighted = False,
                       )[0]
-rv_Donatello += np.random.normal(0,1e-2,size=len(rv_Donatello))
-rv_err_Donatello = 6e-3*np.ones_like(rv_Donatello)
+rv_Donatello += np.random.normal(0,6e-3,size=len(rv_Donatello)) #white noise
+rv_err_Donatello = 6e-3*np.ones_like(rv_Donatello) #white noise
 header = 'time,flux,flux_err'
 X = np.column_stack(( time_Donatello, rv_Donatello, rv_err_Donatello ))
 np.savetxt('allesfit/Donatello.csv', X, delimiter=',', header=header)
@@ -135,8 +145,8 @@ rv_Raphael = ellc.rv(
                       q =           params[planet+'_q'],
                       flux_weighted = False,
                       )[0]
-rv_Raphael += np.random.normal(0,3e-3,size=len(rv_Raphael))
-rv_err_Raphael = 1e-3*np.ones_like(rv_Raphael)
+rv_Raphael += np.random.normal(0,1e-3,size=len(rv_Raphael)) #white noise
+rv_err_Raphael = 1e-3*np.ones_like(rv_Raphael) #white noise
 header = 'time,flux,flux_err'
 X = np.column_stack(( time_Raphael, rv_Raphael, rv_err_Raphael ))
 np.savetxt('allesfit/Raphael.csv', X, delimiter=',', header=header)
