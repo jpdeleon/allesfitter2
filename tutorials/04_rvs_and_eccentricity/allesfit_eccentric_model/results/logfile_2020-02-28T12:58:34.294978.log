@@ -15,9 +15,9 @@ shift_epoch                    True
 secondary_eclipse              False          
 phase_curve                    False          
 mcmc_nwalkers                  200            
-mcmc_total_steps               5000           
-mcmc_burn_steps                2000           
-mcmc_thin_by                   10             
+mcmc_total_steps               6000           
+mcmc_burn_steps                1000           
+mcmc_thin_by                   20             
 ns_modus                       dynamic        
 ns_nlive                       500            
 ns_bound                       single         
@@ -33,7 +33,6 @@ companions_all                 ['b']
 inst_all                       ['Donatello', 'Raphael']
 print_progress                 True           
 inst_for_b_epoch               ['Donatello', 'Raphael']
-phase_variations               False          
 use_host_density_prior         True           
 fit_ttvs                       False          
 mcmc_pre_run_loops             0              
@@ -76,8 +75,8 @@ user-given:
 b_epoch                        52.112          free  ['uniform', 50.4, 53.6]       
 b_period                       3.401           free  ['uniform', 3.3, 3.5]         
 b_K                            0.11            free  ['uniform', 0.0, 0.2]         
-b_f_c                          0.0             free  ['uniform', -1.0, 1.0]        
-b_f_s                          0.0             free  ['uniform', -1.0, 1.0]        
+b_f_c                          0.0             free  ['uniform', -0.7, 0.7]        
+b_f_s                          0.0             free  ['uniform', -0.7, 0.7]        
 log_jitter_rv_Donatello        -5.0            free  ['uniform', -10.0, -1.0]      
 log_jitter_rv_Raphael          -7.0            free  ['uniform', -10.0, -1.0]      
 

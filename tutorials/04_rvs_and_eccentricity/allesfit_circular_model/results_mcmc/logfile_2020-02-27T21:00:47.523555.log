@@ -16,7 +16,7 @@ secondary_eclipse              False
 phase_curve                    False          
 mcmc_nwalkers                  100            
 mcmc_total_steps               3000           
-mcmc_burn_steps                2000           
+mcmc_burn_steps                1000           
 mcmc_thin_by                   10             
 ns_modus                       dynamic        
 ns_nlive                       500            

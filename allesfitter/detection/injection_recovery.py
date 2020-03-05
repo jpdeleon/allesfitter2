@@ -26,15 +26,11 @@ sns.set_context(rc={'lines.markeredgewidth': 1})
 import numpy as np
 import matplotlib.pyplot as plt
 import os
-import ellc
-from astropy.constants import G
-from astropy import units as u
 from tqdm import tqdm
 import itertools
 from transitleastsquares import catalog_info
 
 #::: my modules
-from allesfitter.exoworlds_rdx.lightcurves import lightcurve_tools as lct
 from .transit_search import tls_search
 from .injection_recovery_output import irplot
 try:
@@ -86,117 +82,7 @@ def setup_logfile(logfname):
         return None
                 
         
-    
-#::: make an ellc model lightcurve
-def make_model(time, flux, flux_err, epoch, period, rplanet, R_star=1., M_star=1., show_plot=False, save_plot=False, save_csv=False):
-    '''
-    Inputs:
-    -------
-    time : array of float
-        in days
-    flux : array of float
-        relative flux of the 'underlying' lightcurve
-    flux_err : array of float
-        error of relative flux of the 'underlying' lightcurve
-    epoch : float
-        epoch in days
-    period : float
-        period in days
-    R_planet : float
-        radius of the planet, in R_earth
-    R_star : float
-        radius of the star, in R_sun
-        default is 1.
-    M_star: float
-        mass of the star, in M_sun
-        default is 1.
-    show_plot : bool
-        show the plot in the terminal, or close it
-    save_plot : bool
-        save the plot to a file, or not
-    save_csv : bool
-        save the lightcurve to a file, or not
-        
-    Returns:
-    --------
-    flux2 : array of float
-        relative flux with injected signal
-    '''
-    
-    a = (G/(4*np.pi**2) * (period*u.d)**2 * M_star*u.Msun)**(1./3.) #in AU, with astropy units
-    a = a.to(u.AU) #in AU, with astropy units
-    
-    radius_1 = (R_star*u.Rsun / a).decompose().value
-    radius_2 = (rplanet*u.Rearth / a).decompose().value
-    a = a.value
-    
-    model_flux = ellc.lc(
-           t_obs = time, 
-           radius_1 = radius_1,
-           radius_2 = radius_2,
-           sbratio = 0, 
-           incl = 90, 
-           light_3 = 0,
-           t_zero = epoch, 
-           period = period,
-           a = None,
-           q = 1,
-           f_c = None, f_s = None,
-           ldc_1=[0.6,0.2], ldc_2 = None,
-           gdc_1 = None, gdc_2 = None,
-           didt = None,
-           domdt = None,
-           rotfac_1 = 1, rotfac_2 = 1,
-           hf_1 = 1.5, hf_2 = 1.5,
-           bfac_1 = None, bfac_2 = None,
-           heat_1 = None, heat_2 = None, 
-           lambda_1 = None, lambda_2 = None,
-           vsini_1 = None, vsini_2 = None,
-           t_exp=None, n_int=None, 
-           grid_1='default', grid_2='default',
-           ld_1='quad', ld_2=None,
-           shape_1='sphere', shape_2='sphere',
-           spots_1=None, spots_2=None, 
-           exact_grav=False, verbose=1)
-    
-    flux2 = flux+model_flux-1
-    
-    if show_plot or save_plot:
-        fig, axes = plt.subplots(2, 2, figsize=(20,10), sharex='col', sharey='row', gridspec_kw={'width_ratios': [3,1]})
-        
-        axes[0,0].plot(time, flux2, 'b.', rasterized=True)
-        axes[0,0].plot(time, model_flux, 'r-')
-        
-        phase, phaseflux, phaseflux_err, N, phi = lct.phase_fold(time, flux2, period, epoch, dt=0.02, ferr_type='medsig', ferr_style='std', sigmaclip=True)
-        axes[0,1].plot(phi, flux2, 'k.', color='lightgrey', rasterized=True)
-        axes[0,1].errorbar(phase, phaseflux, yerr=phaseflux_err, fmt='b.')
 
-        axes[1,0].plot(time, flux+model_flux-1, 'b.', rasterized=True)
-        axes[1,0].plot(time, model_flux, 'r-', lw=2)
-        axes[1,0].set(ylim=[0.99,1.01])
-        
-        phase, phaseflux, phaseflux_err, N, phi = lct.phase_fold(time, flux2, period, epoch, dt=0.02, ferr_type='medsig', ferr_style='std', sigmaclip=True)
-        axes[1,1].plot(phi, flux2, 'k.', color='lightgrey')
-        axes[1,1].errorbar(phase, phaseflux, yerr=phaseflux_err, fmt='b.')
-        axes[1,0].plot(time, model_flux, 'r-', lw=2)
-        axes[1,1].set(ylim=[0.99,1.01])
-        
-        plt.suptitle('\nP = '+str(period)+' days, Rp = '+str(rplanet)+' Rearth')
-        plt.tight_layout()
-        
-        if show_plot:
-            plt.show(fig)
-            
-        if save_plot:
-            if not os.path.exists('plots'): os.makedirs('plots')
-            fig.savefig('plots/'+'Lightcurve P = '+str(period)+' days, Rp = '+str(rplanet)+' Rearth'+'.jpg', bbox_inches='tight')
-            plt.close(fig)
-    
-    if save_csv:
-        X = np.column_stack((time, flux2, flux_err))
-        np.savetxt('csv/'+'Lightcurve P = '+str(period)+' days, Rp = '+str(rplanet)+' Rearth'+'.csv', X, delimiter=',')
-
-    return flux2
 
 
 
@@ -293,7 +179,7 @@ def inject_and_tls_search(time, flux, flux_err,
         if to_do_or_not_to_do_that_is_the_question(ex, period, rplanet):
             print('\tP = '+str(period)+' days, Rp = '+str(rplanet)+' Rearth --> do')
             epoch = time[0] + np.random.random()*period
-            flux2 = make_model(time, flux, flux_err, epoch, period, rplanet, 
+            flux2 = inject_lc_model(time, flux, flux_err, epoch, period, rplanet, 
                                R_star=R_star, M_star=M_star,
                                show_plot=show_plot, save_plot=save_plot)
             results_all = tls_search(time, flux2, flux_err,
