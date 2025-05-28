@@ -529,7 +529,8 @@ def _tls_search_plot_lightcurve(time, flux, results, typ='fullplot'):
         axes = brokenplot(results['model_lightcurve_time'], results['model_lightcurve_model'], color='r', ls='-', marker='', lw=3, zorder=100, axes=axes)
     elif typ=='tessplot':
         trend = _cut(time, results['model_lightcurve_time'], results['model_lightcurve_model'])
-        axes = tessplot(time, flux, trend=trend)
+        axes = tessplot(time, flux)
+        # axes = tessplot(time, flux, trend=trend)
         # axes = tessplot(results['model_lightcurve_time'], results['model_lightcurve_model'], color='r', ls='-', marker='', lw=3, zorder=100, axes=axes, shade=False)
     elif typ=='monthplot':
         axes = monthplot(time, flux)

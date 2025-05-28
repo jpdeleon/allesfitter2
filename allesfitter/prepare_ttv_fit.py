@@ -242,12 +242,13 @@ def prepare_ttv_fit(datadir, style='fullplot', max_transits=20):
         #::: add vertical lines and numbers
         flux_min = np.nanmin(flux_combined)
         flux_max = np.nanmax(flux_combined)
-        for ax in axes:
-            for i, tmid in enumerate(alles.data[companion+'_tmid_observed_transits']):
-                if (tmid>ax.get_xlim()[0]) & (tmid<ax.get_xlim()[1]):
-                    ax.text( tmid, 0.992*flux_min, str(i+1), color=alles.settings[companion+'_color'], ha='center', zorder=12 )  
-                    ax.axvline( tmid, color='lightgrey', zorder=11 )
-                    ax.set(ylim=[0.99*flux_min, 1.002*flux_max], title='Companion '+companion) 
+        #for ax in axes:
+        #    #import pdb; pdb.set_trace()
+        #    for i, tmid in enumerate(alles.data[companion+'_tmid_observed_transits']):
+        #        if (tmid>ax.get_xlim()[0]) & (tmid<ax.get_xlim()[1]):
+        #            ax.text( tmid, 0.992*flux_min, str(i+1), color=alles.settings[companion+'_color'], ha='center', zorder=12 )  
+        #            ax.axvline( tmid, color='lightgrey', zorder=11 )
+        #            ax.set(ylim=[0.99*flux_min, 1.002*flux_max], title='Companion '+companion) 
             
         #::: wrap up
         fname = os.path.join(datadir,'ttv_preparation','ttv_preparation_'+companion+'.jpg')
