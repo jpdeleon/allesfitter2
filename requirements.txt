@@ -1,0 +1,9 @@
+ellc
+dynesty
+corner
+pandas
+astropy
+#astroquery
+lightkurve
+tess-point
+
