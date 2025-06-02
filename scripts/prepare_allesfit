@@ -565,12 +565,14 @@ if __name__ == "__main__":
                     + pl
                     + "}$,BJD,\n"
                 )
-                text += f"{pl}_period,{Porb:.6f},1,uniform {Porb_min:.6f} {Porb_max:.6f},$P_b$,d,\n"
+                text += f"{pl}_period,{Porb:.6f},1,uniform {Porb_min:.6f} {Porb_max:.6f},$P_{pl}$,d,\n"
             except Exception as e:
                 print("Error: ", e)
         try:
-            text += "#b_f_c,0,0,uniform 0.0 0.0,$\sqrt{e_b} \cos{\omega_b}$,,\n"
-            text += "#b_f_s,0,0,uniform 0.0 0.0,$\sqrt{e_b} \sin{\omega_b}$,,\n"
+            text += f"{pl}_f_c,0,0,uniform -1 1,$\sqrt{{e_{pl}}} \cos{{\omega_{pl}}}$,,\n"
+            text += f"{pl}_f_s,0,0,uniform -1 1,$\sqrt{{e_{pl}}} \sin{{\omega_{pl}}}$,,\n"
+            text += "#dilution per instrument,,,,,,\n"
+            text += f"dil_{fn},0,0,uniform -1 1,$D_\mathrm{{0; {fn}}}$,,\n"
             text += "#limb darkening coefficients per instrument,,,,,,\n"
             q1_min, q1, q1_max = np.percentile(
                 alles.posterior_params[f"host_ldc_q1_{fn}"], q=quartiles_1sig
@@ -594,10 +596,6 @@ if __name__ == "__main__":
             text += f"baseline_gp_offset_flux_{fn},0,1,uniform -0.1 0.1,$\mathrm{{gp ln \sigma ({fn})}}$,,\n"
             text += f"baseline_gp_matern32_lnsigma_flux_{fn},-5,1,uniform -15 0,$\mathrm{{gp ln \sigma ({fn})}}$,,\n"
             text += f"baseline_gp_matern32_lnrho_flux_{fn},0,1,uniform -1 15,$\mathrm{{gp ln \\rho ({fn})}}$,,\n"
-            text += "#TTV companion b,,,,,\n"
-            text += "#b_ttv_transit_1,0,1,uniform -0.1 0.1,TTV$_\mathrm{b;1}$,d,\n"
-            text += "#TTV companion c,,,,,\n"
-            text += "#c_ttv_transit_1,0,1,uniform -0.1 0.1,TTV$_\mathrm{c;1}$,d,\n"
         except Exception as e:
             print("Error: ", e)
         if True:
@@ -758,10 +756,12 @@ if __name__ == "__main__":
                 + "}$,BJD,\n"
             )
             text += (
-                f"{pl}_period,{Porb:.6f},1,normal {Porb:.6f} {Porberr:.6f},$P_b$,d,\n"
+                f"{pl}_period,{Porb:.6f},1,normal {Porb:.6f} {Porberr:.6f},$P_{pl}$,d,\n"
             )
-        text += "#b_f_c,0,0,uniform 0.0 0.0,$\sqrt{e_b} \cos{\omega_b}$,,\n"
-        text += "#b_f_s,0,0,uniform 0.0 0.0,$\sqrt{e_b} \sin{\omega_b}$,,\n"
+            text += f"{pl}_f_c,0,0,uniform -1 1,$\sqrt{{e_{pl}}} \cos{{\omega_{pl}}}$,,\n"
+            text += f"{pl}_f_s,0,0,uniform -1 1,$\sqrt{{e_{pl}}} \sin{{\omega_{pl}}}$,,\n"
+        text += "#dilution per instrument,,,,,,\n"
+        text += f"dil_{fn},0,0,uniform -1 1,$D_\mathrm{{0; {fn}}}$,,\n"
         text += "#limb darkening coefficients per instrument,,,,,,\n"
         text += (
             f"host_ldc_q1_{fn},{q1:.2f},1,normal {q1:.2f} {q1_err:.2f},"
@@ -781,10 +781,11 @@ if __name__ == "__main__":
         text += f"baseline_gp_offset_flux_{fn},0,1,uniform -0.1 0.1,$\mathrm{{gp ln \sigma ({fn})}}$,,\n"
         text += f"baseline_gp_matern32_lnsigma_flux_{fn},-5,1,uniform -15 0,$\mathrm{{gp ln \sigma ({fn})}}$,,\n"
         text += f"baseline_gp_matern32_lnrho_flux_{fn},0,1,uniform -1 15,$\mathrm{{gp ln \\rho ({fn})}}$,,\n"
-        text += "#TTV companion b,,,,,\n"
-        text += "#b_ttv_transit_1,0,1,uniform -0.1 0.1,TTV$_\mathrm{b;1}$,d,\n"
-        text += "#TTV companion c,,,,,\n"
-        text += "#c_ttv_transit_1,0,1,uniform -0.1 0.1,TTV$_\mathrm{c;1}$,d,\n"
+        for i, row in target_df.iterrows():
+            pl = planets[i]
+            text += f"#TTV companion {pl},,,,,\n"
+            for i in range(5):
+                text += f"#{pl}_ttv_transit_{i+1},0,1,uniform -0.1 0.1,TTV$_\mathrm{{{b};{i+1}}}$,d,\n"
         if debug:
             print(text)
         fp = outdir.joinpath("params.csv")
@@ -813,9 +814,12 @@ fast_fit_width,0.3333333333333333
 #fast_fit_width,0.5
 secondary_eclipse,False
 phase_curve,False
-shift_epoch,True
-inst_for_b_epoch,all
-###############################################################################,
+shift_epoch,True\n"""
+        for i, row in target_df.iterrows():
+            pl = planets[i]
+            text2 += f"inst_for_{pl}_epoch,all\n"
+            text2 += f"#inst_for_{pl}_epoch,['{fn}']\n"
+        text2 += f"""###############################################################################,
 # MCMC settings,
 ###############################################################################,
 mcmc_nwalkers,100
@@ -832,31 +836,51 @@ ns_sample,auto
 ns_tol,0.01
 ###############################################################################,
 # Limb darkening law per object and instrument,
+# if 'quad' two corresponding parameter called 'ldc_q1_inst' and 'ldc_q2_inst' have to be given in params.csv,
 ###############################################################################,
 host_ld_law_{fn},quad
 #####################################,
 # Exposure interpolation settings,
 #####################################,
-### crucial only for long exposure times,
-# t_exp_{fn},0.0208333
-# t_exp_n_int_{fn},10
+### crucial only for long (>600s) exposure times,
+#t_exp_{fn},0.0208333
+#t_exp_n_int_{fn},10
 ###############################################################################,
-# Baseline settings per instrument,
+# Baseline settings per instrument: sample / hybrid,
+# if 'sample_offset' one corresponding parameter called 'baseline_offset_key_inst' has to be given in params.csv,
+# if 'sample_linear' two corresponding parameters called 'baseline_offset_key_inst' and 'baseline_slope_key_inst' have to be given in params.csv,
+# if 'sample_GP' two corresponding parameters called 'baseline_gp1_key_inst' and 'baseline_gp2_key_inst' have to be given in params.csv,
 ###############################################################################,
 #baseline_flux_{fn},sample_offset
+#baseline_flux_{fn},sample_linear
 #baseline_flux_{fn},hybrid_spline
 #baseline_flux_{fn},hybrid_poly_2
 baseline_flux_{fn},sample_GP_Matern32
 ###############################################################################,
-# Error settings per instrument,
+# Error settings (overall scaling) per instrumentL sample / hybrid,
+# if 'sample' one corresponding parameter called 'ln_err_key_inst' (photometry) or 'ln_jitter_key_inst' (RV) has to be given in params.csv,
 ###############################################################################,
 error_flux_{fn},sample
 ###############################################################################,
 # Flares,
+# if N>0 4xN corresponding parameters has to be given in params.csv,
+# See https://github.com/MNGuenther/allesfitter/blob/master/paper/GJ_1243/allesfit_0/params.csv,
 ###############################################################################,
-#N_flares,1
+#N_flares,0
+###############################################################################,
+# Number of spots per object and instrument,
+# if N>0 3xN corresponding parameters has to be given in params.csv,
+###############################################################################,
+#host_N_spots_{fn},0
 ###############################################################################,
 # Host density prior,
+###############################################################################,
+# Stellar variability: sample_GP_SHO / _real / _complex / matern32,
+# if 'sample_GP_SHO' three corresponding parameters has to be given in params.csv,
+# See https://github.com/MNGuenther/allesfitter/blob/master/tutorials/06_transits_and_rvs_with_stellar_variability/allesfit/params.csv,
+###############################################################################,
+#stellar_var_flux,sample_GP_SHO
+#stellar_var_rv,sample_GP_real
 ###############################################################################,\n"""
 
         text2 += f"use_host_density_prior,{rhostar_prior}"
@@ -869,9 +893,12 @@ fit_ttvs,False
 ###############################################################################,
 # Stellar grid per object and instrument,
 ###############################################################################,
-host_grid_{fn},very_sparse
-# b_grid_{fn},very_sparse
-# c_grid_{fn},very_sparse"""
+host_grid_{fn},very_sparse\n"""
+        for i, row in target_df.iterrows():
+            pl = planets[i]
+            text2 += f"#{pl}_grid_{fn},very_sparse\n"
+            text2 += f"#{pl}_shape_{fn},sphere\n"
+            text2 += f"#{pl}_flux_weighted_{fn},False\n"
 
         if debug:
             print(text2)
