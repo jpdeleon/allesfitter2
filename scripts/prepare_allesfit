@@ -33,6 +33,7 @@ import numpy as np
 import lightkurve as lk
 import astropy.units as u
 import pandas as pd
+from scipy.stats import anderson
 from astropy.coordinates import SkyCoord
 from allesfitter import allesclass  # , config, nested_sampling_output, general_output
 
@@ -80,9 +81,9 @@ cols = ["time", "flux", "flux_err"]
 
 Nsamples = 10_000
 planets = "b c d e f g h i j k".split()
-quartiles_1sig = [16, 50, 84]  # 1-sigma
-quartiles_3sig = [2.70, 50, 97.3]  # 3-sigma
-
+quartiles_1sig = [16.0, 50.0, 84.0]  # 1-sigma
+quartiles_2sig = [2.275, 50.0, 97.725]  # 2-sigma
+quartiles_3sig = [0.135, 50.0, 99.865]  # 3-sigma
 
 def catalog_info_name(df) -> Tuple:
     Teff, Teff_err = df["st_teff"].astype(float), np.sqrt(
@@ -284,13 +285,13 @@ if __name__ == "__main__":
         "-e", "--exptime", help="exposure time (default=None)", type=float, default=None
     )
     ap.add_argument(
-        "-p", "--pipeline", help="TESS/Kepler data pipeline", type=str, default="spoc"
+        "-p", "--pipeline", help="TESS/Kepler data pipeline (default='spoc')", type=str, default="spoc"
     )
     ap.add_argument(
-        "-f", "--filename", help="filename of lightcurve", type=str, default="tess"
+        "-f", "--filename", help="filename of lightcurve (default='tess')", type=str, default="tess"
     )
     ap.add_argument(
-        "-m", "--mission", type=str, default="tess", choices=["tess", "k2", "kepler"]
+        "-m", "--mission", help="satellite mission (default='tess')", type=str, default="tess", choices=["tess", "k2", "kepler"]
     )
     ap.add_argument(
         "-lc",
@@ -346,150 +347,10 @@ if __name__ == "__main__":
 
     args = ap.parse_args(None if sys.argv[1:] else ["-h"])
 
-    toiid = args.toi
-    ticid = args.tic
-    ctoiid = args.ctoi
-    name = args.name
-    exptime = args.exptime
     basedir = args.dir
-    mission = args.mission.lower()
-    fn = args.filename
-    quality_bitmask = args.quality
-    sigma = args.sigma
-    results_dir = args.results_dir
-    interactive = args.interactive
-
-    if mission == "tess":
-        sector = args.sector
-    elif mission == "k2":
-        campaign = -1 if args.campaign is None else args.campaign
-        raise NotImplementedError("TODO")
-    elif mission == "kepler":
-        quarter = -1 if args.quarter is None else args.quarter
-        raise NotImplementedError("TODO")
-
-    pipeline = args.pipeline
-    lc_type = "sap_flux" if pipeline == "qlp" else args.lc_type + "_flux"
-    debug = args.debug
-
-    overwrite = args.overwrite
-    update_db = args.update_db
-
-    target_name, target_df, source = parse_target_name(
-        toiid, ticid, ctoiid, name, update_db
-    )
-    if ticid:
-        name = target_name.replace("-", "")
-    tic_id, outSec = get_tess_sectors(target_name, target_df, toiid, ctoiid, name)
-    sector_flag = check_if_sector_is_available(
-        target_name, given_sector=sector, all_sectors=outSec
-    )
-
     outdir = Path(basedir)
-    if debug:
-        print(target_df)
-
-    try:
-        if toiid or ctoiid or ticid:
-            (
-                Teff,
-                Teff_err,
-                logg,
-                logg_err,
-                feh,
-                feh_err,
-                radius,
-                radius_err,
-                mass,
-                mass_err,
-            ) = catalog_info_TIC(int(tic_id))
-        elif name:
-            (
-                Teff,
-                Teff_err,
-                logg,
-                logg_err,
-                feh,
-                feh_err,
-                radius,
-                radius_err,
-                mass,
-                mass_err,
-            ) = catalog_info_name(target_df.iloc[0])
-        if debug:
-            print(
-                Teff,
-                Teff_err,
-                logg,
-                logg_err,
-                feh,
-                feh_err,
-                radius,
-                radius_err,
-                mass,
-                mass_err,
-            )
-    except Exception as e:
-        print("Error: ", e)
-    ticid = tic_id if ticid is None else ticid
-    rhostar_prior = True
-    if str(radius) == "nan":
-        if interactive:
-            radius = float(input("Rstar [Rsun]:"))
-            rhostar_prior = False
-        else:
-            raise ValueError("use --interactive to input value")
-    if str(mass) == "nan":
-        if interactive:
-            mass = float(input("Mstar [Msun]:"))
-            rhostar_prior = False
-        else:
-            raise ValueError("use --interactive to input value")
-    if str(radius_err) == "nan":
-        radius_err = 0.1
-        print("Rstar err is nan; setting to 0.1")
-    if str(mass_err) == "nan":
-        mass_err = 0.1
-        print("Mstar err is nan; setting to 0.1")
-    if debug:
-        # print(f"Teff={Teff:.0f}+/-{Teff_err:.0f},
-        #     logg={logg:.2f}+/-{logg_err:.2f},
-        #     feh={feh:.2f}+/-{feh_err:.2f}")
-        print(f"Rs={radius:.2f}+/-{radius_err:.2f}, Ms={mass:.2f}+/-{mass_err:.2f}")
-
-    # band = mission.lower()
-    if np.isnan(feh):
-        feh = float(input("[Fe/H]: ")) if interactive else 0  # solar metallicity
-    if np.isnan(feh_err):
-        feh_err = float(input("[Fe/H] err: ")) if interactive else 0.1
-    print(f"Using [Fe/H]=({feh},{feh_err}) dex")
-    if np.isnan(logg):
-        if interactive:
-            logg = float(input("logg: "))
-        else:
-            raise ValueError("use --interactive to input value")  # no assumption
-    if np.isnan(logg_err):
-        logg_err = float(input("logg err: ")) if interactive else 0.1
-    print(f"Using logg=({logg:.2f},{logg_err:.2f}) cm/s^2")
-    if np.isnan(Teff):
-        if interactive:
-            Teff = float(input("Teff: "))
-        else:
-            raise ValueError("use --interactive to input value")  # no assumption
-    if np.isnan(Teff_err):
-        Teff_err = float(input("Teff err: ")) if interactive else 500
-    print(f"Using Teff=({Teff:.0f},{Teff_err:.0f}) K")
-
-    q1, q1_err, q2, q2_err = ld.claret(
-        band="T",
-        teff=Teff,
-        uteff=Teff_err,
-        logg=logg,
-        ulogg=logg_err,
-        feh=feh,
-        ufeh=feh_err,
-        law="quadratic",
-    )
+    results_dir = args.results_dir
+    debug = args.debug
 
     if results_dir:
         alles = allesclass(outdir.joinpath(results_dir))
@@ -497,116 +358,184 @@ if __name__ == "__main__":
 
         # =====Update params.csv=====
         text = """#name,value,fit,bounds,label,unit,truth\n"""
-        for pl in alles.settings["companions_all"]:
-            try:
-                rprs_min, rprs, rprs_max = np.percentile(
-                    alles.posterior_params[f"{pl}_rr"], q=quartiles_1sig
-                )
-                rsuma_min, rsuma, rsuma_max = np.percentile(
-                    alles.posterior_params[f"{pl}_rsuma"], q=quartiles_1sig
-                )
-                cosi_min, cosi, cosi_max = np.percentile(
-                    alles.posterior_params[f"{pl}_cosi"], q=quartiles_1sig
-                )
-                Porb_min, Porb, Porb_max = np.percentile(
-                    alles.posterior_params[f"{pl}_period"], q=quartiles_1sig
-                )
-                epoch_min, epoch, epoch_max = np.percentile(
-                    alles.posterior_params[f"{pl}_epoch"], q=quartiles_1sig
-                )
-                rprs_err = (rprs_max - rprs_min) / 2
-                rsuma_err = (rprs_max - rprs_min) / 2
-                cosi_err = (cosi_max - cosi_min) / 2
-                Porb_err = (Porb_max - Porb_min) / 2
-                epoch_err = (epoch_max - epoch_min) / 2
-                text += f"#companion {pl} astrophysical params,,,,,,\n"
-                text += f"#{pl}_rr,{rprs:.4f},1,normal {rprs:.4f} {rprs_err:.4f},$R_{pl} / R_\star$,,\n"
-                text += f"#{pl}_rsuma,{rsuma:.4f},1,normal {rsuma:.4f} {rsuma_err:.4f},$(R_\star + R_{pl}) / a_{pl}$,,\n"
-                text += (
-                    f"#{pl}_cosi,{cosi:.2f},1,normal {cosi:.2f} {cosi_err:.2f},$\cos"
-                    + "{i_"
-                    + pl
-                    + "}$,,\n"
-                )
-                text += (
-                    f"#{pl}_epoch,{epoch:.6f},1,normal {epoch:.6f} {epoch_err:.6f},$T_"
-                    + "{0;"
-                    + pl
-                    + "}$,BJD,\n"
-                )
-                text += f"#{pl}_period,{Porb:.6f},1,normal {Porb:.6f} {Porb_err:.6f},$P_b$,d,\n"
-
-                rprs_min, rprs, rprs_max = np.percentile(
-                    alles.posterior_params[f"{pl}_rr"], q=quartiles_3sig
-                )
-                rsuma_min, rsuma, rsuma_max = np.percentile(
-                    alles.posterior_params[f"{pl}_rsuma"], q=quartiles_3sig
-                )
-                cosi_min, cosi, cosi_max = np.percentile(
-                    alles.posterior_params[f"{pl}_cosi"], q=quartiles_3sig
-                )
-                Porb_min, Porb, Porb_max = np.percentile(
-                    alles.posterior_params[f"{pl}_period"], q=quartiles_3sig
-                )
-                epoch_min, epoch, epoch_max = np.percentile(
-                    alles.posterior_params[f"{pl}_epoch"], q=quartiles_3sig
-                )
-                text += f"{pl}_rr,{rprs:.4f},1,uniform {rprs_min:.4f} {rprs_max:.4f},$R_{pl} / R_\star$,,\n"
-                text += f"{pl}_rsuma,{rsuma:.4f},1,uniform {rsuma_min:.4f} {rsuma_max:.4f},$(R_\star + R_{pl}) / a_{pl}$,,\n"
-                text += (
-                    f"{pl}_cosi,{cosi:.2f},1,uniform {cosi_min:.2f} {cosi_max:.2f},$\cos"
-                    + "{i_"
-                    + pl
-                    + "}$,,\n"
-                )
-                text += (
-                    f"{pl}_epoch,{epoch:.6f},1,uniform {epoch_min:.6f} {epoch_max:.6f},$T_"
-                    + "{0;"
-                    + pl
-                    + "}$,BJD,\n"
-                )
-                text += f"{pl}_period,{Porb:.6f},1,uniform {Porb_min:.6f} {Porb_max:.6f},$P_{pl}$,d,\n"
-            except Exception as e:
-                print("Error: ", e)
         try:
-            text += f"{pl}_f_c,0,0,uniform -1 1,$\sqrt{{e_{pl}}} \cos{{\omega_{pl}}}$,,\n"
-            text += f"{pl}_f_s,0,0,uniform -1 1,$\sqrt{{e_{pl}}} \sin{{\omega_{pl}}}$,,\n"
-            text += "#dilution per instrument,,,,,,\n"
-            text += f"dil_{fn},0,0,uniform -1 1,$D_\mathrm{{0; {fn}}}$,,\n"
-            text += "#limb darkening coefficients per instrument,,,,,,\n"
-            q1_min, q1, q1_max = np.percentile(
-                alles.posterior_params[f"host_ldc_q1_{fn}"], q=quartiles_1sig
-            )
-            q2_min, q2, q2_max = np.percentile(
-                alles.posterior_params[f"host_ldc_q2_{fn}"], q=quartiles_1sig
-            )
-            text += (
-                f"host_ldc_q1_{fn},{q1:.2f},1,normal {q1:.2f} {q1_err:.2f},"
-                + f"$q_{{1; \\mathrm{{{fn}}}}}$"
-                + ",,\n"
-            )
-            text += (
-                f"host_ldc_q2_{fn},{q2:.2f},1,normal {q2:.2f} {q2_err:.2f},"
-                + f"$q_{{2; \\mathrm{{{fn}}}}}$"
-                + ",,\n"
-            )
-            text += "#errors per instrument,,,,,,\n"
-            text += f"ln_err_flux_{fn},-6,1,uniform -10 -1,$\log{{\sigma ({fn})}}$,rel. flux,\n"
-            text += "#baseline per instrument,,,,,,\n"
-            text += f"baseline_gp_offset_flux_{fn},0,1,uniform -0.1 0.1,$\mathrm{{gp ln \sigma ({fn})}}$,,\n"
-            text += f"baseline_gp_matern32_lnsigma_flux_{fn},-5,1,uniform -15 0,$\mathrm{{gp ln \sigma ({fn})}}$,,\n"
-            text += f"baseline_gp_matern32_lnrho_flux_{fn},0,1,uniform -1 15,$\mathrm{{gp ln \\rho ({fn})}}$,,\n"
+            # See https://github.com/MNGuenther/allesfitter/blob/master/allesfitter/general_output.py#L935
+            ll = alles.posterior_params_ll.copy() #1-sigma lower error: 16th per
+            median = alles.posterior_params_median.copy() #50th percentile
+            ul = alles.posterior_params_ul.copy() #1-sigma upper error: 84th perc - median
+            for name,label,unit in zip(alles.BASEMENT.fitkeys,
+                                       alles.BASEMENT.fitlabels,
+                                       alles.BASEMENT.fitunits):
+                norm_test = anderson(alles.posterior_params[name], dist='norm')
+                # critical values: 15%, 10%, 5%, 2.5%, 1%
+                # a crit val of 5% corresponds to 95% confidence level
+                # if statistic < crit val --> fail to reject normality
+                dist = 'normal' if norm_test.statistic < norm_test.critical_values[0] else 'uniform'
+                if dist=='normal':
+                    # or use scipy.normal.fit?
+                    l_err,mid,u_err = ll[name], median[name], ul[name]
+                    sig = np.sqrt(l_err**2+u_err**2)
+                    text += f"{name},{mid:6f},1,normal {mid:6f} {sig:6f},{label},{unit},\n"
+                    if debug:
+                        print(f"{mid:.6f} +{u_err:.6f} -{l_err:.6f}")
+                elif dist=='uniform':                    
+                    # or use scipy.uniform.fit?
+                    l_limit,mid,u_limit = np.nanpercentile(alles.posterior_params[name], q=[1,50,99])
+                    text += f"{name},{mid:6f},1,uniform {l_limit:6f} {u_limit:6f},{label},{unit},\n"
+                    if debug:
+                        print(f"{l_limit:.6f} < {mid:.6f} < {u_limit:.6f}")
+                else:
+                    raise ValueError("distribution is not uniform or normal!")                
         except Exception as e:
             print("Error: ", e)
-        if True:
-            for key, val in alles.posterior_params.items():
-                print(f"{key}: {np.median(val):.6f}, {np.std(val):.6f}")
-        fp = Path(results_dir, "params2.csv")
+        if debug:
+            print(text)
+        fp = Path(results_dir, f"params2.csv")
         np.savetxt(fp, [text], fmt="%s")
         print("Saved: ", fp)
         sys.exit()
 
     else:
+        toiid = args.toi
+        ticid = args.tic
+        ctoiid = args.ctoi
+        name = args.name
+        exptime = args.exptime
+        mission = args.mission.lower()
+        quality_bitmask = args.quality
+        sigma = args.sigma
+        interactive = args.interactive
+        fn = args.filename
+
+        if mission == "tess":
+            sector = args.sector
+        elif mission == "k2":
+            campaign = -1 if args.campaign is None else args.campaign
+            raise NotImplementedError("TODO")
+        elif mission == "kepler":
+            quarter = -1 if args.quarter is None else args.quarter
+            raise NotImplementedError("TODO")
+
+        pipeline = args.pipeline
+        lc_type = "sap_flux" if pipeline == "qlp" else args.lc_type + "_flux"
+
+        overwrite = args.overwrite
+        update_db = args.update_db
+
+        target_name, target_df, source = parse_target_name(
+            toiid, ticid, ctoiid, name, update_db
+        )
+        if ticid:
+            name = target_name.replace("-", "")
+        tic_id, outSec = get_tess_sectors(target_name, target_df, toiid, ctoiid, name)
+        sector_flag = check_if_sector_is_available(
+            target_name, given_sector=sector, all_sectors=outSec
+        )
+
+        if debug:
+            print(target_df)
+
+        try:
+            if toiid or ctoiid or ticid:
+                (
+                    Teff,
+                    Teff_err,
+                    logg,
+                    logg_err,
+                    feh,
+                    feh_err,
+                    radius,
+                    radius_err,
+                    mass,
+                    mass_err,
+                ) = catalog_info_TIC(int(tic_id))
+            elif name:
+                (
+                    Teff,
+                    Teff_err,
+                    logg,
+                    logg_err,
+                    feh,
+                    feh_err,
+                    radius,
+                    radius_err,
+                    mass,
+                    mass_err,
+                ) = catalog_info_name(target_df.iloc[0])
+            if debug:
+                print(
+                    Teff,
+                    Teff_err,
+                    logg,
+                    logg_err,
+                    feh,
+                    feh_err,
+                    radius,
+                    radius_err,
+                    mass,
+                    mass_err,
+                )
+        except Exception as e:
+            print("Error: ", e)
+        ticid = tic_id if ticid is None else ticid
+        rhostar_prior = True
+        if str(radius) == "nan":
+            if interactive:
+                radius = float(input("Rstar [Rsun]:"))
+                rhostar_prior = False
+            else:
+                raise ValueError("use --interactive to input value")
+        if str(mass) == "nan":
+            if interactive:
+                mass = float(input("Mstar [Msun]:"))
+                rhostar_prior = False
+            else:
+                raise ValueError("use --interactive to input value")
+        if str(radius_err) == "nan":
+            radius_err = 0.1
+            print("Rstar err is nan; setting to 0.1")
+        if str(mass_err) == "nan":
+            mass_err = 0.1
+            print("Mstar err is nan; setting to 0.1")
+        if debug:
+            # print(f"Teff={Teff:.0f}+/-{Teff_err:.0f},
+            #     logg={logg:.2f}+/-{logg_err:.2f},
+            #     feh={feh:.2f}+/-{feh_err:.2f}")
+            print(f"Rs={radius:.2f}+/-{radius_err:.2f}, Ms={mass:.2f}+/-{mass_err:.2f}")
+
+        # band = mission.lower()
+        if np.isnan(feh):
+            feh = float(input("[Fe/H]: ")) if interactive else 0  # solar metallicity
+        if np.isnan(feh_err):
+            feh_err = float(input("[Fe/H] err: ")) if interactive else 0.1
+        print(f"Using [Fe/H]=({feh},{feh_err}) dex")
+        if np.isnan(logg):
+            if interactive:
+                logg = float(input("logg: "))
+            else:
+                raise ValueError("use --interactive to input value")  # no assumption
+        if np.isnan(logg_err):
+            logg_err = float(input("logg err: ")) if interactive else 0.1
+        print(f"Using logg=({logg:.2f},{logg_err:.2f}) cm/s^2")
+        if np.isnan(Teff):
+            if interactive:
+                Teff = float(input("Teff: "))
+            else:
+                raise ValueError("use --interactive to input value")  # no assumption
+        if np.isnan(Teff_err):
+            Teff_err = float(input("Teff err: ")) if interactive else 500
+        print(f"Using Teff=({Teff:.0f},{Teff_err:.0f}) K")
+
+        q1, q1_err, q2, q2_err = ld.claret(
+            band="T",
+            teff=Teff,
+            uteff=Teff_err,
+            logg=logg,
+            ulogg=logg_err,
+            feh=feh,
+            ufeh=feh_err,
+            law="quadratic",
+        )
         # ===== Write files =====#
         outdir = Path(basedir, target_name)
         try:
@@ -748,6 +677,7 @@ if __name__ == "__main__":
             text += f"#companion {pl} astrophysical params,,,,,,\n"
             text += f"{pl}_rr,{rprs:.4f},1,uniform 0 {ceil(rprs_max*10)/10:.4f},$R_{pl} / R_\star$,,\n"
             text += f"{pl}_rsuma,{rsuma:.4f},1,uniform {rsuma_min:.4f} {ceil(rsuma_max*10)/10:.4f},$(R_\star + R_{pl}) / a_{pl}$,,\n"
+            #text += f"{pl}_rsuma,{rsuma:.4f},1,uniform 0 1,$(R_\star + R_{pl}) / a_{pl}$,,\n"
             text += f"{pl}_cosi,0,1,uniform 0 1,$\cos" + "{i_" + pl + "}$,,\n"
             text += (
                 f"{pl}_epoch,{epoch:.6f},1,normal {epoch:.6f} {epocherr:.6f},$T_"
@@ -785,7 +715,7 @@ if __name__ == "__main__":
             pl = planets[i]
             text += f"#TTV companion {pl},,,,,\n"
             for i in range(5):
-                text += f"#{pl}_ttv_transit_{i+1},0,1,uniform -0.1 0.1,TTV$_\mathrm{{{b};{i+1}}}$,d,\n"
+                text += f"#{pl}_ttv_transit_{i+1},0,1,uniform -0.1 0.1,TTV$_\mathrm{{ttv;{i+1}}}$,d,\n"
         if debug:
             print(text)
         fp = outdir.joinpath("params.csv")
@@ -874,6 +804,9 @@ error_flux_{fn},sample
 #host_N_spots_{fn},0
 ###############################################################################,
 # Host density prior,
+###############################################################################,\n"""
+        text2 += f"use_host_density_prior,{rhostar_prior}"
+        text2 += f"""
 ###############################################################################,
 # Stellar variability: sample_GP_SHO / _real / _complex / matern32,
 # if 'sample_GP_SHO' three corresponding parameters has to be given in params.csv,
@@ -881,11 +814,6 @@ error_flux_{fn},sample
 ###############################################################################,
 #stellar_var_flux,sample_GP_SHO
 #stellar_var_rv,sample_GP_real
-###############################################################################,\n"""
-
-        text2 += f"use_host_density_prior,{rhostar_prior}"
-
-        text2 += f"""
 ###################################################,
 # Fit TTV,
 ###################################################,
@@ -1068,11 +996,18 @@ allesfitter.prepare_ttv_fit('.', style='tessplot')
             #import pdb; pdb.set_trace()
             if sector_flag == "all_sector":
                 secs = "s".join(map(str, unique_sectors))
+            elif len(sector)>1:
+                secs = "s".join(map(str, sector))
             else:
                 secs = sector
-            fp = outdir.joinpath(
-                f"{target_name}_{mission}_{pipeline}_s{secs}_exp{int(exptime)}s.png"
-            )
+            if pipeline == "spoc":
+                fp = outdir.joinpath(
+                    f"{target_name}_{mission}_{lc_type.split('_')[0]}_s{secs}_exp{int(exptime)}s.png"
+                )
+            else:
+                fp = outdir.joinpath(
+                    f"{target_name}_{mission}_{pipeline}_s{secs}_exp{int(exptime)}s.png"
+                )
             ax.figure.savefig(fp)
             if pipeline == "spoc":
                 fp = outdir.joinpath(
