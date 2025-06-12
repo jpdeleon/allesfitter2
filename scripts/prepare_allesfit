@@ -787,7 +787,7 @@ host_ld_law_{fn},quad
 #baseline_flux_{fn},hybrid_poly_2
 baseline_flux_{fn},sample_GP_Matern32
 ###############################################################################,
-# Error settings (overall scaling) per instrumentL sample / hybrid,
+# Error settings (overall scaling) per instrument: sample / hybrid,
 # if 'sample' one corresponding parameter called 'ln_err_key_inst' (photometry) or 'ln_jitter_key_inst' (RV) has to be given in params.csv,
 ###############################################################################,
 error_flux_{fn},sample
