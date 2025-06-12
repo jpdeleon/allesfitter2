@@ -1,9 +1,11 @@
 ellc
 dynesty
 corner
-pandas
-astropy
+pandas==1.5
+astropy==5.1
 #astroquery
-lightkurve
+lightkurve==2.4.2
 tess-point
-
+scipy==1.9
+numpy==1.23
+seaborn==0.12
