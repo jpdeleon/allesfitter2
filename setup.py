@@ -16,10 +16,6 @@ Web: www.mnguenther.com
 
 from setuptools import setup, find_packages
 
-
-
-
-
 setup(
     name = 'allesfitter',
     packages = find_packages(),
