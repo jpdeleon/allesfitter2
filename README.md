@@ -16,8 +16,14 @@ An extension of the original allesfitter package that streamlines the process of
 ```bash
 git clone https://github.com/jpdeleon/allesfitter2.git
 cd allesfitter2
+pip install .
+```
+
+If you encounter a problem with ellc, you can use a custom installation
+```bash
 bash install.sh
 ```
+which includes cloning ellc package and building the fortran extension modules.
 
 ## Quick Start
 

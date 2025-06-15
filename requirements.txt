@@ -1,4 +1,4 @@
-#ellc==1.8.7
+ellc==1.8.7
 #git+https://github.com/pmaxted/ellc.git
 dynesty==2.0.0
 corner==2.2.1
@@ -11,4 +11,6 @@ numpy==1.23
 seaborn==0.12
 statsmodels==0.13.2
 celerite==0.4.2
+brokenaxes==0.5.0
+rebound==3.20.0
 git+https://github.com/jpdeleon/limbdark2.git
