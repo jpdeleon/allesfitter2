@@ -763,7 +763,7 @@ ns_modus,dynamic
 ns_nlive,1000
 ns_bound,single
 ns_sample,auto
-ns_tol,0.01
+ns_tol,1
 ###############################################################################,
 # Limb darkening law per object and instrument,
 # if 'quad' two corresponding parameter called 'ldc_q1_inst' and 'ldc_q2_inst' have to be given in params.csv,
@@ -986,20 +986,20 @@ allesfitter.prepare_ttv_fit('.', style='tessplot')
                 if pipeline == "spoc":
                     lc1 = lc1.remove_outliers(sigma=sigma)
                     lc2 = lc2.remove_outliers(sigma=sigma)
-            if pipeline == "spoc":
-                ax = lc1.scatter(label="PDCSAP")
-                _ = lc2.scatter(ax=ax, label="SAP")
-                ax.set_title(f"Sectors: {unique_sectors} exptime={int(exptime)}s")
-            else:
-                ax = lc.scatter(label=pipeline)
-                ax.set_title(f"Sectors: {unique_sectors} exptime={int(exptime)}s")
             #import pdb; pdb.set_trace()
             if sector_flag == "all_sector":
                 secs = "s".join(map(str, unique_sectors))
             elif len(sector)>1:
                 secs = "s".join(map(str, sector))
             else:
-                secs = sector
+                secs = sector[0]
+            if pipeline == "spoc":
+                ax = lc1.scatter(label="PDCSAP")
+                _ = lc2.scatter(ax=ax, label="SAP")
+                ax.set_title(f"Sectors: s{secs} in {unique_sectors}\nexptime={int(exptime)}s")
+            else:
+                ax = lc.scatter(label=pipeline)
+                ax.set_title(f"Sectors: s{secs} in {unique_sectors}\nexptime={int(exptime)}s")
             if pipeline == "spoc":
                 fp = outdir.joinpath(
                     f"{target_name}_{mission}_{lc_type.split('_')[0]}_s{secs}_exp{int(exptime)}s.png"
