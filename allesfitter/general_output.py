@@ -991,7 +991,7 @@ def save_latex_table(samples, mode):
     with open(os.path.join(config.BASEMENT.outdir,mode+'_latex_table.txt'),'w') as f,\
          open(os.path.join(config.BASEMENT.outdir,mode+'_latex_cmd.txt'),'w') as f_cmd:
             
-        f.write('parameter & value & unit & fit/fixed \\\\ \n')
+        f.write('Parameter & Value & Unit & Fit/Fixed \\\\ \n')
         f.write('\\hline \n')
         f.write('\\multicolumn{4}{c}{\\textit{Fitted parameters}} \\\\ \n')
         f.write('\\hline \n')

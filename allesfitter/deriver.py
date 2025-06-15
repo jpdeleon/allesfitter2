@@ -611,7 +611,7 @@ def derive(samples, mode):
                 
         
     names.append( 'combined_host_density' )
-    labels.append( 'Combined host density from all orbits; $rho_\mathrm{\star; combined}$ (cgs)' )
+    labels.append( 'Combined host density from all orbits; $\rho_\mathrm{\star; combined}$ (cgs)' )
         
             
     ###############################################################################
