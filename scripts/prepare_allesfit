@@ -694,15 +694,18 @@ if __name__ == "__main__":
         text += f"dil_{fn},0,0,uniform -1 1,$D_\mathrm{{0; {fn}}}$,,\n"
         text += "#limb darkening coefficients per instrument,,,,,,\n"
         text += (
-            f"host_ldc_q1_{fn},{q1:.2f},1,normal {q1:.2f} {q1_err:.2f},"
+            f"#host_ldc_q1_{fn},{q1:.2f},1,normal {q1:.2f} {q1_err:.2f},"
             + f"$q_{{1; \\mathrm{{{fn}}}}}$"
             + ",,\n"
         )
         text += (
-            f"host_ldc_q2_{fn},{q2:.2f},1,normal {q2:.2f} {q2_err:.2f},"
+            f"#host_ldc_q2_{fn},{q2:.2f},1,normal {q2:.2f} {q2_err:.2f},"
             + f"$q_{{2; \\mathrm{{{fn}}}}}$"
             + ",,\n"
         )
+        text += f"#host_ldc_q1_{fn},0.5,1,uniform 0 1,$q_{{1; \\mathrm{{{fn}}}}}$,,\n"
+        text += f"#host_ldc_q2_{fn},0.5,1,uniform 0 1,$q_{{2; \\mathrm{{{fn}}}}}$,,\n"
+        
         text += "#errors per instrument,,,,,,\n"
         text += (
             f"ln_err_flux_{fn},-6,1,uniform -10 -1,$\log{{\sigma ({fn})}}$,rel. flux,\n"
@@ -763,7 +766,7 @@ ns_modus,dynamic
 ns_nlive,1000
 ns_bound,single
 ns_sample,auto
-ns_tol,1
+ns_tol,100
 ###############################################################################,
 # Limb darkening law per object and instrument,
 # if 'quad' two corresponding parameter called 'ldc_q1_inst' and 'ldc_q2_inst' have to be given in params.csv,
@@ -853,8 +856,13 @@ import allesfitter
 fig = allesfitter.show_initial_guess('.')
 allesfitter.prepare_ttv_fit('.', style='tessplot')
 
+# nested sampling
 #allesfitter.ns_fit('.')
-#allesfitter.ns_output('.')"""
+#allesfitter.ns_output('.')
+
+# mcmc (if needed)
+#allesfitter.mcmc_fit('.')
+#allesfitter.mcmc_output('.')"""
 
         if debug:
             print(text4)
@@ -986,13 +994,13 @@ allesfitter.prepare_ttv_fit('.', style='tessplot')
                 if pipeline == "spoc":
                     lc1 = lc1.remove_outliers(sigma=sigma)
                     lc2 = lc2.remove_outliers(sigma=sigma)
-            #import pdb; pdb.set_trace()
             if sector_flag == "all_sector":
                 secs = "s".join(map(str, unique_sectors))
-            elif len(sector)>1:
-                secs = "s".join(map(str, sector))
             else:
-                secs = sector[0]
+                if isinstance(sector, list):
+                    secs = "s".join(map(str, sector))
+                else:
+                    secs = f"s{sector}"
             if pipeline == "spoc":
                 ax = lc1.scatter(label="PDCSAP")
                 _ = lc2.scatter(ax=ax, label="SAP")

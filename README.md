@@ -19,30 +19,29 @@ cd allesfitter2
 pip install .
 ```
 
-If you encounter a problem with ellc, you can use a custom installation
+If you encounter a problem with ellc, you can use a custom installation script
 ```bash
+cd allesfitter2
 bash install.sh
 ```
 which includes cloning ellc package and building the fortran extension modules.
 
 ## Quick Start
 
-### Basic Usage - Single TESS Lightcurve
-
 ```bash
-prepare_allesfit -name "HD 39091" -s 1
+prepare_allesfit -name "HD 39091" -s 1 -f tess
 ```
 
 This creates a complete analysis directory:
 
 ```
 HD39091/
-├── params.csv                          # Parameter definitions and priors
-├── settings.csv                        # Analysis configuration
-├── params_star.csv                     # Stellar properties for planet derivation
-├── run.py                              # Main analysis script
-├── tess_spoc_pdcsap_s1_exp120s.csv    # Downloaded lightcurve
-└── tess_spoc_pdcsap_s1_exp120s.png    # Quality check plot
+├── params.csv                      
+├── settings.csv                    
+├── params_star.csv                 
+├── run.py                              
+├── tess.csv   
+└── tess.png    
 ```
 
 ### Running the Analysis
@@ -124,7 +123,7 @@ Use only `ns_tol,0.01` for the final run.
 ### Using the results of previous run for TTV fit
 Run the command below to read the posterior samples in `HD39091/results` and create `params2.csv` file.
 ```bash
-$ prepare_allesfit -name HD39091 -r HD39091 -s 1
+$ prepare_allesfit -name "HD 39091" -r HD39091 -s 1
 ```
 where `-r` specifies the path to the directory of your previous run.
 The `-s` flag is not important so any number is fine.
@@ -133,14 +132,15 @@ You can then copy the values or re-name the file entirely to `params.csv`.
 You may fix all the transit, lightcurve, and baseline parameters (default is 1) and then add all the necessary ttv parameters e.g. `b_ttv_transit_1` in `params.csv`.
 Set `fit_ttvs,True` in `settings.csv` and run `python run.py` with a different a different directory name e.g. `allesfitter.ns_fit('ttv')`.
 This procedure is useful not only for TTVs but also for other fits with iterative refinement.
+For more info, see files in the [TOI-216 example](https://github.com/MNGuenther/allesfitter/tree/master/paper/TOI-216).
 
 ### Lightcurves from different pipelines
 You should be specific which lightcurve produced by which pipeline to use. SPOC produces two lightcurves `pdcsap` and `sap` and `pdcsap` is usually better so it is used by default. Inspect the plots in `.png` file which shows both `pdcsap` and `sap` lightcurves. In the event you want to use `sap` instead, then specify `-lc sap` in the script.
 
 In case you want to study the impact on derived transit parameters by the choice of lightcurves produced by two different TESS pipelines, try
 ```bash
-$ prepare_allesfit -name HD39091 -s 1 -p spoc -f spoc -dir spoc
-$ prepare_allesfit -name HD39091 -s 1 -p qlp -f qlp -dir qlp
+$ prepare_allesfit -name "HD 39091" -s 1 -p spoc -f spoc -dir spoc
+$ prepare_allesfit -name "HD 39091" -s 1 -p qlp -f qlp -dir qlp
 ```
 Note that two directories are produced. 
 Before fitting, you should manually combine the each parameter file into one `params.csv` and `settings.csv`.
