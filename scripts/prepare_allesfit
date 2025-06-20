@@ -33,6 +33,7 @@ import numpy as np
 import lightkurve as lk
 import astropy.units as u
 import pandas as pd
+import matplotlib.pyplot as plt
 from scipy.stats import anderson
 from astropy.coordinates import SkyCoord
 from allesfitter import allesclass  # , config, nested_sampling_output, general_output
@@ -703,8 +704,8 @@ if __name__ == "__main__":
             + f"$q_{{2; \\mathrm{{{fn}}}}}$"
             + ",,\n"
         )
-        text += f"#host_ldc_q1_{fn},0.5,1,uniform 0 1,$q_{{1; \\mathrm{{{fn}}}}}$,,\n"
-        text += f"#host_ldc_q2_{fn},0.5,1,uniform 0 1,$q_{{2; \\mathrm{{{fn}}}}}$,,\n"
+        text += f"host_ldc_q1_{fn},0.5,1,uniform 0 1,$q_{{1; \\mathrm{{{fn}}}}}$,,\n"
+        text += f"host_ldc_q2_{fn},0.5,1,uniform 0 1,$q_{{2; \\mathrm{{{fn}}}}}$,,\n"
         
         text += "#errors per instrument,,,,,,\n"
         text += (
@@ -1000,38 +1001,32 @@ allesfitter.prepare_ttv_fit('.', style='tessplot')
                 if isinstance(sector, list):
                     secs = "s".join(map(str, sector))
                 else:
-                    secs = f"s{sector}"
+                    secs = str(sector)
             if pipeline == "spoc":
-                ax = lc1.scatter(label="PDCSAP")
-                _ = lc2.scatter(ax=ax, label="SAP")
-                ax.set_title(f"Sectors: s{secs} in {unique_sectors}\nexptime={int(exptime)}s")
+                fig, axs = plt.subplots(2, 1, figsize=(8,6), sharex=True)
+                _ = lc1.scatter(ax=axs[0], zorder=1, label="PDCSAP", c="C0")
+                _ = lc2.scatter(ax=axs[0], zorder=2, label="SAP", c="C1")
+                axs[0].set_title(f"Sectors: s{secs} in {unique_sectors}\nexptime={int(exptime)}s")
+                (lc1-lc2).scatter(ax=axs[1], label='difference', c='k')
+                fp = outdir.joinpath(
+                    f"{target_name}_{mission}_{lc_type.split('_')[0]}_s{secs}_exp{int(exptime)}s"
+                )
+                fig.savefig(fp.with_suffix(".png"))
             else:
                 ax = lc.scatter(label=pipeline)
                 ax.set_title(f"Sectors: s{secs} in {unique_sectors}\nexptime={int(exptime)}s")
-            if pipeline == "spoc":
                 fp = outdir.joinpath(
-                    f"{target_name}_{mission}_{lc_type.split('_')[0]}_s{secs}_exp{int(exptime)}s.png"
+                    f"{target_name}_{mission}_{pipeline}_s{secs}_exp{int(exptime)}s"
                 )
-            else:
-                fp = outdir.joinpath(
-                    f"{target_name}_{mission}_{pipeline}_s{secs}_exp{int(exptime)}s.png"
-                )
-            ax.figure.savefig(fp)
-            if pipeline == "spoc":
-                fp = outdir.joinpath(
-                    f"{mission}_{pipeline}_{lc_type.split('_')[0]}_s{secs}_exp{int(exptime)}s.csv"
-                )
-            else:
-                fp = outdir.joinpath(
-                    f"{mission}_{pipeline}_s{secs}_exp{int(exptime)}s.csv"
-                )
+                ax.figure.savefig(fp.with_suffix(".png"))
+            print("Saved: ", fp.with_suffix(".png"))
             df = lc.to_pandas()
             df["time"] = df.index + 2457000
             df = df.reset_index(drop=True).sort_values(by="time")
             df = df[cols].dropna()
-            df.to_csv(fp, sep=",", header=False, index=False)
+            df.to_csv(fp.with_suffix(".csv"), sep=",", header=False, index=False)
+            print("Saved: ", fp.with_suffix(".csv"))
             print("Ndata: ", len(df))
-            print("Saved: ", fp)
             if debug:
                 print(df.head())
         else:
