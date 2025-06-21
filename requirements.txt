@@ -13,4 +13,5 @@ statsmodels==0.13.2
 celerite==0.4.2
 brokenaxes==0.5.0
 rebound==3.20.0
+loguru==0.7.3
 git+https://github.com/jpdeleon/limbdark2.git
