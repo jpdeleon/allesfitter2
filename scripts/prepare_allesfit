@@ -23,8 +23,6 @@ https://exoplanetarchive.ipac.caltech.edu/docs/sysaliases.html
 ======
 """
 import sys
-
-# import logging
 from typing import Tuple
 from argparse import ArgumentParser
 from pathlib import Path
@@ -208,7 +206,7 @@ def get_tess_sectors(
         ticid = int(data_json["basic_info"]["tic_id"])
     else:
         msg = "Set toiid, ctoiid, or name."
-        raise ValueError(logger.error(msg) or msg)
+        logger.error(msg); sys.exit()
     try:
         (
             outID,
@@ -390,7 +388,7 @@ if __name__ == "__main__":
                         logger.info(f"{l_limit:.6f} < {mid:.6f} < {u_limit:.6f}")
                 else:
                     msg = "distribution is not uniform or normal!"
-                    raise ValueError(logger.error(msg) or msg)       
+                    logger.error(msg); sys.exit()       
         except Exception as e:
             logger.error(f"Error: {e}")
         if debug:
@@ -438,7 +436,7 @@ if __name__ == "__main__":
         )
 
         fp = Path(basedir, target_name).joinpath(f"{target_name}.log")
-        logger.add(fp)
+        logger.add(fp, format=log_format)
         if debug:
             logger.info(target_df)
 
@@ -492,7 +490,7 @@ if __name__ == "__main__":
                 rhostar_prior = False
             else:
                 msg = "use --interactive to input value"
-                raise ValueError(logger.error(msg) or msg)
+                logger.error(msg); sys.exit()
         if str(mass) == "nan":
             if interactive:
                 mass = float(input("Mstar [Msun]:"))
@@ -523,7 +521,7 @@ if __name__ == "__main__":
                 logg = float(input("logg: "))
             else:
                 msg = "use --interactive to input value"
-                raise ValueError(logger.error(msg) or msg) # no assumption
+                logger.error(msg); sys.exit() # no assumption
         if np.isnan(logg_err):
             logg_err = float(input("logg err: ")) if interactive else 0.1
         logger.info(f"Using logg=({logg:.2f},{logg_err:.2f}) cm/s^2")
@@ -532,7 +530,7 @@ if __name__ == "__main__":
                 Teff = float(input("Teff: "))
             else:
                 msg = "use --interactive to input value"
-                raise ValueError(logger.error(msg) or msg) # no assumption
+                logger.error(msg); sys.exit() # no assumption
         if np.isnan(Teff_err):
             Teff_err = float(input("Teff err: ")) if interactive else 500
         logger.info(f"Using Teff=({Teff:.0f},{Teff_err:.0f}) K")
@@ -612,7 +610,7 @@ if __name__ == "__main__":
                         logger.error(msg)
                 else:
                     msg = "Rp/Rs is nan. Try --interactive for manual input"
-                    raise ValueError(logger.error(msg) or msg)
+                    logger.error(msg); sys.exit()
             assert rprs > 0
 
             rprs_s = np.random.normal(rprs, rprserr, size=Nsamples)
@@ -901,13 +899,13 @@ allesfitter.prepare_ttv_fit('.', style='tessplot')
             logger.info(f"Available Pipelines: {pipelines}")
         else:
             msg = "No light curves found."
-            raise ValueError(logger.error(msg) or msg)               
+            logger.error(msg); sys.exit()               
         unique_exptimes = all_lcs.table.to_pandas().exptime.unique()
         logger.info(f"Available Exp. times: {unique_exptimes}")
         idx = [i == pipeline.lower() for i in pipelines]
         if sum(idx) == 0:
             msg = f"pipeline={pipeline} not in {pipelines}"
-            raise ValueError(logger.error(msg) or msg)
+            logger.error(msg); sys.exit()
         
         # search only requested data
         result = lk.search_lightcurve(
@@ -925,7 +923,7 @@ allesfitter.prepare_ttv_fit('.', style='tessplot')
                 if len(unique_exptimes) > 1:
                     msg = f"Multiple exposure times are available for `all` sectors:\n{result}.\n"
                     msg += f"Try using -exp={unique_exptimes}"
-                    raise ValueError(logger.error(msg) or msg)
+                    logger.error(msg); sys.exit()
                 exptime = unique_exptimes[0] if exptime is None else exptime
                 lc = result.download_all(
                     flux_column=lc_type, quality_bitmask=quality_bitmask
@@ -956,11 +954,11 @@ allesfitter.prepare_ttv_fit('.', style='tessplot')
                 if len(sector) > len(filtered_result):
                     msg = f"Not all sector={sector} have exptime={exptime} sec.\n"
                     msg = "Try to limit the sectors.\n"
-                    raise ValueError(logger.error(msg) or msg)
+                    logger.error(msg); sys.exit()
                 elif len(sector) < len(filtered_result):
                     msg = f"Multiple exposure times are available for the given sector:\n{filtered_result}.\n"
                     msg += f"Try using -exp={unique_exptimes}"
-                    raise ValueError(logger.error(msg) or msg)
+                    logger.error(msg); sys.exit()
                 assert len(sector) == len(filtered_result)
                 exptime = unique_exptimes[0] if exptime is None else exptime
                 lc = filtered_result.download_all(
@@ -1021,8 +1019,8 @@ allesfitter.prepare_ttv_fit('.', style='tessplot')
                     secs = str(sector)
             if pipeline == "spoc" and len(lc1)==len(lc2):
                 fig, axs = plt.subplots(2, 1, figsize=(8,6), sharex=True)
-                _ = lc1.scatter(ax=axs[0], zorder=1, label="PDCSAP", c="C0")
-                _ = lc2.scatter(ax=axs[0], zorder=2, label="SAP", c="C1")
+                _ = lc1.scatter(ax=axs[0], zorder=2, label="PDCSAP", c="C0")
+                _ = lc2.scatter(ax=axs[0], zorder=1, label="SAP", c="C1")
                 axs[0].set_title(f"Sector={secs}\nexptime={int(exptime)}s")
                 (lc1-lc2).scatter(ax=axs[1], label='difference', c='k')
                 fp = outdir.joinpath(
@@ -1046,11 +1044,11 @@ allesfitter.prepare_ttv_fit('.', style='tessplot')
             msg = f"Somehow, one of the data columns is all NaN.\n{df[cols]}\n"
             msg += "No lightcurve downloaded."
             assert len(df2)>0, logger.error(msg)
-            df.to_csv(fp.with_suffix('.csv'), sep=",", header=False, index=False)
+            df2.to_csv(fp.with_suffix('.csv'), sep=",", header=False, index=False)
             logger.info(f"Saved: {fp.with_suffix('.csv')}")
             logger.info(f"Ndata: {len(df):,}")
             if debug:
                 logger.info(df.head())
         else:
             msg = "No lightcurve downloaded. Check inputs."
-            raise ValueError(logger.error(msg) or msg)
+            logger.error(msg); sys.exit()
