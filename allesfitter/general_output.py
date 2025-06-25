@@ -567,12 +567,13 @@ def plot_1(ax, samples, inst, companion, style,
                 #else: plot with 30 min resolution
                 else: 
                     dt = 30./24./60. 
-                    
+
+            plot_time_limit = 100
             if key == 'flux':
                 xx_full = np.arange( x[0], x[-1]+dt, dt)
                 N_points_per_chunk = 48
                 N_chunks = int(1.*len(xx_full)/N_points_per_chunk)+2
-                if N_chunks < 60:
+                if N_chunks < plot_time_limit:
                     for i_chunk in tqdm(range(N_chunks)):
                         xx = xx_full[i_chunk*N_points_per_chunk:(i_chunk+1)*N_points_per_chunk] #plot in chunks of 48 points (1 day)
                         if len(xx)>0 and any( (x>xx[0]) & (x<xx[-1]) ): #plot only where there is data
@@ -587,8 +588,8 @@ def plot_1(ax, samples, inst, companion, style,
                                 ax.plot( xx, baseline+stellar_var+baseline_plus, marker=None, ls='-', color='orange', alpha=alpha, zorder=12 )
                                 ax.plot( xx, model+baseline+stellar_var, 'r-', alpha=alpha, zorder=12 )
                 else:
-                    ax.text(0.05, 0.95, '(The model is not plotted here because the\nphotometric data spans more than 60 days)', fontsize=10, va='top', ha='left', transform=ax.transAxes)  
-            elif key in ['rv', 'rv2']: 
+                    ax.text(0.05, 0.95, f'(The model is not plotted here because the\nphotometric data spans more than {plot_time_limit} days)', fontsize=10, va='top', ha='left', transform=ax.transAxes)  
+            elif key in ['rv', 'rv2']:
                 xx = np.arange( x[0], x[-1]+dt, dt)
                 for i in range(samples.shape[0]):
                     s = samples[i,:]
@@ -596,7 +597,7 @@ def plot_1(ax, samples, inst, companion, style,
                     model = calculate_model(p, inst, key, xx=xx) #evaluated on xx (!)
                     baseline = calculate_baseline(p, inst, key, xx=xx) #evaluated on xx (!)
                     if style in ['full_minus_offset']:
-                        baseline -= np.median(baseline)                    
+                        baseline -= np.median(baseline)
                     stellar_var = calculate_stellar_var(p, 'all', key, xx=xx) #evaluated on xx (!)
                     ax.plot( xx, baseline+stellar_var+baseline_plus, marker=None, ls='-', color='orange', alpha=alpha, zorder=12 )
                     ax.plot( xx, model+baseline+stellar_var, 'r-', alpha=alpha, zorder=12 )

@@ -359,7 +359,7 @@ if __name__ == "__main__":
         logger.info("Updating params.csv")
 
         # =====Update params.csv=====
-        text = """#name,value,fit,bounds,label,unit,truth\n"""
+        text = """#name,value,fit,bounds,label,unit,coupled_with\n"""
         try:
             # See https://github.com/MNGuenther/allesfitter/blob/master/allesfitter/general_output.py#L935
             ll = alles.posterior_params_ll.copy() #1-sigma lower error: 16th per
@@ -482,6 +482,7 @@ if __name__ == "__main__":
                 )
         except Exception as e:
             logger.error(f"Error: {e}")
+
         ticid = tic_id if ticid is None else ticid
         rhostar_prior = True
         if str(radius) == "nan":
@@ -760,7 +761,7 @@ shift_epoch,True\n"""
         for i, row in target_df.iterrows():
             pl = planets[i]
             text2 += f"inst_for_{pl}_epoch,all\n"
-            text2 += f"#inst_for_{pl}_epoch,['{fn}']\n"
+            text2 += f"#inst_for_{pl}_epoch,{fn}\n"
         text2 += f"""###############################################################################,
 # MCMC settings,
 ###############################################################################,
