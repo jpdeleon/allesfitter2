@@ -234,8 +234,8 @@ def ns_output(datadir):
                         caxes[i,j].yaxis.set_major_locator(MaxNLocator(nbins=3))
                         caxes[i,j].yaxis.set_major_formatter(fmt)
                         
-                    for tick in caxes[i,j].xaxis.get_major_ticks(): tick.label.set_fontsize(24) 
-                    for tick in caxes[i,j].yaxis.get_major_ticks(): tick.label.set_fontsize(24)    
+                    #for tick in caxes[i,j].xaxis.get_major_ticks(): tick.label.set_fontsize(24) 
+                    #for tick in caxes[i,j].yaxis.get_major_ticks(): tick.label.set_fontsize(24)    
         else:
             caxes[i,i].set_title(ctitle)
             taxes[1].set_title(ttitle)

@@ -634,6 +634,7 @@ if __name__ == "__main__":
             rsuma_s = radius_s[idx] / as_s[idx]
             # import pdb; pdb.set_trace()
             rsuma_min, rsuma, rsuma_max = np.percentile(rsuma_s, q=quartiles_3sig)
+            rsuma_max = 1 if rsuma_max>1 else rsuma_max
 
             theta = np.arcsin(radius_s / as_s)
             inc_s = np.pi / 2 - theta
@@ -864,7 +865,7 @@ host_grid_{fn},very_sparse\n"""
 import allesfitter
 
 fig = allesfitter.show_initial_guess('.')
-allesfitter.prepare_ttv_fit('.', style='tessplot')
+#allesfitter.prepare_ttv_fit('.', style='tessplot')
 
 # nested sampling
 #allesfitter.ns_fit('.')
