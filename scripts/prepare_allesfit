@@ -578,7 +578,7 @@ if __name__ == "__main__":
             # tdurerr = float(input("Tdur err: "))
             else:
                 assert np.all([Porb > 0, epoch > 0, tdur > 0])
-            Porb_s = np.random.normal(Porb, Porberr, size=Nsamples)
+            Porb_samples = np.random.normal(Porb, Porberr, size=Nsamples)
 
             if debug:
                 logger.info(f"P={Porb:.4f}+/-{Porberr:.4f}, T0={epoch:.4f}+/-{epocherr:.4f}")
@@ -614,38 +614,39 @@ if __name__ == "__main__":
                     logger.error(msg); sys.exit()
             assert rprs > 0
 
-            rprs_s = np.random.normal(rprs, rprserr, size=Nsamples)
-            rprs_min, rprs, rprs_max = np.percentile(rprs_s, q=quartiles_3sig)
+            rprs_samples = np.random.normal(rprs, rprserr, size=Nsamples)
+            rprs_min, rprs, rprs_max = np.percentile(rprs_samples, q=quartiles_3sig)
 
-            mass_s = np.random.normal(mass, mass_err, size=Nsamples)
-            radius_s = np.random.normal(radius, radius_err, size=Nsamples)
+            radius_samples = np.random.normal(radius, radius_err, size=Nsamples)
+            mass_samples = np.random.normal(mass, mass_err, size=Nsamples)
 
             # compute a/Rs from stellar density
-            rho_s = rho_from_mr(mass_s, radius_s)
-            as_s = as_from_rhop(rho_s, Porb_s)
+            rho_samples = rho_from_mr(mass_samples, radius_samples)
+            a_over_Rs_samples = as_from_rhop(rho_samples, Porb_samples)
             if debug:
-                rhomin, rho, rhomax = np.percentile(rho_s, q=quartiles_3sig)
-                as_min, a, as_max = np.percentile(as_s, q=quartiles_3sig)
-                a_au_s = a_from_rhoprs(rho_s, Porb_s, radius_s)
+                rhomin, rho, rhomax = np.percentile(rho_samples, q=quartiles_3sig)
+                as_min, a, as_max = np.percentile(a_over_Rs_samples, q=quartiles_3sig)
+                a_au_s = a_from_rhoprs(rho_samples, Porb_samples, radius_samples)
                 a_au_min, a_au, a_au_max = np.percentile(a_au_s, q=quartiles_3sig)
 
-            # FIXME: as_s produces some NaNs e.g. for Kepler-51
-            idx = as_s > 0
-            rsuma_s = radius_s[idx] / as_s[idx]
-            # import pdb; pdb.set_trace()
-            rsuma_min, rsuma, rsuma_max = np.percentile(rsuma_s, q=quartiles_3sig)
-            rsuma_max = 1 if rsuma_max>1 else rsuma_max
-
-            theta = np.arcsin(radius_s / as_s)
-            inc_s = np.pi / 2 - theta
-            # if all(inc_s>np.pi/2):
-            #    inc_s = np.random.uniform(np.deg2rad(80), np.deg2rad(90), size=Nsamples)
-            inc_min, inc, inc_max = np.percentile(inc_s, q=quartiles_3sig)
-            b_s = as_s * np.cos(inc_s)
-            b_min, b, b_max = np.percentile(b_s, q=quartiles_3sig)
-            if all(b_s > 1):
-                b_s = np.random.uniform(0, 1, size=Nsamples)
-                b = 0
+            # FIXME: a_over_Rs_samples produces some NaNs e.g. for Kepler-51
+            rsuma_samples = 1/a_over_Rs_samples * (1+rprs_samples)
+            # idx = (a_over_Rs_samples > 0) & (a_over_Rs_samples < 1)
+            rsuma_min, rsuma, rsuma_max = np.percentile(rsuma_samples, q=quartiles_3sig)
+            
+            if True:
+                # uniformly distributed from inc_min to 90 deg
+                cosi = np.random.uniform(0, 1/min(a_over_Rs_samples), size=Nsamples)
+                inc_samples = np.arccos(cosi)
+            else:
+                # normally distributed
+                inc_samples = np.arcos(1/a_over_Rs_samples)
+            inc_min, inc, inc_max = np.percentile(inc_samples, q=quartiles_3sig)
+            # FIXME: compute b taking into account ecc 
+            b_samples = np.random.uniform(0, 1, size=Nsamples)
+            # FIXME: compute including grazing orbits
+            # b_samples = np.random.uniform(0, 1+max(rprs_samples), size=Nsamples)
+            b_min, b, b_max = np.percentile(b_samples, q=quartiles_3sig)
 
             if str(tdur) != "nan":
                 # check if tdur derived from rhostar is consistent with tdur from tfop
@@ -656,9 +657,9 @@ if __name__ == "__main__":
                 # check if tdur derived from orbit is consistent with tdur from tfop
                 try:
                     tdurerr = 1 if str(tdurerr) == "nan" else tdurerr
-                    tdur_s = np.random.normal(tdur, tdurerr, size=Nsamples) / 24
-                    rsuma_s = get_rsuma(tdur_s, Porb, inc_s, rprs_s, b_s)
-                    tdur_orbit = get_tdur(Porb, np.median(rsuma_s), inc, rprs, b) * 24
+                    tdur_samples = np.random.normal(tdur, tdurerr, size=Nsamples) / 24
+                    rsuma_samples = get_rsuma(tdur_samples, Porb, inc_samples, rprs_samples, b_samples)
+                    tdur_orbit = get_tdur(Porb, np.median(rsuma_samples), inc, rprs, b) * 24
                     logger.info(
                         f"tdur={tdur:.1f}h ({source}) {tdur_orbit:.1f}h (derived from orbit)"
                     )
@@ -670,7 +671,7 @@ if __name__ == "__main__":
                     ):
                         logger.info("Using Rstar/a derived from orbit.")
                         rsuma_min, rsuma, rsuma_max = np.percentile(
-                            rsuma_s, q=quartiles_3sig
+                            rsuma_samples, q=quartiles_3sig
                         )
                     else:
                         logger.info("Using Rstar/a derived from rhostar.")
@@ -722,9 +723,9 @@ if __name__ == "__main__":
             f"ln_err_flux_{fn},-6,1,uniform -10 -1,$\log{{\sigma ({fn})}}$,rel. flux,\n"
         )
         text += "#baseline per instrument,,,,,,\n"
-        text += f"baseline_gp_offset_flux_{fn},0,1,uniform -0.1 0.1,$\mathrm{{gp ln \sigma ({fn})}}$,,\n"
+        text += f"#baseline_gp_offset_flux_{fn},0,1,uniform -0.1 0.1,$\mathrm{{offset ({fn})}}$,,\n"
         text += f"baseline_gp_matern32_lnsigma_flux_{fn},-5,1,uniform -15 0,$\mathrm{{gp ln \sigma ({fn})}}$,,\n"
-        text += f"baseline_gp_matern32_lnrho_flux_{fn},0,1,uniform -1 15,$\mathrm{{gp ln \\rho ({fn})}}$,,\n"
+        text += f"baseline_gp_matern32_lnrho_flux_{fn},0,1,uniform -5 10,$\mathrm{{gp ln \\rho ({fn})}}$,,\n"
         for i, row in target_df.iterrows():
             pl = planets[i]
             text += f"#TTV companion {pl},,,,,\n"

@@ -709,8 +709,8 @@ def derive(samples, mode):
                             fmt = ScalarFormatter(useOffset=False)
                             caxes[i,j].yaxis.set_major_formatter(fmt)
                             
-                        for tick in caxes[i,j].xaxis.get_major_ticks(): tick.label.set_fontsize(24) 
-                        for tick in caxes[i,j].yaxis.get_major_ticks(): tick.label.set_fontsize(24)    
+                        #for tick in caxes[i,j].xaxis.get_major_ticks(): tick.label.set_fontsize(24) 
+                        #for tick in caxes[i,j].yaxis.get_major_ticks(): tick.label.set_fontsize(24)    
             else:
                 caxes.set_title(ctitle)
                 caxes.xaxis.set_label_coords(0.5, -0.5)
