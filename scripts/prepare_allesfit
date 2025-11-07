@@ -555,7 +555,7 @@ if __name__ == "__main__":
             raise FileExistsError("Use --overwrite to overwrite files.")
 
         # ===== Create params.csv =====#
-        text = """#name,value,fit,bounds,label,unit,truth\n"""
+        text = """#name,value,fit,bounds,label,unit,coupled_with\n"""
         for i, row in target_df.iterrows():
             pl = planets[i]
             if debug:
@@ -631,9 +631,8 @@ if __name__ == "__main__":
 
             # FIXME: a_over_Rs_samples produces some NaNs e.g. for Kepler-51
             rsuma_samples = 1/a_over_Rs_samples * (1+rprs_samples)
-            # idx = (a_over_Rs_samples > 0) & (a_over_Rs_samples < 1)
-            rsuma_min, rsuma, rsuma_max = np.percentile(rsuma_samples, q=quartiles_3sig)
-            
+            idx = (rsuma_samples > 0) & (rsuma_samples < 1)
+            rsuma_min, rsuma, rsuma_max = np.percentile(rsuma_samples[idx], q=quartiles_3sig)
             if True:
                 # uniformly distributed from inc_min to 90 deg
                 cosi = np.random.uniform(0, 1/min(a_over_Rs_samples), size=Nsamples)
@@ -659,7 +658,8 @@ if __name__ == "__main__":
                     tdurerr = 1 if str(tdurerr) == "nan" else tdurerr
                     tdur_samples = np.random.normal(tdur, tdurerr, size=Nsamples) / 24
                     rsuma_samples = get_rsuma(tdur_samples, Porb, inc_samples, rprs_samples, b_samples)
-                    tdur_orbit = get_tdur(Porb, np.median(rsuma_samples), inc, rprs, b) * 24
+                    idx = (rsuma_samples > 0) & (rsuma_samples < 1)
+                    tdur_orbit = get_tdur(Porb, np.median(rsuma_samples[idx]), inc, rprs, b) * 24
                     logger.info(
                         f"tdur={tdur:.1f}h ({source}) {tdur_orbit:.1f}h (derived from orbit)"
                     )
@@ -671,7 +671,7 @@ if __name__ == "__main__":
                     ):
                         logger.info("Using Rstar/a derived from orbit.")
                         rsuma_min, rsuma, rsuma_max = np.percentile(
-                            rsuma_samples, q=quartiles_3sig
+                            rsuma_samples[idx], q=quartiles_3sig
                         )
                     else:
                         logger.info("Using Rstar/a derived from rhostar.")
@@ -735,119 +735,6 @@ if __name__ == "__main__":
             logger.info(text)
         fp = outdir.joinpath("params.csv")
         np.savetxt(fp, [text], fmt="%s")
-        logger.info(f"Saved: {fp}")
-
-        # =====Create settings.csv===== #
-        text2 = """#name,value
-###############################################################################,
-# General settings,
-###############################################################################,\n"""
-
-        text2 += f"companions_phot,{' '.join(planets[:len(target_df)])}"
-
-        text2 += f"""
-companions_rv,
-inst_phot,{fn}
-inst_rv,
-###############################################################################,
-# Fit performance settings,
-###############################################################################,
-multiprocess,True
-multiprocess_cores,40
-fast_fit,True
-fast_fit_width,0.3333333333333333
-#fast_fit_width,0.5
-secondary_eclipse,False
-phase_curve,False
-shift_epoch,True\n"""
-        for i, row in target_df.iterrows():
-            pl = planets[i]
-            text2 += f"inst_for_{pl}_epoch,all\n"
-            text2 += f"#inst_for_{pl}_epoch,{fn}\n"
-        text2 += f"""###############################################################################,
-# MCMC settings,
-###############################################################################,
-mcmc_nwalkers,100
-mcmc_total_steps,2000
-mcmc_burn_steps,1000
-mcmc_thin_by,2
-###############################################################################,
-# Nested Sampling settings,
-###############################################################################,
-ns_modus,dynamic
-ns_nlive,1000
-ns_bound,single
-ns_sample,auto
-ns_tol,100
-###############################################################################,
-# Limb darkening law per object and instrument,
-# if 'quad' two corresponding parameter called 'ldc_q1_inst' and 'ldc_q2_inst' have to be given in params.csv,
-###############################################################################,
-host_ld_law_{fn},quad
-#####################################,
-# Exposure interpolation settings,
-#####################################,
-### crucial only for long (>600s) exposure times,
-#t_exp_{fn},0.0208333
-#t_exp_n_int_{fn},10
-###############################################################################,
-# Baseline settings per instrument: sample / hybrid,
-# if 'sample_offset' one corresponding parameter called 'baseline_offset_key_inst' has to be given in params.csv,
-# if 'sample_linear' two corresponding parameters called 'baseline_offset_key_inst' and 'baseline_slope_key_inst' have to be given in params.csv,
-# if 'sample_GP' two corresponding parameters called 'baseline_gp1_key_inst' and 'baseline_gp2_key_inst' have to be given in params.csv,
-###############################################################################,
-#baseline_flux_{fn},sample_offset
-#baseline_flux_{fn},sample_linear
-#baseline_flux_{fn},hybrid_spline
-#baseline_flux_{fn},hybrid_poly_2
-baseline_flux_{fn},sample_GP_Matern32
-###############################################################################,
-# Error settings (overall scaling) per instrument: sample / hybrid,
-# if 'sample' one corresponding parameter called 'ln_err_key_inst' (photometry) or 'ln_jitter_key_inst' (RV) has to be given in params.csv,
-###############################################################################,
-error_flux_{fn},sample
-###############################################################################,
-# Flares,
-# if N>0 4xN corresponding parameters has to be given in params.csv,
-# See https://github.com/MNGuenther/allesfitter/blob/master/paper/GJ_1243/allesfit_0/params.csv,
-###############################################################################,
-#N_flares,0
-###############################################################################,
-# Number of spots per object and instrument,
-# if N>0 3xN corresponding parameters has to be given in params.csv,
-###############################################################################,
-#host_N_spots_{fn},0
-###############################################################################,
-# Host density prior,
-###############################################################################,\n"""
-        text2 += f"use_host_density_prior,{rhostar_prior}"
-        text2 += f"""
-###############################################################################,
-# Stellar variability: sample_GP_SHO / _real / _complex / matern32,
-# if 'sample_GP_SHO' three corresponding parameters has to be given in params.csv,
-# See https://github.com/MNGuenther/allesfitter/blob/master/tutorials/06_transits_and_rvs_with_stellar_variability/allesfit/params.csv,
-###############################################################################,
-#stellar_var_flux,sample_GP_SHO
-#stellar_var_rv,sample_GP_real
-###################################################,
-# Fit TTV,
-###################################################,
-fit_ttvs,False
-###############################################################################,
-# Stellar grid per object and instrument,
-###############################################################################,
-host_grid_{fn},very_sparse\n"""
-        for i, row in target_df.iterrows():
-            pl = planets[i]
-            text2 += f"#{pl}_grid_{fn},very_sparse\n"
-            text2 += f"#{pl}_shape_{fn},sphere\n"
-            text2 += f"#{pl}_flux_weighted_{fn},False\n"
-
-        if debug:
-            logger.info(text2)
-
-        fp = outdir.joinpath("settings.csv")
-        np.savetxt(fp, [text2], fmt="%s")
         logger.info(f"Saved: {fp}")
 
         # =====Create params_star.csv===== #
@@ -1043,15 +930,138 @@ fig = allesfitter.show_initial_guess('.')
             assert len(df)>0, logger.error(msg)
             df["time"] = df.index + 2457000
             df = df.reset_index(drop=True).sort_values(by="time")
-            df2 = df[cols].dropna(axis='index')
             msg = f"Somehow, one of the data columns is all NaN.\n{df[cols]}\n"
-            msg += "No lightcurve downloaded."
+            if len(df['flux_err'].dropna(axis='index'))==0:
+                df['flux_err'] = 1
+                msg += "Setting flux error column = 1 (See allesfitter documentation)."
+                logger.error(msg)
+            df2 = df[cols].dropna(axis='index')
+            msg = "Lightcurve is all NaN. No lightcurve downloaded."
             assert len(df2)>0, logger.error(msg)
-            df2.to_csv(fp.with_suffix('.csv'), sep=",", header=False, index=False)
+            df2[cols].to_csv(fp.with_suffix('.csv'), sep=",", header=False, index=False)
             logger.info(f"Saved: {fp.with_suffix('.csv')}")
             logger.info(f"Ndata: {len(df):,}")
+            logger.info(df[cols].head())
             if debug:
                 logger.info(df.head())
         else:
             msg = "No lightcurve downloaded. Check inputs."
             logger.error(msg); sys.exit()
+
+        # =====Create settings.csv===== #
+        text2 = """#name,value
+###############################################################################,
+# General settings,
+###############################################################################,\n"""
+
+        text2 += f"companions_phot,{' '.join(planets[:len(target_df)])}"
+        text2 += f"""
+companions_rv,
+inst_phot,{fn}
+inst_rv,
+time_format,BJD_TDB
+###############################################################################,
+# Fit performance settings,
+###############################################################################,
+multiprocess,True
+multiprocess_cores,40
+fast_fit,True
+fast_fit_width,0.3333333333333333
+#fast_fit_width,0.5
+secondary_eclipse,False
+phase_curve,False
+shift_epoch,True\n"""
+        for i, row in target_df.iterrows():
+            pl = planets[i]
+            text2 += f"inst_for_{pl}_epoch,all\n"
+            text2 += f"#inst_for_{pl}_epoch,{fn}\n"
+        text2 += f"""###############################################################################,
+# MCMC settings,
+###############################################################################,
+mcmc_nwalkers,100
+mcmc_total_steps,2000
+mcmc_burn_steps,1000
+mcmc_thin_by,2
+###############################################################################,
+# Nested Sampling settings,
+###############################################################################,
+ns_modus,dynamic
+ns_nlive,1000
+ns_bound,single
+ns_sample,auto
+ns_tol,100
+###############################################################################,
+# Limb darkening law per object and instrument,
+# if 'quad' two corresponding parameter called 'ldc_q1_inst' and 'ldc_q2_inst' have to be given in params.csv,
+###############################################################################,
+host_ld_law_{fn},quad
+#####################################,
+# Exposure interpolation settings,
+#####################################,\n"""
+        exptime = np.median(np.diff(df2.time)) if exptime is None else exptime/24/60/60
+        assert exptime<1, "exp time should be in days"
+        if exptime>0.0069:
+            text2 += f"""### crucial only for long (>600s) exposure times,
+t_exp_{fn},{exptime/60/24:.4f}
+#t_exp_{fn},0.020833
+#t_exp_n_int_{fn},10\n"""
+        text2 += f"""###############################################################################,
+# Baseline settings per instrument: sample / hybrid,
+# if 'sample_offset' one corresponding parameter called 'baseline_offset_key_inst' has to be given in params.csv,
+# if 'sample_linear' two corresponding parameters called 'baseline_offset_key_inst' and 'baseline_slope_key_inst' have to be given in params.csv,
+# if 'sample_GP' two corresponding parameters called 'baseline_gp1_key_inst' and 'baseline_gp2_key_inst' have to be given in params.csv,
+###############################################################################,
+#baseline_flux_{fn},sample_offset
+#baseline_flux_{fn},sample_linear
+#baseline_flux_{fn},hybrid_spline
+#baseline_flux_{fn},hybrid_poly_2
+baseline_flux_{fn},sample_GP_Matern32
+###############################################################################,
+# Error settings (overall scaling) per instrument: sample / hybrid,
+# if 'sample' one corresponding parameter called 'ln_err_key_inst' (photometry) or 'ln_jitter_key_inst' (RV) has to be given in params.csv,
+###############################################################################,
+error_flux_{fn},sample
+###############################################################################,
+# Flares,
+# if N>0 4xN corresponding parameters has to be given in params.csv,
+# See https://github.com/MNGuenther/allesfitter/blob/master/paper/GJ_1243/allesfit_0/params.csv,
+###############################################################################,
+#N_flares,0
+###############################################################################,
+# Number of spots per object and instrument,
+# if N>0 3xN corresponding parameters has to be given in params.csv,
+###############################################################################,
+#host_N_spots_{fn},0
+###############################################################################,
+# Host density prior,
+###############################################################################,\n"""
+        text2 += f"use_host_density_prior,{rhostar_prior}"
+        text2 += f"""
+###############################################################################,
+# Stellar variability: sample_GP_SHO / _real / _complex / matern32,
+# if 'sample_GP_SHO' three corresponding parameters has to be given in params.csv,
+# See https://github.com/MNGuenther/allesfitter/blob/master/tutorials/06_transits_and_rvs_with_stellar_variability/allesfit/params.csv,
+###############################################################################,
+#stellar_var_flux,sample_GP_SHO
+#stellar_var_rv,sample_GP_real
+###################################################,
+# Fit TTV,
+###################################################,
+fit_ttvs,False
+###############################################################################,
+# Stellar grid per object and instrument,
+###############################################################################,
+host_grid_{fn},very_sparse\n"""
+        for i, row in target_df.iterrows():
+            pl = planets[i]
+            text2 += f"#{pl}_grid_{fn},very_sparse\n"
+            text2 += f"#{pl}_shape_{fn},sphere\n"
+            text2 += f"#{pl}_flux_weighted_{fn},False\n"
+
+        if debug:
+            logger.info(text2)
+
+        fp = outdir.joinpath("settings.csv")
+        np.savetxt(fp, [text2], fmt="%s")
+        logger.info(f"Saved: {fp}")
+
