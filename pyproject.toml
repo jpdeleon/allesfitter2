@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "allesfitter"
+version = "2"
+description = "A global inference framework for photometry and RV"
+authors = [
+    {name = "Jerome de Leon", email = "jpdeleon@g.ecc.u-tokyo.ac.jp"}
+]
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python",
+]
+dependencies = [
+    "dynesty==2.0.0",
+    "corner==2.2.1",
+    "pandas==1.5",
+    "astropy==5.1",
+    "lightkurve==2.4.2",
+    "tess-point",
+    "scipy==1.9",
+    "numpy==1.23",
+    "seaborn==0.12",
+    "statsmodels==0.13.2",
+    "celerite==0.4.2",
+    "brokenaxes==0.5.0",
+    "rebound==3.20.0",
+    "loguru==0.7.3",
+    "emcee>=3.0.0",
+    "setuptools",
+    "ellc",
+    "limbdark @ git+https://github.com/jpdeleon/limbdark2.git",
+]
+
+[project.urls]
+Homepage = "https://github.com/MNGuenther/allesfitter"
+Download = "https://github.com/jpdeleon/allesfitter2"
+
+[project.scripts]
+prepare_allesfit = "allesfitter.scripts:prepare_allesfit"
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+#[tool.setuptools.include-package-data]
+#true

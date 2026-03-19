@@ -193,6 +193,15 @@ class Basement():
         if 'time_format' not in self.settings:
             self.settings['time_format'] = 'BJD_TDB'
             
+            
+        if 'transit_model' not in self.settings:
+            self.settings['transit_model'] = 'achromatic'
+        else:
+            models = ['achromatic','chromatic']
+            errmsg = f"transit_model should be either `achromatic` or `chromatic`."
+            assert self.settings['transit_model'].lower() in models, errmsg
+
+
         for key in ['companions_phot', 'companions_rv', 'inst_phot', 'inst_rv', 'inst_rv2']:
             if key not in self.settings:
                 self.settings[key] = []

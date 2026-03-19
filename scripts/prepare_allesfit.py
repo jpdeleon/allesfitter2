@@ -253,7 +253,7 @@ def check_if_sector_is_available(
         return "multi_sector"
 
 
-if __name__ == "__main__":
+def main():
     ap = ArgumentParser()
     group1 = ap.add_mutually_exclusive_group(required=True)
     group1.add_argument("-toi", help="TOI ID", type=int)
@@ -960,6 +960,7 @@ companions_rv,
 inst_phot,{fn}
 inst_rv,
 time_format,BJD_TDB
+transit_model,achromatic
 ###############################################################################,
 # Fit performance settings,
 ###############################################################################,
@@ -1064,4 +1065,8 @@ host_grid_{fn},very_sparse\n"""
         fp = outdir.joinpath("settings.csv")
         np.savetxt(fp, [text2], fmt="%s")
         logger.info(f"Saved: {fp}")
+
+
+if __name__ == "__main__":
+    main()
 

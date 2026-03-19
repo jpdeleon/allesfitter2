@@ -1,12 +1,19 @@
 #!/bin/bash
 
-echo "=== Installing packages from requirements.txt ==="
-pip install -r requirements.txt
+if command -v uv &> /dev/null; then
+    PIP="uv pip install"
+    PIP_EDIT="uv pip install -e ."
+else
+    PIP="pip install"
+    PIP_EDIT="pip install -e ."
+fi
+
+echo "=== Installing allesfitter dependencies ==="
+$PIP .
 
 echo "=== Uninstalling ellc ==="
-pip uninstall ellc -y
+$PIP uninstall ellc -y
 
-# Clone into the parent directory
 ELLCPATH="../ellc"
 
 echo "=== Cloning the ellc repository into $ELLCPATH ==="
@@ -17,13 +24,12 @@ cd "$ELLCPATH"
 python setup.py build_ext --inplace
 
 echo "=== Installing ellc package into the Python environment ==="
-pip install -e .
+$PIP_EDIT .
 
-# Return to the original directory
 cd -
 
 echo "=== Installing allesfitter ==="
-pip install -e .
+$PIP_EDIT .
 
 echo "=== allesfitter installation complete ==="
 echo "=== To test, run the script \`prepare_allesfit\` ==="
