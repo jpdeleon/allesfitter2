@@ -5,3 +5,5 @@ __pychache__
 *.egg-info
 dist/
 build/
+utils/data/nexsci*.csv
+utils/data/TOIs.csv
