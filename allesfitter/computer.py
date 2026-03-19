@@ -137,24 +137,28 @@ def update_params(theta):
         
        
     #=========================================================================
-    #::: radii, per companion 
-    #::: R_1/a and R_2/a --> dependent on each companion's orbit
+    #::: radii, per companion (radius_1 from rsuma, radius_2 from rr)
+    #::: radius_1 is shared (depends on rsuma)
+    #::: radius_2 is per-bandpass in chromatic mode (depends on rr_{bandpass})
     #=========================================================================
     for companion in config.BASEMENT.settings['companions_all']:
         try:
             params[companion+'_radius_1'] = params[companion+'_rsuma'] / (1. + params[companion+'_rr'])
-            params[companion+'_radius_2'] = params[companion+'_radius_1'] * params[companion+'_rr']
         except:
             params[companion+'_radius_1'] = None
-            params[companion+'_radius_2'] = None
                 
                 
     #=========================================================================
-    #::: limb darkening, per instrument
+    #::: limb darkening, per instrument (per-bandpass in chromatic mode)
     #=========================================================================
     for inst in config.BASEMENT.settings['inst_all']:
         for obj in ['host']+config.BASEMENT.settings['companions_all']:
         
+            bandpass = config.BASEMENT.get_bandpass(inst)
+            if bandpass:
+                ldc_suffix = '_' + bandpass
+            else:
+                ldc_suffix = '_' + inst
             
             #::: if we sampled in q-space, convert the params to u-space for ellc
             if config.BASEMENT.settings[obj+'_ld_space_'+inst] == 'q': 
@@ -163,17 +167,17 @@ def update_params(theta):
                     params[obj+'_ldc_'+inst] = None
                     
                 elif config.BASEMENT.settings[obj+'_ld_law_'+inst] == 'lin':
-                    params[obj+'_ldc_'+inst] = params[obj+'_ldc_q1_'+inst]
+                    params[obj+'_ldc_'+inst] = params[obj+'_ldc_q1'+ldc_suffix]
                     
                 elif config.BASEMENT.settings[obj+'_ld_law_'+inst] == 'quad':
-                    params[obj+'_ldc_'+inst] = q_to_u([params[obj+'_ldc_q1_'+inst],
-                                                       params[obj+'_ldc_q2_'+inst]], 
+                    params[obj+'_ldc_'+inst] = q_to_u([params[obj+'_ldc_q1'+ldc_suffix],
+                                                       params[obj+'_ldc_q2'+ldc_suffix]], 
                                                       law='quad')
                     
                 elif config.BASEMENT.settings[obj+'_ld_law_'+inst] == 'sing':
-                    params[obj+'_ldc_'+inst] = q_to_u([params[obj+'_ldc_q1_'+inst], 
-                                                       params[obj+'_ldc_q2_'+inst], 
-                                                       params[obj+'_ldc_q3_'+inst]],
+                    params[obj+'_ldc_'+inst] = q_to_u([params[obj+'_ldc_q1'+ldc_suffix], 
+                                                       params[obj+'_ldc_q2'+ldc_suffix], 
+                                                       params[obj+'_ldc_q3'+ldc_suffix]],
                                                       law='sing')
         
                 else:
@@ -190,22 +194,22 @@ def update_params(theta):
                     params[obj+'_ldc_'+inst] = None
                     
                 elif config.BASEMENT.settings[obj+'_ld_law_'+inst] == 'lin':
-                    params[obj+'_ldc_'+inst] = params[obj+'_ldc_u1_'+inst]
+                    params[obj+'_ldc_'+inst] = params[obj+'_ldc_u1'+ldc_suffix]
                     
                 elif config.BASEMENT.settings[obj+'_ld_law_'+inst] in ('quad','sqrt','exp','log'):
-                    params[obj+'_ldc_'+inst] = [ params[obj+'_ldc_u1_'+inst], 
-                                                 params[obj+'_ldc_u2_'+inst] ]
+                    params[obj+'_ldc_'+inst] = [ params[obj+'_ldc_u1'+ldc_suffix], 
+                                                 params[obj+'_ldc_u2'+ldc_suffix] ]
                     
                 elif config.BASEMENT.settings[obj+'_ld_law_'+inst] == 'sing':
-                    params[obj+'_ldc_'+inst] = [ params[obj+'_ldc_u1_'+inst], 
-                                                 params[obj+'_ldc_u2_'+inst], 
-                                                 params[obj+'_ldc_u3_'+inst] ]
+                    params[obj+'_ldc_'+inst] = [ params[obj+'_ldc_u1'+ldc_suffix], 
+                                                 params[obj+'_ldc_u2'+ldc_suffix], 
+                                                 params[obj+'_ldc_u3'+ldc_suffix] ]
                     
                 elif config.BASEMENT.settings[obj+'_ld_law_'+inst] == 'claret':
-                    params[obj+'_ldc_'+inst] = [ params[obj+'_ldc_u1_'+inst], 
-                                                 params[obj+'_ldc_u2_'+inst], 
-                                                 params[obj+'_ldc_u3_'+inst], 
-                                                 params[obj+'_ldc_u4_'+inst] ]
+                    params[obj+'_ldc_'+inst] = [ params[obj+'_ldc_u1'+ldc_suffix], 
+                                                 params[obj+'_ldc_u2'+ldc_suffix], 
+                                                 params[obj+'_ldc_u3'+ldc_suffix], 
+                                                 params[obj+'_ldc_u4'+ldc_suffix] ]
         
                 else:
                     raise ValueError("Only 'none', 'lin', 'quad', 'sqrt', 'exp',"+\
@@ -472,11 +476,18 @@ def flux_subfct_ellc(params, inst, companion, xx=None, settings=None, t_exp=None
     #-------------------------------------------------------------------------- 
     #::: if: planet and EB lightcurve model
     #-------------------------------------------------------------------------- 
-    if (params[companion+'_rr'] is not None) and (params[companion+'_rr'] > 0):
+    # Get bandpass-specific rr key for chromatic mode
+    rr_key = config.BASEMENT.get_rr_key(companion, inst)
+    rr = params.get(rr_key)
+    
+    if (rr is not None) and (rr > 0):
+        # Compute radius_2 from bandpass-specific rr
+        radius_2 = params[companion+'_radius_1'] * rr
+        
         model_flux1, model_flux2 = ellc.fluxes(
                                     t_obs =       xx, 
                                     radius_1 =    params[companion+'_radius_1'], 
-                                    radius_2 =    params[companion+'_radius_2'], 
+                                    radius_2 =    radius_2, 
                                     sbratio =     params[companion+'_sbratio_'+inst], 
                                     incl =        params[companion+'_incl'], 
                                     # light_3 =     params['dil_'+inst] / (1.-params['dil_'+inst]), #fluxes does not take light_3

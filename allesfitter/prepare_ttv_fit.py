@@ -98,8 +98,10 @@ def prepare_ttv_fit(datadir, style='fullplot', max_transits=20):
     eclipse_width = {}
     for companion in alles.settings['companions_phot']:
         alles.initial_guess_params_median[companion+'_epoch']
+        # Get first band's rr for eclipse width calculation (Option A: use first bandpass)
+        rr_key = alles.get_rr_key(companion, alles.settings['inst_phot'][0])
         eclipse_width[companion] = eclipse_width_smart(alles.initial_guess_params_median[companion+'_period'], 
-                                                        alles.initial_guess_params_median[companion+'_rr'], 
+                                                        alles.initial_guess_params_median[rr_key], 
                                                         alles.initial_guess_params_median[companion+'_rsuma'], 
                                                         alles.initial_guess_params_median[companion+'_cosi'], 
                                                         alles.initial_guess_params_median[companion+'_f_s'], 

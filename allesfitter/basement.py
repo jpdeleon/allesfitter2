@@ -142,9 +142,53 @@ class Basement():
             sys.stdout = original
         else:
             pass
+    
+    
+    ###############################################################################
+    #::: helper to get bandpass for an instrument
+    ###############################################################################
+    def get_bandpass(self, inst):
+        """
+        Return bandpass for an instrument, or None if achromatic.
         
+        Parameters
+        ----------
+        inst : str
+            Instrument name (e.g., 'tess', 'kepler')
         
-
+        Returns
+        -------
+        str or None
+            Bandpass name if chromatic, None if achromatic
+        """
+        return self.settings.get('bandpass', {}).get(inst)
+    
+    
+    ###############################################################################
+    #::: get_rr_key: helper to get the correct rr key for a companion/instrument
+    ###############################################################################
+    def get_rr_key(self, companion, inst):
+        """
+        Return the parameter key for radius ratio (rr) for a given companion and instrument.
+        
+        Parameters
+        ----------
+        companion : str
+            Companion name (e.g., 'b', 'c')
+        inst : str
+            Instrument name (e.g., 'tess', 'kepler')
+        
+        Returns
+        -------
+        str
+            Parameter key: 'b_rr' for achromatic, 'b_rr_tess' for chromatic
+        """
+        bandpass = self.get_bandpass(inst)
+        if bandpass:
+            return f'{companion}_rr_{bandpass}'
+        return f'{companion}_rr'
+    
+    
     ###############################################################################
     #::: load settings
     ###############################################################################
@@ -194,14 +238,6 @@ class Basement():
             self.settings['time_format'] = 'BJD_TDB'
             
             
-        if 'transit_model' not in self.settings:
-            self.settings['transit_model'] = 'achromatic'
-        else:
-            models = ['achromatic','chromatic']
-            errmsg = f"transit_model should be either `achromatic` or `chromatic`."
-            assert self.settings['transit_model'].lower() in models, errmsg
-
-
         for key in ['companions_phot', 'companions_rv', 'inst_phot', 'inst_rv', 'inst_rv2']:
             if key not in self.settings:
                 self.settings[key] = []
@@ -217,6 +253,25 @@ class Basement():
             raise ValueError('No photometric instrument is selected, but photometric companions are given.')
         if len(self.settings['inst_rv'])==0 and len(self.settings['companions_rv'])>0:
            raise ValueError('No RV instrument is selected, but RV companions are given.')
+           
+           
+        #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+        #::: Bandpass settings (for chromatic transit modeling)
+        #::: If not specified → achromatic (all instruments share same rr)
+        #::: If specified with multiple unique values → chromatic
+        #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+        if 'bandpass' not in self.settings or is_empty_or_none('bandpass'):
+            self.settings['bandpass'] = {}  # empty = achromatic
+        else:
+            bp_list = str(self.settings['bandpass']).split()
+            self.settings['bandpass'] = {
+                inst: bp_list[i] if i < len(bp_list) else bp_list[0]
+                for i, inst in enumerate(self.settings['inst_phot'])
+            }
+        
+        # Determine if chromatic (multiple unique bandpasses) or achromatic
+        unique_bandpasses = set(self.settings['bandpass'].values())
+        self.settings['chromatic'] = len(unique_bandpasses) > 1
             
             
         #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
@@ -730,12 +785,29 @@ class Basement():
         for companion in self.settings['companions_all']:
             for inst in self.settings['inst_all']:
                 
+                # Get bandpass for this instrument (None if achromatic)
+                bandpass = self.get_bandpass(inst)
+                
+                # Determine suffix for parameter keys
+                # For chromatic mode: use bandpass name (e.g., 'tess')
+                # For achromatic mode: use instrument name (e.g., 'tess')
+                # This way, existing parameter naming is preserved for achromatic
+                if bandpass:
+                    bp_suffix = '_' + bandpass
+                else:
+                    bp_suffix = ''  # Will use inst as suffix in LDC below
+                
                 #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
                 #::: ellc defaults
                 #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
                 
                 #::: frequently used parameters
-                validate(companion+'_rr', None, 0., np.inf)
+                # rr is per-bandpass in chromatic mode, per-companion in achromatic
+                if bandpass:
+                    rr_key = companion + '_rr' + bp_suffix
+                    validate(rr_key, None, 0., np.inf)
+                else:
+                    validate(companion+'_rr', None, 0., np.inf)
                 validate(companion+'_rsuma', None, 0., np.inf)
                 validate(companion+'_cosi', 0., 0., 1.)
                 validate(companion+'_epoch', 0., -np.inf, np.inf)
@@ -746,25 +818,26 @@ class Basement():
                 validate(companion+'_f_c', 0., -1, 1)
                 validate('dil_'+inst, 0., -np.inf, np.inf)
                 
-                #::: limb darkenings, u-space
-                validate('host_ldc_u1_'+inst, None, 0, 1)
-                validate('host_ldc_u2_'+inst, None, 0, 1)
-                validate('host_ldc_u3_'+inst, None, 0, 1)
-                validate('host_ldc_u4_'+inst, None, 0, 1)
-                validate(companion+'_ldc_u1_'+inst, None, 0, 1)
-                validate(companion+'_ldc_u2_'+inst, None, 0, 1)
-                validate(companion+'_ldc_u3_'+inst, None, 0, 1)
-                validate(companion+'_ldc_u4_'+inst, None, 0, 1)
+                #::: limb darkenings, u-space (per-bandpass in chromatic, per-inst in achromatic)
+                ldc_suffix = bp_suffix if bandpass else '_' + inst
+                validate('host_ldc_u1'+ldc_suffix, None, 0, 1)
+                validate('host_ldc_u2'+ldc_suffix, None, 0, 1)
+                validate('host_ldc_u3'+ldc_suffix, None, 0, 1)
+                validate('host_ldc_u4'+ldc_suffix, None, 0, 1)
+                validate(companion+'_ldc_u1'+ldc_suffix, None, 0, 1)
+                validate(companion+'_ldc_u2'+ldc_suffix, None, 0, 1)
+                validate(companion+'_ldc_u3'+ldc_suffix, None, 0, 1)
+                validate(companion+'_ldc_u4'+ldc_suffix, None, 0, 1)
 
                 #::: limb darkenings, q-space
-                validate('host_ldc_q1_'+inst, None, 0, 1)
-                validate('host_ldc_q2_'+inst, None, 0, 1)
-                validate('host_ldc_q3_'+inst, None, 0, 1)
-                validate('host_ldc_q4_'+inst, None, 0, 1)
-                validate(companion+'_ldc_q1_'+inst, None, 0, 1)
-                validate(companion+'_ldc_q2_'+inst, None, 0, 1)
-                validate(companion+'_ldc_q3_'+inst, None, 0, 1)
-                validate(companion+'_ldc_q4_'+inst, None, 0, 1)
+                validate('host_ldc_q1'+ldc_suffix, None, 0, 1)
+                validate('host_ldc_q2'+ldc_suffix, None, 0, 1)
+                validate('host_ldc_q3'+ldc_suffix, None, 0, 1)
+                validate('host_ldc_q4'+ldc_suffix, None, 0, 1)
+                validate(companion+'_ldc_q1'+ldc_suffix, None, 0, 1)
+                validate(companion+'_ldc_q2'+ldc_suffix, None, 0, 1)
+                validate(companion+'_ldc_q3'+ldc_suffix, None, 0, 1)
+                validate(companion+'_ldc_q4'+ldc_suffix, None, 0, 1)
                 
                 #::: catch exceptions
                 if self.params[companion+'_period'] is None:

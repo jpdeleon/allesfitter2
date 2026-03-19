@@ -256,19 +256,64 @@ def derive(samples, mode):
     def cos_d(alpha): return np.cos(np.deg2rad(alpha))
     def arcsin_d(x): return np.rad2deg(np.arcsin(x))
     def arccos_d(x): return np.rad2deg(np.arccos(x))
+    
+    def get_first_bandpass():
+        """Get the first bandpass from the bandpass dict, or None if achromatic."""
+        bandpass_dict = config.BASEMENT.settings.get('bandpass', {})
+        if bandpass_dict:
+            return list(bandpass_dict.values())[0]
+        return None
+    
+    def get_rr_key_for_derive(companion, inst=None):
+        """Get the rr key for derived parameters.
+        
+        For chromatic mode: use first band's rr
+        For achromatic mode: use standard rr
+        """
+        bandpass = get_first_bandpass()
+        if bandpass:
+            return f'{companion}_rr_{bandpass}'
+        return f'{companion}_rr'
+    
+    def get_all_rr_keys(companion):
+        """Get all rr keys for all bandpasses (for chromatic mode)."""
+        bandpass_dict = config.BASEMENT.settings.get('bandpass', {})
+        if not bandpass_dict:
+            return [f'{companion}_rr']
+        unique_bandpasses = set(bandpass_dict.values())
+        return [f'{companion}_rr_{bp}' for bp in unique_bandpasses]
 
     derived_samples = {}
     for cc in companions:
         companion = cc
         
+        # Get rr keys
+        rr_key_primary = get_rr_key_for_derive(companion)  # first bandpass for primary derived params
+        rr_keys_all = get_all_rr_keys(companion)  # all bandpasses for R_companion
+        
         #----------------------------------------------------------------------
-        #::: radii
+        #::: radii (passband-independent: R_star/a, a/R_star)
+        #::: Use first band's rr for these derived params
         #----------------------------------------------------------------------
-        derived_samples[companion+'_R_star/a'] = get_params(companion+'_rsuma') / (1. + get_params(companion+'_rr'))
-        derived_samples[companion+'_a/R_star'] = (1. + get_params(companion+'_rr')) / get_params(companion+'_rsuma')
-        derived_samples[companion+'_R_companion/a'] = get_params(companion+'_rsuma') * get_params(companion+'_rr') / (1. + get_params(companion+'_rr'))
-        derived_samples[companion+'_R_companion_(R_earth)'] = star['R_star'] * get_params(companion+'_rr') * R_sun.value / R_earth.value #in R_earth
-        derived_samples[companion+'_R_companion_(R_jup)'] = star['R_star'] * get_params(companion+'_rr') * R_sun.value / R_jup.value #in R_jup
+        rr_primary = get_params(rr_key_primary)
+        derived_samples[companion+'_R_star/a'] = get_params(companion+'_rsuma') / (1. + rr_primary)
+        derived_samples[companion+'_a/R_star'] = (1. + rr_primary) / get_params(companion+'_rsuma')
+        
+        #----------------------------------------------------------------------
+        #::: R_companion (bandpass-dependent: different values per bandpass)
+        #----------------------------------------------------------------------
+        rsuma = get_params(companion+'_rsuma')
+        for rr_key in rr_keys_all:
+            rr = get_params(rr_key)
+            # Extract bandpass suffix from key
+            if '_rr_' in rr_key:
+                bp_suffix = '_' + rr_key.split('_rr_')[1]
+            else:
+                bp_suffix = ''
+            
+            derived_samples[companion+f'_R_companion/a{bp_suffix}'] = rsuma * rr / (1. + rr)
+            derived_samples[companion+f'_R_companion_(R_earth{bp_suffix})'] = star['R_star'] * rr * R_sun.value / R_earth.value
+            derived_samples[companion+f'_R_companion_(R_jup{bp_suffix})'] = star['R_star'] * rr * R_sun.value / R_jup.value
 
     
         #----------------------------------------------------------------------
@@ -330,19 +375,20 @@ def derive(samples, mode):
         
         #----------------------------------------------------------------------
         #::: transit duration (in hours) with eccentricity corrections (from Winn 2010) 
+        #::: Uses first band's rr for passband-independent transit duration
         #----------------------------------------------------------------------
         eccentricity_correction_T_tra = ( np.sqrt(1. - derived_samples[companion+'_e']**2) / ( 1. + derived_samples[companion+'_e']*sin_d(derived_samples[companion+'_w']) ) )
         
         derived_samples[companion+'_T_tra_tot'] = get_params(companion+'_period')/np.pi *24.  \
                                                   * np.arcsin( derived_samples[companion+'_R_star/a'] \
-                                                               * np.sqrt( (1. + get_params(companion+'_rr'))**2 - derived_samples[companion+'_b_tra']**2 ) \
+                                                               * np.sqrt( (1. + rr_primary)**2 - derived_samples[companion+'_b_tra']**2 ) \
                                                                / sin_d(derived_samples[companion+'_i']) ) \
                                                   * eccentricity_correction_T_tra    #in h
         derived_samples[companion+'_T_tra_full'] = get_params(companion+'_period')/np.pi *24.  \
                                                    * np.arcsin( derived_samples[companion+'_R_star/a'] \
-                                                                * np.sqrt( (1. - get_params(companion+'_rr'))**2 - derived_samples[companion+'_b_tra']**2  )\
+                                                                * np.sqrt( (1. - rr_primary)**2 - derived_samples[companion+'_b_tra']**2  )\
                                                                 / sin_d(derived_samples[companion+'_i']) ) \
-                                                   * eccentricity_correction_T_tra    #in h
+                                                  * eccentricity_correction_T_tra    #in h
                                   
         
         #----------------------------------------------------------------------
@@ -407,21 +453,29 @@ def derive(samples, mode):
         #::: stellar density from orbit
         #----------------------------------------------------------------------
         if companion in config.BASEMENT.settings['companions_phot']:
-            if all(np.atleast_1d(get_params(companion+'_rr'))<0.215443469): #see computer.py; get_params could return np.nan (float) or array; all(np.atleast_1d(...)) takes care of that
+            if all(np.atleast_1d(rr_primary)<0.215443469): #see computer.py; get_params could return np.nan (float) or array; all(np.atleast_1d(...)) takes care of that
                 derived_samples[companion+'_host_density'] = 3. * np.pi * (1./derived_samples[companion+'_R_star/a'])**3. / (get_params(companion+'_period')*86400.)**2 / 6.67408e-8 #in cgs
   
     
         #----------------------------------------------------------------------
-        #::: companion densities
+        #::: companion densities (uses first bandpass R_companion)
         #----------------------------------------------------------------------
-        derived_samples[companion+'_density'] = ( (derived_samples[companion+'_M_companion_(M_earth)'] * M_earth) / (4./3. * np.pi * (derived_samples[companion+'_R_companion_(R_earth)'] * R_earth)**3 ) ).cgs.value #in cgs
+        # Construct the R_companion key from the rr key
+        rr_key = get_rr_key_for_derive(companion)
+        if '_rr_' in rr_key:
+            bp_suffix = '_' + rr_key.split('_rr_')[1]
+        else:
+            bp_suffix = ''
+        r_companion_earth_key = f'{companion}_R_companion_(R_earth{bp_suffix})'
+        derived_samples[companion+'_density'] = ( (derived_samples[companion+'_M_companion_(M_earth)'] * M_earth) / (4./3. * np.pi * (derived_samples[r_companion_earth_key] * R_earth)**3 ) ).cgs.value #in cgs
         
         
         #----------------------------------------------------------------------
         #::: the companion's surface gravity (individual posterior distribution for each companion; via Southworth+ 2007)
         #----------------------------------------------------------------------
         try:
-            derived_samples[companion+'_surface_gravity'] = 2. * np.pi / (get_params(companion+'_period')*86400.) * np.sqrt((1.-derived_samples[companion+'_e']**2)) * (get_params(companion+'_K')*1e5) / (derived_samples[companion+'_R_companion/a'])**2 / sin_d(derived_samples[companion+'_i'])
+            r_companion_a_key = f'{companion}_R_companion/a{bp_suffix}'
+            derived_samples[companion+'_surface_gravity'] = 2. * np.pi / (get_params(companion+'_period')*86400.) * np.sqrt((1.-derived_samples[companion+'_e']**2)) * (get_params(companion+'_K')*1e5) / (derived_samples[r_companion_a_key])**2 / sin_d(derived_samples[companion+'_i'])
         except:
             pass
         

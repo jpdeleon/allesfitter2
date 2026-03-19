@@ -394,7 +394,9 @@ def plot_top_down_view(params_median, params_star, a=None, timestep=None, scalin
     
     for i, companion in enumerate(config.BASEMENT.settings['companions_all']):
         
-        R_companion = params_star['R_star'] * params_median[companion+'_rr'] # in Rsun
+        # Get first band's rr for R_companion (Option A: use first bandpass)
+        rr_key = config.BASEMENT.get_rr_key(companion, config.BASEMENT.settings['inst_phot'][0])
+        R_companion = params_star['R_star'] * params_median[rr_key] # in Rsun
         R_companion *= 0.004650467260962157 #in AU
         R_companion *= scaling
     

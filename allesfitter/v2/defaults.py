@@ -93,11 +93,21 @@ def fill_params(params=None, settings=None):
     for companion in companions_all:
         for inst in inst_all:
     
+            # Get bandpass suffix for this instrument
+            bandpass = settings.get('bandpass', {}).get(inst)
+            if bandpass:
+                rr_suffix = '_' + bandpass
+                ldc_suffix = '_' + bandpass
+            else:
+                rr_suffix = ''
+                ldc_suffix = '_' + inst
+    
             if 'dil_'+inst not in params:
                 params['dil_'+inst] = 0.
             
-            if companion+'_rr' not in params:
-                params[companion+'_rr'] = None
+            # rr is per-bandpass in chromatic mode
+            if companion+'_rr'+rr_suffix not in params:
+                params[companion+'_rr'+rr_suffix] = None
                 
             if companion+'_rsuma' not in params:
                 params[companion+'_rsuma'] = None
@@ -129,11 +139,22 @@ def fill_params(params=None, settings=None):
             if companion+'_f_s' not in params:
                 params[companion+'_f_s'] = 0.
                 
+            # LDC is per-bandpass in chromatic mode
             if 'host_ldc_'+inst not in params:
                 params['host_ldc_'+inst] = None
                 
+            if 'host_ldc_q1'+ldc_suffix not in params:
+                params['host_ldc_q1'+ldc_suffix] = None
+            if 'host_ldc_q2'+ldc_suffix not in params:
+                params['host_ldc_q2'+ldc_suffix] = None
+                
             if companion+'_ldc_'+inst not in params:
                 params[companion+'_ldc_'+inst] = None
+                
+            if companion+'_ldc_q1'+ldc_suffix not in params:
+                params[companion+'_ldc_q1'+ldc_suffix] = None
+            if companion+'_ldc_q2'+ldc_suffix not in params:
+                params[companion+'_ldc_q2'+ldc_suffix] = None
                 
             if 'host_gdc_'+inst not in params:
                 params['host_gdc_'+inst] = None

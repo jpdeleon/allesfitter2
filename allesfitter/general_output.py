@@ -312,18 +312,33 @@ def afplot(samples, companion):
 ###############################################################################
 #::: guesstimate median values for plotting stuff
 ###############################################################################
-def guesstimator(params_median, companion, base=None):
+def guesstimator(params_median, companion, base=None, inst=None):
     
     if base==None:
         base = config.BASEMENT
         
     try:
+        # Get bandpass-specific rr key for chromatic mode
+        if inst is not None:
+            rr_key = base.get_rr_key(companion, inst)
+            rr_bandpass = params_median[rr_key]
+        else:
+            rr_key = companion + '_rr'
+            rr_bandpass = params_median.get(rr_key, params_median.get(base.get_rr_key(companion, list(base.settings.get('inst_phot', ['dummy']))[0]), np.nan))
+        
+        # Get first band's rr for passband-independent parameters
+        first_bp = list(base.settings.get('bandpass', {}).values())[0] if base.settings.get('bandpass') else None
+        if first_bp:
+            rr_primary = params_median.get(f'{companion}_rr_{first_bp}', params_median.get(rr_key, np.nan))
+        else:
+            rr_primary = params_median.get(rr_key, np.nan)
+        
         #==========================================================================
         # guesstimate the median e, omega, R_star_over_a, and b_tra for below
         #==========================================================================
         e = params_median[companion+'_f_s']**2 + params_median[companion+'_f_c']**2
         w = np.mod( np.arctan2(params_median[companion+'_f_s'], params_median[companion+'_f_c']), 2*np.pi) #in rad, from 0 to 2*pi
-        R_star_over_a = params_median[companion+'_rsuma'] / (1. + params_median[companion+'_rr'])
+        R_star_over_a = params_median[companion+'_rsuma'] / (1. + rr_primary)
         eccentricity_correction_b_tra = ( (1. - e**2) / ( 1. + e*np.sin(w) ) )
         b_tra = (1./R_star_over_a) * params_median[companion+'_cosi'] * eccentricity_correction_b_tra
             
@@ -334,7 +349,7 @@ def guesstimator(params_median, companion, base=None):
         eccentricity_correction_T_tra = ( np.sqrt(1. - e**2) / ( 1. + e*np.sin(w) ) )
         T_tra_tot = params_median[companion+'_period'] / np.pi * 24. \
                     * np.arcsin( R_star_over_a \
-                                 * np.sqrt( (1. + params_median[companion+'_rr'])**2 - b_tra**2 ) \
+                                 * np.sqrt( (1. + rr_primary)**2 - b_tra**2 ) \
                                  / np.sin( np.arccos(params_median[companion+'_cosi'])) ) \
                     * eccentricity_correction_T_tra #in h
         
@@ -351,7 +366,7 @@ def guesstimator(params_median, companion, base=None):
         #==========================================================================
         # dynamically set the y-axis zoom window to [1.-2.*depth, 1.+depth]   
         #==========================================================================
-        depth = (params_median[companion+'_rr'])**2
+        depth = (rr_bandpass)**2
         y_zoomwindow = [1.-2.*depth, 1.+depth]        
         
         

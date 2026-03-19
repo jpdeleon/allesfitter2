@@ -59,21 +59,36 @@ def translate_alles_to_ellc(params, settings):
        
     #=========================================================================
     #::: radii, per companion
-    #::: R_1/a and R_2/a --> dependent on each companion's orbit
+    #::: R_1/a is from rsuma, R_2/a is from rr (per-bandpass in chromatic mode)
     #=========================================================================
     for companion in companions_all:
-        try:
-            params2[companion+'_radius_1'] = params2[companion+'_rsuma'] / (1. + params2[companion+'_rr'])
-            params2[companion+'_radius_2'] = params2[companion+'_radius_1'] * params2[companion+'_rr']
-        except:
-            params2[companion+'_radius_1'] = None
-            params2[companion+'_radius_2'] = None
+        for inst in inst_all:
+            # Get bandpass for this instrument
+            bandpass = settings.get('bandpass', {}).get(inst)
+            if bandpass:
+                rr_key = f'{companion}_rr_{bandpass}'
+            else:
+                rr_key = f'{companion}_rr'
+            
+            try:
+                params2[companion+'_radius_1'] = params2[companion+'_rsuma'] / (1. + params2[rr_key])
+                params2[companion+'_radius_2'] = params2[companion+'_radius_1'] * params2[rr_key]
+            except:
+                params2[companion+'_radius_1'] = None
+                params2[companion+'_radius_2'] = None
             
             
     #=========================================================================
-    #::: limb darkening, per instrument
+    #::: limb darkening, per instrument (per-bandpass in chromatic mode)
     #=========================================================================
     for inst in inst_all:
+        
+        # Get bandpass suffix for this instrument
+        bandpass = settings.get('bandpass', {}).get(inst)
+        if bandpass:
+            ldc_suffix = '_' + bandpass
+        else:
+            ldc_suffix = '_' + inst
         
         #---------------------------------------------------------------------
         #::: host
@@ -82,11 +97,11 @@ def translate_alles_to_ellc(params, settings):
             params2['host_ldc_'+inst] = None
             
         elif settings['host_ld_law_'+inst] == 'lin':
-            params2['host_ldc_'+inst] = params2['host_ldc_q1_'+inst]
+            params2['host_ldc_'+inst] = params2['host_ldc_q1'+ldc_suffix]
             
         elif settings['host_ld_law_'+inst] == 'quad':
-            ldc_u1 = 2.*np.sqrt(params2['host_ldc_q1_'+inst]) * params2['host_ldc_q2_'+inst]
-            ldc_u2 = np.sqrt(params2['host_ldc_q1_'+inst]) * (1. - 2.*params2['host_ldc_q2_'+inst])
+            ldc_u1 = 2.*np.sqrt(params2['host_ldc_q1'+ldc_suffix]) * params2['host_ldc_q2'+ldc_suffix]
+            ldc_u2 = np.sqrt(params2['host_ldc_q1'+ldc_suffix]) * (1. - 2.*params2['host_ldc_q2'+ldc_suffix])
             params2['host_ldc_'+inst] = [ ldc_u1, ldc_u2 ]
             
         elif settings['host_ld_law_'+inst] == 'sing':
@@ -95,7 +110,7 @@ def translate_alles_to_ellc(params, settings):
         else:
             print(settings['host_ld_law_'+inst] )
             raise ValueError("Currently only 'none', 'lin', 'quad' and 'sing' limb darkening are supported.")
-     
+      
     
         #---------------------------------------------------------------------
         #::: companion
@@ -106,11 +121,11 @@ def translate_alles_to_ellc(params, settings):
                 params2[companion+'_ldc_'+inst] = None
                 
             elif settings[companion+'_ld_law_'+inst] == 'lin':
-                params2[companion+'_ldc_'+inst] = params2[companion+'_ldc_q1_'+inst]
+                params2[companion+'_ldc_'+inst] = params2[companion+'_ldc_q1'+ldc_suffix]
                 
             elif settings[companion+'_ld_law_'+inst] == 'quad':
-                ldc_u1 = 2.*np.sqrt(params2[companion+'_ldc_q1_'+inst]) * params2[companion+'_ldc_q2_'+inst]
-                ldc_u2 = np.sqrt(params2[companion+'_ldc_q1_'+inst]) * (1. - 2.*params2[companion+'_ldc_q2_'+inst])
+                ldc_u1 = 2.*np.sqrt(params2[companion+'_ldc_q1'+ldc_suffix]) * params2[companion+'_ldc_q2'+ldc_suffix]
+                ldc_u2 = np.sqrt(params2[companion+'_ldc_q1'+ldc_suffix]) * (1. - 2.*params2[companion+'_ldc_q2'+ldc_suffix])
                 params2[companion+'_ldc_'+inst] = [ ldc_u1, ldc_u2 ]
                 
             elif settings[companion+'_ld_law_'+inst] == 'sing':
