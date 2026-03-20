@@ -352,7 +352,7 @@ class Basement():
             self.settings['fast_fit'] = False
         
         if ('fast_fit_width' in self.settings.keys()) and len(self.settings['fast_fit_width']):
-            self.settings['fast_fit_width'] = np.float(self.settings['fast_fit_width'])
+            self.settings['fast_fit_width'] = float(self.settings['fast_fit_width'])
         else:
             self.settings['fast_fit_width'] = 8./24.
                 
@@ -626,10 +626,10 @@ class Basement():
                 t_exp = self.settings['t_exp_'+inst].split(' ')
                 #if float
                 if len(t_exp)==1:
-                    self.settings['t_exp_'+inst] = np.float(t_exp[0])
+                    self.settings['t_exp_'+inst] = float(t_exp[0])
                 #if array
                 else:
-                    self.settings['t_exp_'+inst] = np.array([ np.float(t) for t in t_exp ])
+                    self.settings['t_exp_'+inst] = np.array([ float(t) for t in t_exp ])
             #::: if not given / given as an empty field
             else:
                 self.settings['t_exp_'+inst] = None
@@ -656,7 +656,7 @@ class Basement():
                 self.settings['host_N_spots_'+inst] = 0
         
             for companion in self.settings['companions_all']:
-                if companion+'_N_spots'+inst in self.settings:
+                if companion+'_N_spots_'+inst in self.settings:
                     self.settings[companion+'_N_spots_'+inst] = int(self.settings[companion+'_N_spots_'+inst])
                 else:
                     self.settings[companion+'_N_spots_'+inst] = 0
@@ -737,7 +737,7 @@ class Basement():
         for i,key in enumerate(self.allkeys):
             #::: if it's not a "coupled parameter", then use the given value
             if np.atleast_1d(buf['value'])[i] not in list(self.allkeys):
-                self.params[key] = np.float(np.atleast_1d(buf['value'])[i])
+                self.params[key] = float(np.atleast_1d(buf['value'])[i])
             #::: if it's a "coupled parameter", then write the string of the key it is coupled to
             else:
                 self.params[key] = np.atleast_1d(buf['value'])[i]
@@ -749,7 +749,7 @@ class Basement():
         def validate(key, default, default_min, default_max):
             if (key in self.params) and (self.params[key] is not None):
                 if (self.params[key] < default_min) or (self.params[key] > default_max):
-                    raise ValueError("User input for "+key+" is "+self.params+" but must lie within ["+str(default_min)+","+str(default_max)+"].")
+                    raise ValueError("User input for "+key+" is "+str(self.params[key])+" but must lie within ["+str(default_min)+","+str(default_max)+"].")
             if (key not in self.params):
                 self.params[key] = default
         
@@ -991,9 +991,9 @@ class Basement():
         self.bounds = [ str(item).split(' ') for item in buf['bounds'][ self.ind_fit ] ] #len(ndim)
         for i, item in enumerate(self.bounds):
             if item[0] in ['uniform', 'normal']:
-                self.bounds[i] = [ item[0], np.float(item[1]), np.float(item[2]) ]
+                self.bounds[i] = [ item[0], float(item[1]), float(item[2]) ]
             elif item[0] in ['trunc_normal']:
-                self.bounds[i] = [ item[0], np.float(item[1]), np.float(item[2]), np.float(item[3]), np.float(item[4]) ]
+                self.bounds[i] = [ item[0], float(item[1]), float(item[2]), float(item[3]), float(item[4]) ]
             else:
                 raise ValueError('Bounds have to be "uniform", "normal" or "trunc_normal". Input from "params.csv" was "'+self.bounds[i][0]+'".')
     
@@ -1401,7 +1401,7 @@ class Basement():
             #     ax.plot( self.data[companion+'_tmid_observed_transits'], np.ones_like(self.data[companion+'_tmid_observed_transits'])*0.995*flux_min, 'k^' )
             #     for i, tmid in enumerate(self.data[companion+'_tmid_observed_transits']):
             #         ax.text( tmid, 0.9925*flux_min, str(i+1), ha='center' )  
-            #     ax.set(ylim=[0.99*flux_min, flux_max], xlabel='Time (BJD)', ylabel='Realtive Flux') 
+            #     ax.set(ylim=[0.99*flux_min, flux_max], xlabel='Time (BJD)', ylabel='Relative Flux') 
             #     if not os.path.exists( os.path.join(self.datadir,'results') ):
             #         os.makedirs(os.path.join(self.datadir,'results'))
             #     ax.legend()

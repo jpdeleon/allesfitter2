@@ -67,6 +67,12 @@ from .lightcurves import translate_limb_darkening_from_q_to_u as q_to_u
 from .observables import calc_M_comp_from_RV, calc_rho, calc_rho_host
 
 
+def _calc_light_3(dil):
+    '''Safely calculate light_3 (dilution factor) avoiding division by zero.'''
+    if dil is None or dil >= 1.0:
+        return 0.0
+    return dil / (1. - dil)
+
 
 
 '''
@@ -490,7 +496,7 @@ def flux_subfct_ellc(params, inst, companion, xx=None, settings=None, t_exp=None
                                     radius_2 =    radius_2, 
                                     sbratio =     params[companion+'_sbratio_'+inst], 
                                     incl =        params[companion+'_incl'], 
-                                    # light_3 =     params['dil_'+inst] / (1.-params['dil_'+inst]), #fluxes does not take light_3
+                                    # light_3 =     _calc_light_3(params.get('dil_'+inst)), #fluxes does not take light_3
                                     t_zero =      params[companion+'_epoch'],
                                     period =      params[companion+'_period'],
                                     a =           params[companion+'_a'],
@@ -752,7 +758,7 @@ def flux_fct_piecewise(params, inst, companion, xx=None, settings=None):
                                   radius_2 =    params[companion+'_radius_2'], 
                                   sbratio =     params[companion+'_sbratio_'+inst], 
                                   incl =        params[companion+'_incl'], 
-                                  light_3 =     params['dil_'+inst] / (1.-params['dil_'+inst]),
+                                  light_3 =     _calc_light_3(params.get('dil_'+inst)),
                                   t_zero =      params[companion+'_epoch'] + params[companion+'_ttv_transit_'+str(n_transit+1)],
                                   period =      params[companion+'_period'],
                                   a =           params[companion+'_a'],
@@ -830,7 +836,7 @@ def flux_subfct_ellc_phase_curve_hack(params, inst, companion, xx, t_exp, n_int)
                       radius_2 =    params[companion+'_radius_2'], 
                       sbratio =     1e12, #a hack to get the flux drop to 0 during occulation
                       incl =        params[companion+'_incl'], 
-                      light_3 =     params['dil_'+inst] / (1.-params['dil_'+inst]),
+                      light_3 =     _calc_light_3(params.get('dil_'+inst)),
                       t_zero =      params[companion+'_epoch'],
                       period =      params[companion+'_period'],
                       a =           params[companion+'_a'],
@@ -876,7 +882,7 @@ def flux_subfct_ellc_phase_curve_hack(params, inst, companion, xx, t_exp, n_int)
                       radius_2 =    params[companion+'_radius_2'], 
                       sbratio =     0, 
                       incl =        params[companion+'_incl'], 
-                      light_3 =     params['dil_'+inst] / (1.-params['dil_'+inst]),
+                      light_3 =     _calc_light_3(params.get('dil_'+inst)),
                       t_zero =      params[companion+'_epoch'],
                       period =      params[companion+'_period'],
                       a =           params[companion+'_a'],
@@ -911,7 +917,7 @@ def flux_subfct_ellc_phase_curve_hack(params, inst, companion, xx, t_exp, n_int)
                       shape_2 =     'sphere',
                       spots_1 =     None, 
                       spots_2 =     None, 
-                      exact_grav =  config.BASEMENT.ssettings['exact_grav'],
+                      exact_grav =  config.BASEMENT.settings['exact_grav'],
                       verbose =     False
                       )
     
@@ -922,7 +928,7 @@ def flux_subfct_ellc_phase_curve_hack(params, inst, companion, xx, t_exp, n_int)
                       radius_2 =    params[companion+'_radius_2'], 
                       sbratio =     0,
                       incl =        params[companion+'_incl'], 
-                      light_3 =     params['dil_'+inst] / (1.-params['dil_'+inst]),
+                      light_3 =     _calc_light_3(params.get('dil_'+inst)),
                       t_zero =      params[companion+'_epoch'],
                       period =      params[companion+'_period'],
                       a =           params[companion+'_a'],
@@ -1790,7 +1796,7 @@ def baseline_get_gp(params, inst, key):
                                log_omega0=params['baseline_gp_sho_lnomega0_'+key+'_'+inst])                               
         
     else: 
-        KeyError('GP settings and params do not match.')
+        raise KeyError('GP settings and params do not match.')
     
     #::: GP and mean (simple offset)  
     if 'baseline_gp_offset_'+key+'_'+inst in params:
@@ -1881,7 +1887,7 @@ def calculate_stellar_var(params, inst, key, model=None, baseline=None, yerr_w=N
     if stellar_var_method not in ['none']:
         if key=='flux': key2 = 'inst_phot'
         elif key=='rv': key2 = 'inst_rv'
-        else: KeyError('Kaput.')
+        else: raise KeyError('Kaput.')
         
         if inst=='all': insts = config.BASEMENT.settings[key2]
         else: insts = [inst]
@@ -1945,7 +1951,7 @@ def stellar_var_get_gp(params, key):
                                log_omega0=params['stellar_var_gp_sho_lnomega0_'+key])                               
         
     else: 
-        KeyError('GP settings and params do not match.')
+        raise KeyError('GP settings and params do not match.')
     
     #::: GP and mean (simple offset)  
     if 'stellar_var_gp_offset_'+key in params:

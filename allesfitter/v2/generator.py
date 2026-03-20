@@ -148,26 +148,33 @@ def make_transit_model(time, inst, params, settings, **kwargs):
         relative flux of the model
     '''
     
+    flux = kwargs.get('flux', None)
+    flux_err = kwargs.get('flux_err', None)
+    options = kwargs.get('options', {})
+    
     def fct(time): 
         params_ellc = translator.translate_alles_to_ellc(params, settings)
         model_flux = computer.calculate_model(params_ellc, inst, key='flux', xx=time, settings=settings)
         return model_flux
     
     model_flux = fct(time)
-    flux2 = flux + model_flux - 1 
+    if flux is not None:
+        flux2 = flux + model_flux - 1 
+    else:
+        flux2 = model_flux
         
-    if options['show_plot'] or options['save_plot']:   
+    if options.get('show_plot', False) or options.get('save_plot', False):   
 
         #::: get model on fine grid
         time_grid = np.linspace(time[0], time[-1], 10001)
-        model_flux_grid = ellc_lc_short(time_grid)
+        model_flux_grid = fct(time_grid)
         
         #::: get phase-folded data
         phase, phaseflux, phaseflux_err, N, phi = lct.phase_fold(time, flux2, params['period'], params['epoch'], dt=0.002, ferr_type='medsig', ferr_style='sem', sigmaclip=True)
 
         #::: get phase-folded model on fine grid from phase -0.25 to 0.75
         phase_grid = np.linspace(-0.25, 0.75, 10001 )
-        model_phaseflux_grid = ellc_lc_short( params['epoch']+phase_grid*params['period'] ) #need to input the phase as time domain for ellc
+        model_phaseflux_grid = fct(params['epoch']+phase_grid*params['period'])
                     
         #::: plot all
         fig = plt.figure(figsize=(15,10), tight_layout=True)
@@ -178,24 +185,24 @@ def make_transit_model(time, inst, params, settings, **kwargs):
         plotter.plot_info(fig.add_subplot(gs[2,0]), text=0, params=params)
         plotter.plot_info(fig.add_subplot(gs[2,1]), text=1, params=params)
         
-        if options['save_plot']:
-            if len(os.path.dirname(options['fname_plot']))>0 and not os.path.exists(os.path.dirname(options['fname_plot'])): os.makedirs(os.path.dirname(options['fname_plot']))
-            fig.savefig(options['fname_plot'])
+        if options.get('save_plot'):
+            if len(os.path.dirname(options.get('fname_plot', '')))>0 and not os.path.exists(os.path.dirname(options.get('fname_plot', ''))): os.makedirs(os.path.dirname(options.get('fname_plot', '')))
+            fig.savefig(options.get('fname_plot', 'plot.png'))
             plt.close(fig)
 
-        if options['show_plot']: plt.show(fig)
+        if options.get('show_plot'): plt.show(fig)
         else: plt.close(fig)
          
-    if options['save_csv']:
-        if len(os.path.dirname(options['fname_csv']))>0 and not os.path.exists(os.path.dirname(options['fname_csv'])): os.makedirs(os.path.dirname(options['fname_csv']))
+    if options.get('save_csv'):
+        if len(os.path.dirname(options.get('fname_csv', '')))>0 and not os.path.exists(os.path.dirname(options.get('fname_csv', ''))): os.makedirs(os.path.dirname(options.get('fname_csv', '')))
         X = np.column_stack((time, flux2, flux_err))
-        np.savetxt(options['fname_csv'], X, delimiter=',')
+        np.savetxt(options.get('fname_csv', 'output.csv'), X, delimiter=',')
 
 
     return flux2
 
-    
-    
+
+
 ###############################################################################
 #::: inject an ellc model lightcurve
 ###############################################################################
@@ -206,8 +213,8 @@ def inject_transit_model(time, flux, flux_err,
     Wrapper around make_lc_model()
     '''
     
-    return make_lightcurve_model(time, flux=flux, flux_err=flux_err, 
-                                 params=None, settings=None, options=None, 
+    return make_transit_model(time, inst=None, params=params, settings=settings, 
+                                 options=options, flux=flux, flux_err=flux_err, 
                                  **kwargs)
     
 

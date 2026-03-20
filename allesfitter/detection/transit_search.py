@@ -114,8 +114,8 @@ def mask(time, flux, flux_err, period, duration, T0):
 #::: check for multiples of a value (e.g., of a period)
 ###############################################################################
 def is_multiple_of(a, b, tolerance=0.05):
-    a = np.float(a)
-    b = np.float(b) 
+    a = float(a)
+    b = float(b)
     result = a % b
     return (abs(result/b) <= tolerance) or (abs((b-result)/b) <= tolerance)
 

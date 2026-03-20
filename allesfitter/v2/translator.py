@@ -357,7 +357,7 @@ def translate(params=None, settings=None, quiet=False, **params_kwargs):
     
     try: set_('r_host_over_a', ((params2['r_host']*u.Rsun) / (params2['a']*u.AU)).decompose().value)
     except: pass
-    try: set_('r_host_over_a', params['rsuma'] / (1. + params['rr']))
+    try: set_('r_host_over_a', params2['rsuma'] / (1. + params2['rr']))
     except: pass
     try: set_('r_host_over_a', 1./params2['a_over_R_host'])
     except: pass

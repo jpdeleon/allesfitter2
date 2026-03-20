@@ -1,0 +1,148 @@
+2026-03-19 23:13:26 | Using [Fe/H]=(0,0.1) dex
+2026-03-19 23:13:26 | Using logg=(4.37,0.02) cm/s^2
+2026-03-19 23:13:26 | Using Teff=(5663,86) K
+2026-03-19 23:13:27 | Error: [Errno 17] File exists: 'kepler-11'
+2026-03-19 23:13:41 | Using [Fe/H]=(0,0.1) dex
+2026-03-19 23:13:41 | Using logg=(4.37,0.02) cm/s^2
+2026-03-19 23:13:41 | Using Teff=(5663,86) K
+2026-03-19 23:13:41 | tdur=4.2h (nexsci) 5.6h (derived from rhostar)
+2026-03-19 23:13:41 | tdur=4.2h (nexsci) 4.2h (derived from orbit)
+2026-03-19 23:13:41 | Using Rstar/a derived from orbit.
+2026-03-19 23:13:41 | tdur=4.1h (nexsci) 3.8h (derived from rhostar)
+2026-03-19 23:13:41 | tdur=4.1h (nexsci) 4.1h (derived from orbit)
+2026-03-19 23:13:41 | Using Rstar/a derived from orbit.
+2026-03-19 23:13:41 | tdur=6.4h (nexsci) 6.3h (derived from rhostar)
+2026-03-19 23:13:41 | tdur=6.4h (nexsci) 6.4h (derived from orbit)
+2026-03-19 23:13:41 | Using Rstar/a derived from orbit.
+2026-03-19 23:13:41 | tdur=4.5h (nexsci) 4.1h (derived from rhostar)
+2026-03-19 23:13:41 | tdur=4.5h (nexsci) 4.5h (derived from orbit)
+2026-03-19 23:13:41 | Using Rstar/a derived from orbit.
+2026-03-19 23:13:41 | tdur=9.5h (nexsci) 8.6h (derived from rhostar)
+2026-03-19 23:13:41 | tdur=9.5h (nexsci) 9.5h (derived from orbit)
+2026-03-19 23:13:41 | Using Rstar/a derived from orbit.
+2026-03-19 23:13:41 | tdur=5.6h (nexsci) 4.9h (derived from rhostar)
+2026-03-19 23:13:41 | tdur=5.6h (nexsci) 5.6h (derived from orbit)
+2026-03-19 23:13:41 | Using Rstar/a derived from orbit.
+2026-03-19 23:13:41 | Saved: kepler-11/params.csv
+2026-03-19 23:13:41 | Saved: kepler-11/params_star.csv
+2026-03-19 23:13:41 | Saved: kepler-11/run.py
+2026-03-19 23:13:48 | SearchResult containing 30 data products.
+
+ #     mission     year   author  exptime target_name distance
+                                     s                 arcsec 
+--- -------------- ---- --------- ------- ----------- --------
+  0 TESS Sector 15 2019      SPOC     120   169175503      0.0
+  1 TESS Sector 14 2019      SPOC     120   169175503      0.0
+  2 TESS Sector 82 2024      SPOC     120   169175503      0.0
+  3 TESS Sector 75 2024      SPOC     120   169175503      0.0
+  4 TESS Sector 74 2024      SPOC     120   169175503      0.0
+  5 TESS Sector 81 2024      SPOC     120   169175503      0.0
+  6 TESS Sector 14 2019 TESS-SPOC    1800   169175503      0.0
+  7 TESS Sector 15 2019 TESS-SPOC    1800   169175503      0.0
+  8 TESS Sector 75 2024 TESS-SPOC     200   169175503      0.0
+  9 TESS Sector 81 2024 TESS-SPOC     200   169175503      0.0
+ 10 TESS Sector 74 2024 TESS-SPOC     200   169175503      0.0
+ 11 TESS Sector 15 2019       QLP    1800   169175503      0.0
+ 12 TESS Sector 14 2019       QLP    1800   169175503      0.0
+ 13 TESS Sector 41 2021       QLP     600   169175503      0.0
+ 14 TESS Sector 55 2022       QLP     600   169175503      0.0
+ 15 TESS Sector 54 2022       QLP     600   169175503      0.0
+ 16 TESS Sector 81 2024       QLP     200   169175503      0.0
+ 17 TESS Sector 82 2024       QLP     200   169175503      0.0
+ 18 TESS Sector 74 2024       QLP     200   169175503      0.0
+ 19 TESS Sector 75 2024       QLP     200   169175503      0.0
+ 20 TESS Sector 14 2019     TASOC     120   169175503      0.0
+ 21 TESS Sector 15 2019     TASOC     120   169175503      0.0
+ 22 TESS Sector 14 2019     CDIPS    1800   169175503      0.0
+ 23 TESS Sector 15 2019     TASOC    1800   169175503      0.0
+ 24 TESS Sector 14 2019     TASOC    1800   169175503      0.0
+ 25 TESS Sector 15 2019     CDIPS    1800   169175503      0.0
+ 26 TESS Sector 15 2019     TASOC    1800   169175503      0.0
+ 27 TESS Sector 14 2019     TASOC    1800   169175503      0.0
+ 28 TESS Sector 55 2022     CDIPS    1800   169175503      0.0
+ 29 TESS Sector 54 2022     CDIPS    1800   169175503      0.0
+2026-03-19 23:13:48 | Available Pipelines: {'tasoc', 'spoc', 'qlp', 'cdips', 'tess-spoc'}
+2026-03-19 23:13:48 | Available Exp. times: [ 120. 1800.  200.  600.]
+2026-03-19 23:14:05 | Using SPOC pipeline in sector 82.
+2026-03-19 23:14:07 | Saved: kepler-11/kepler-11_tess_pdcsap_s82_exp120s.png
+2026-03-19 23:14:07 | Saved: kepler-11/kepler-11_tess_pdcsap_s82_exp120s.csv
+2026-03-19 23:14:07 | Ndata: 18,138
+2026-03-19 23:14:07 |            time      flux  flux_err
+0  2.460533e+06  0.998358  0.009752
+1  2.460533e+06  0.999408  0.009762
+2  2.460533e+06  1.011604  0.009761
+3  2.460533e+06  1.003302  0.009758
+4  2.460533e+06  1.001954  0.009760
+2026-03-19 23:14:07 | Saved: kepler-11/settings.csv
+2026-03-19 23:14:43 | Using [Fe/H]=(0,0.1) dex
+2026-03-19 23:14:43 | Using logg=(4.37,0.02) cm/s^2
+2026-03-19 23:14:43 | Using Teff=(5663,86) K
+2026-03-19 23:14:44 | tdur=4.2h (nexsci) 5.6h (derived from rhostar)
+2026-03-19 23:14:44 | tdur=4.2h (nexsci) 4.2h (derived from orbit)
+2026-03-19 23:14:44 | Using Rstar/a derived from orbit.
+2026-03-19 23:14:44 | tdur=4.1h (nexsci) 3.8h (derived from rhostar)
+2026-03-19 23:14:44 | tdur=4.1h (nexsci) 4.1h (derived from orbit)
+2026-03-19 23:14:44 | Using Rstar/a derived from orbit.
+2026-03-19 23:14:44 | tdur=6.4h (nexsci) 6.3h (derived from rhostar)
+2026-03-19 23:14:44 | tdur=6.4h (nexsci) 6.4h (derived from orbit)
+2026-03-19 23:14:44 | Using Rstar/a derived from orbit.
+2026-03-19 23:14:44 | tdur=4.5h (nexsci) 4.1h (derived from rhostar)
+2026-03-19 23:14:44 | tdur=4.5h (nexsci) 4.5h (derived from orbit)
+2026-03-19 23:14:44 | Using Rstar/a derived from orbit.
+2026-03-19 23:14:44 | tdur=9.5h (nexsci) 8.6h (derived from rhostar)
+2026-03-19 23:14:44 | tdur=9.5h (nexsci) 9.5h (derived from orbit)
+2026-03-19 23:14:44 | Using Rstar/a derived from orbit.
+2026-03-19 23:14:44 | tdur=5.6h (nexsci) 4.9h (derived from rhostar)
+2026-03-19 23:14:44 | tdur=5.6h (nexsci) 5.6h (derived from orbit)
+2026-03-19 23:14:44 | Using Rstar/a derived from orbit.
+2026-03-19 23:14:44 | Saved: kepler-11/params.csv
+2026-03-19 23:14:44 | Saved: kepler-11/params_star.csv
+2026-03-19 23:14:44 | Saved: kepler-11/run.py
+2026-03-19 23:14:57 | SearchResult containing 30 data products.
+
+ #     mission     year   author  exptime target_name distance
+                                     s                 arcsec 
+--- -------------- ---- --------- ------- ----------- --------
+  0 TESS Sector 15 2019      SPOC     120   169175503      0.0
+  1 TESS Sector 14 2019      SPOC     120   169175503      0.0
+  2 TESS Sector 82 2024      SPOC     120   169175503      0.0
+  3 TESS Sector 75 2024      SPOC     120   169175503      0.0
+  4 TESS Sector 74 2024      SPOC     120   169175503      0.0
+  5 TESS Sector 81 2024      SPOC     120   169175503      0.0
+  6 TESS Sector 14 2019 TESS-SPOC    1800   169175503      0.0
+  7 TESS Sector 15 2019 TESS-SPOC    1800   169175503      0.0
+  8 TESS Sector 75 2024 TESS-SPOC     200   169175503      0.0
+  9 TESS Sector 81 2024 TESS-SPOC     200   169175503      0.0
+ 10 TESS Sector 74 2024 TESS-SPOC     200   169175503      0.0
+ 11 TESS Sector 15 2019       QLP    1800   169175503      0.0
+ 12 TESS Sector 14 2019       QLP    1800   169175503      0.0
+ 13 TESS Sector 41 2021       QLP     600   169175503      0.0
+ 14 TESS Sector 55 2022       QLP     600   169175503      0.0
+ 15 TESS Sector 54 2022       QLP     600   169175503      0.0
+ 16 TESS Sector 81 2024       QLP     200   169175503      0.0
+ 17 TESS Sector 82 2024       QLP     200   169175503      0.0
+ 18 TESS Sector 74 2024       QLP     200   169175503      0.0
+ 19 TESS Sector 75 2024       QLP     200   169175503      0.0
+ 20 TESS Sector 14 2019     TASOC     120   169175503      0.0
+ 21 TESS Sector 15 2019     TASOC     120   169175503      0.0
+ 22 TESS Sector 14 2019     CDIPS    1800   169175503      0.0
+ 23 TESS Sector 15 2019     TASOC    1800   169175503      0.0
+ 24 TESS Sector 14 2019     TASOC    1800   169175503      0.0
+ 25 TESS Sector 15 2019     CDIPS    1800   169175503      0.0
+ 26 TESS Sector 15 2019     TASOC    1800   169175503      0.0
+ 27 TESS Sector 14 2019     TASOC    1800   169175503      0.0
+ 28 TESS Sector 55 2022     CDIPS    1800   169175503      0.0
+ 29 TESS Sector 54 2022     CDIPS    1800   169175503      0.0
+2026-03-19 23:14:57 | Available Pipelines: {'tasoc', 'spoc', 'cdips', 'qlp', 'tess-spoc'}
+2026-03-19 23:14:57 | Available Exp. times: [ 120. 1800.  200.  600.]
+2026-03-19 23:15:11 | Using QLP pipeline in sector 15.
+2026-03-19 23:15:12 | Saved: kepler-11/kepler-11_tess_qlp_s15_exp1800s.png
+2026-03-19 23:15:12 | Saved: kepler-11/kepler-11_tess_qlp_s15_exp1800s.csv
+2026-03-19 23:15:12 | Ndata: 1,190
+2026-03-19 23:15:12 |            time      flux  flux_err
+0  2.458711e+06  0.984999   0.00325
+1  2.458711e+06  0.991400   0.00325
+2  2.458711e+06  0.987094   0.00325
+3  2.458711e+06  0.988020   0.00325
+4  2.458711e+06  0.990298   0.00325
+2026-03-19 23:15:12 | Saved: kepler-11/settings.csv

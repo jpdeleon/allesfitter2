@@ -960,7 +960,7 @@ companions_rv,
 inst_phot,{fn}
 inst_rv,
 time_format,BJD_TDB
-transit_model,achromatic
+#passbands,tess
 ###############################################################################,
 # Fit performance settings,
 ###############################################################################,

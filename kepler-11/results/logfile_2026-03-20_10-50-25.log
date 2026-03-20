@@ -1,0 +1,20 @@
+
+allesfitter version
+---------------------
+v1.2.10
+
+Shifting epochs into the data center
+------------------------------------
+Companion d
+	input epoch: 2455618.271
+	shifted epoch: 2457579.2006000006
+	shifted by 42 periods
+Companion f
+	input epoch: 2455593.8021
+	shifted epoch: 2457606.274
+	shifted by 17 periods
+
+Results:
+----------
+log(Z) = 13695.470154898436 +- 0.25296876148279973
+Nr. of posterior samples: 43618

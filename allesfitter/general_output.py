@@ -860,7 +860,7 @@ def afplot_per_transit(samples, inst, companion, base=None, kwargs_dict=None):
     #==========================================================================
     if inst in base.settings['inst_phot']:
         key = 'flux'
-        ylabel = 'Realtive Flux'
+        ylabel = 'Relative Flux'
         baseline_plus = 1.
     elif inst in base.settings['inst_rv']:
         key = 'rv'   
