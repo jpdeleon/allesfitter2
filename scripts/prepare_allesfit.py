@@ -183,7 +183,29 @@ def parse_target_name(
         key = "hostname"
         id = name.lower()
         target_name = name.strip().replace(" ", "")
-        idx = df[key].str.lower() == id
+
+        def _norm(s):
+            return str(s).lower().replace(" ", "").replace("-", "").replace("_", "")
+
+        hostnames_norm = df[key].astype(str).map(_norm)
+        idx = hostnames_norm == _norm(name)
+        if sum(idx) == 0:
+            # Fall back to NExSci alias lookup: the hostname in pscomppars is
+            # often a TIC/2MASS/HD identifier rather than the TOI/K2 alias the
+            # user supplied. Resolve all known aliases and try each one.
+            try:
+                logger.info(
+                    f"Hostname '{name}' not found directly; resolving NExSci aliases..."
+                )
+                aliases = get_name_aliases(name)
+                for alias in aliases:
+                    match = hostnames_norm == _norm(alias)
+                    if match.any():
+                        logger.info(f"Matched NExSci hostname via alias: {alias}")
+                        idx = match
+                        break
+            except Exception as e:
+                logger.error(f"Alias lookup failed: {e}")
         source = "nexsci"
     msg = f"Coulnd't find {key} {id} in {key} database."
     assert sum(idx) > 0, logger.error(msg)
@@ -290,7 +312,10 @@ def main():
         "-p", "--pipeline", help="TESS/Kepler data pipeline (default='spoc')", type=str, default="spoc"
     )
     ap.add_argument(
-        "-f", "--filename", help="filename of lightcurve (default='tess')", type=str, default="tess"
+        "-f", "--filename",
+        help="filename(s) of lightcurve used as inst_phot (default='tess'). "
+             "Accepts multiple, e.g. -f kepler tess",
+        type=str, nargs="+", default=["tess"],
     )
     ap.add_argument(
         "-m", "--mission", help="satellite mission (default='tess')", type=str, default="tess", choices=["tess", "k2", "kepler"]
@@ -346,6 +371,12 @@ def main():
         default=False,
     )
     ap.add_argument("--debug", action="store_true", default=False)
+    ap.add_argument(
+        "--lc-only",
+        help="only download and save lightcurve, skip generating config files",
+        action="store_true",
+        default=False,
+    )
 
     args = ap.parse_args(None if sys.argv[1:] else ["-h"])
 
@@ -353,6 +384,101 @@ def main():
     outdir = Path(basedir)
     results_dir = args.results_dir
     debug = args.debug
+
+    if args.lc_only:
+        # Minimal path: just download lightcurve
+        assert args.sector is not None, "Sector required for --lc-only mode"
+        assert any([args.tic, args.toi, args.ctoi, args.name]), (
+            "One of -tic/-toi/-ctoi/-name required for --lc-only mode"
+        )
+
+        mission = args.mission.lower()
+        ticid = args.tic
+        pipeline = args.pipeline
+        sector = args.sector
+        exptime = args.exptime
+        lc_type = "sap_flux" if pipeline == "qlp" else args.lc_type + "_flux"
+        quality_bitmask = args.quality
+
+        if args.tic:
+            query_name = f"TIC {ticid}"
+            label = f"TIC-{ticid}"
+        elif args.toi:
+            query_name = f"TOI {args.toi}"
+            label = f"TOI-{str(args.toi).zfill(4)}"
+        elif args.ctoi:
+            query_name = f"CTOI {args.ctoi}"
+            label = f"CTOI-{args.ctoi}"
+        else:
+            query_name = args.name
+            label = args.name.strip().replace(" ", "")
+        
+        result = lk.search_lightcurve(
+            query_name, author=pipeline, exptime=exptime, mission=mission
+        )
+        
+        if not result:
+            logger.error("No lightcurve found. Check inputs.")
+            sys.exit()
+        
+        sectors = list(map(int, [s.split()[-1] for s in result.mission]))
+        unique_sectors = sorted(set(sectors))
+        
+        # Handle sector flag (args.sector is a list like ["all"] or [10])
+        if sector == ["all"]:
+            sector_to_use = unique_sectors
+        else:
+            sector_to_use = sector if isinstance(sector, list) else [sector]
+        
+        idx = [str(s) in [str(x) for x in sector_to_use] for s in sectors]
+        
+        if sum(idx) == 0:
+            msg = f"Sector {sector} not available. Available: {unique_sectors}"
+            logger.error(msg)
+            sys.exit()
+        
+        filtered_result = result[idx]
+        
+        unique_exptimes = filtered_result.table.to_pandas().exptime.unique()
+        exptime = unique_exptimes[0] if exptime is None else exptime
+        
+        if len(sector_to_use) != len(filtered_result):
+            msg = f"Multiple exposure times available. Use -e {unique_exptimes}"
+            logger.error(msg)
+            sys.exit()
+        
+        lc = filtered_result.download_all(
+            flux_column=lc_type, quality_bitmask=quality_bitmask
+        ).stitch()
+        
+        df = lc.to_pandas()
+        if len(df) == 0:
+            logger.error("Lightcurve data is empty.")
+            sys.exit()
+        
+        # Handle time (lightkurve uses time as index)
+        df["time"] = df.index + 2457000
+        df = df.reset_index(drop=True).sort_values(by="time")
+
+        cols = ["time", "flux", "flux_err"]
+        msg = f"Somehow, `flux_err` is all NaN.\n{df[cols]}\n"
+        if len(df['flux_err'].dropna(axis='index'))==0:
+            df['flux_err'] = 1
+            msg += "Setting flux error column = 1 (See allesfitter documentation)."
+            logger.error(msg)
+        df2 = df[cols].dropna(axis='index')
+                
+        # Build output filename
+        sector_str = "_".join(map(str, sector_to_use)) if isinstance(sector_to_use, list) else str(sector_to_use)
+        fn = f"{label}_{pipeline}_s{sector_str}_exp{int(exptime)}s.csv"
+        fp = Path(basedir, fn)
+        fp.parent.mkdir(parents=True, exist_ok=True)
+        
+        df2[cols].to_csv(fp, sep=",", header=False, index=False)
+        logger.info(f"Saved: {fp}")
+        logger.info(f"Ndata: {len(df2):,}")
+        logger.info("Lightcurve saved. Exiting (--lc-only mode).")
+        return
 
     if results_dir:
         alles = allesclass(outdir.joinpath(results_dir))
@@ -408,7 +534,8 @@ def main():
         quality_bitmask = args.quality
         sigma = args.sigma
         interactive = args.interactive
-        fn = args.filename
+        fns = args.filename if isinstance(args.filename, list) else [args.filename]
+        fn = fns[0]  # first instrument (used where a single filename is needed)
 
         if mission == "tess":
             sector = args.sector
@@ -490,15 +617,15 @@ def main():
                 radius = float(input("Rstar [Rsun]:"))
                 rhostar_prior = False
             else:
-                msg = "use --interactive to input value"
+                msg = "use --interactive to input missing value"
                 logger.error(msg); sys.exit()
         if str(mass) == "nan":
             if interactive:
                 mass = float(input("Mstar [Msun]:"))
                 rhostar_prior = False
             else:
-                msg = "use --interactive to input value"
-                raise (msg)
+                msg = "use --interactive to input missing value"
+                raise ValueError(msg)
         if str(radius_err) == "nan":
             radius_err = 0.1
             logger.info("Rstar err is nan; setting to 0.1")
@@ -521,7 +648,7 @@ def main():
             if interactive:
                 logg = float(input("logg: "))
             else:
-                msg = "use --interactive to input value"
+                msg = "use --interactive to input missing value"
                 logger.error(msg); sys.exit() # no assumption
         if np.isnan(logg_err):
             logg_err = float(input("logg err: ")) if interactive else 0.1
@@ -530,7 +657,7 @@ def main():
             if interactive:
                 Teff = float(input("Teff: "))
             else:
-                msg = "use --interactive to input value"
+                msg = "use --interactive to input missing value"
                 logger.error(msg); sys.exit() # no assumption
         if np.isnan(Teff_err):
             Teff_err = float(input("Teff err: ")) if interactive else 500
@@ -550,9 +677,10 @@ def main():
         outdir = Path(basedir, target_name)
         try:
             outdir.mkdir(parents=True, exist_ok=overwrite)
-        except Exception as e:
-            logger.error(f"Error: {e}")
-            raise FileExistsError("Use --overwrite to overwrite files.")
+        except FileExistsError:
+            raise FileExistsError(
+                f"{outdir} already exists. Use --overwrite to overwrite files."
+            )
 
         # ===== Create params.csv =====#
         text = """#name,value,fit,bounds,label,unit,coupled_with\n"""
@@ -703,29 +831,33 @@ def main():
             text += f"{pl}_f_c,0,0,uniform -1 1,$\sqrt{{e_{pl}}} \cos{{\omega_{pl}}}$,,\n"
             text += f"{pl}_f_s,0,0,uniform -1 1,$\sqrt{{e_{pl}}} \sin{{\omega_{pl}}}$,,\n"
         text += "#dilution per instrument,,,,,,\n"
-        text += f"dil_{fn},0,0,uniform -1 1,$D_\mathrm{{0; {fn}}}$,,\n"
+        for inst in fns:
+            text += f"dil_{inst},0,0,uniform -1 1,$D_\mathrm{{0; {inst}}}$,,\n"
         text += "#limb darkening coefficients per instrument,,,,,,\n"
-        text += (
-            f"#host_ldc_q1_{fn},{q1:.2f},1,normal {q1:.2f} {q1_err:.2f},"
-            + f"$q_{{1; \\mathrm{{{fn}}}}}$"
-            + ",,\n"
-        )
-        text += (
-            f"#host_ldc_q2_{fn},{q2:.2f},1,normal {q2:.2f} {q2_err:.2f},"
-            + f"$q_{{2; \\mathrm{{{fn}}}}}$"
-            + ",,\n"
-        )
-        text += f"host_ldc_q1_{fn},0.5,1,uniform 0 1,$q_{{1; \\mathrm{{{fn}}}}}$,,\n"
-        text += f"host_ldc_q2_{fn},0.5,1,uniform 0 1,$q_{{2; \\mathrm{{{fn}}}}}$,,\n"
-        
+        for inst in fns:
+            text += (
+                f"#host_ldc_q1_{inst},{q1:.2f},1,normal {q1:.2f} {q1_err:.2f},"
+                + f"$q_{{1; \\mathrm{{{inst}}}}}$"
+                + ",,\n"
+            )
+            text += (
+                f"#host_ldc_q2_{inst},{q2:.2f},1,normal {q2:.2f} {q2_err:.2f},"
+                + f"$q_{{2; \\mathrm{{{inst}}}}}$"
+                + ",,\n"
+            )
+            text += f"host_ldc_q1_{inst},0.5,1,uniform 0 1,$q_{{1; \\mathrm{{{inst}}}}}$,,\n"
+            text += f"host_ldc_q2_{inst},0.5,1,uniform 0 1,$q_{{2; \\mathrm{{{inst}}}}}$,,\n"
+
         text += "#errors per instrument,,,,,,\n"
-        text += (
-            f"ln_err_flux_{fn},-6,1,uniform -10 -1,$\log{{\sigma ({fn})}}$,rel. flux,\n"
-        )
+        for inst in fns:
+            text += (
+                f"ln_err_flux_{inst},-6,1,uniform -10 -1,$\log{{\sigma ({inst})}}$,rel. flux,\n"
+            )
         text += "#baseline per instrument,,,,,,\n"
-        text += f"#baseline_gp_offset_flux_{fn},0,1,uniform -0.1 0.1,$\mathrm{{offset ({fn})}}$,,\n"
-        text += f"baseline_gp_matern32_lnsigma_flux_{fn},-5,1,uniform -15 0,$\mathrm{{gp ln \sigma ({fn})}}$,,\n"
-        text += f"baseline_gp_matern32_lnrho_flux_{fn},0,1,uniform -5 10,$\mathrm{{gp ln \\rho ({fn})}}$,,\n"
+        for inst in fns:
+            text += f"#baseline_gp_offset_flux_{inst},0,1,uniform -0.1 0.1,$\mathrm{{offset ({inst})}}$,,\n"
+            text += f"baseline_gp_matern32_lnsigma_flux_{inst},-5,1,uniform -15 0,$\mathrm{{gp ln \sigma ({inst})}}$,,\n"
+            text += f"baseline_gp_matern32_lnrho_flux_{inst},0,1,uniform -5 10,$\mathrm{{gp ln \\rho ({inst})}}$,,\n"
         for i, row in target_df.iterrows():
             pl = planets[i]
             text += f"#TTV companion {pl},,,,,\n"
@@ -930,7 +1062,8 @@ fig = allesfitter.show_initial_guess('.')
             assert len(df)>0, logger.error(msg)
             df["time"] = df.index + 2457000
             df = df.reset_index(drop=True).sort_values(by="time")
-            msg = f"Somehow, one of the data columns is all NaN.\n{df[cols]}\n"
+            cols = ["time", "flux", "flux_err"]
+            msg = f"Somehow, `flux_err` is all NaN.\n{df[cols]}\n"
             if len(df['flux_err'].dropna(axis='index'))==0:
                 df['flux_err'] = 1
                 msg += "Setting flux error column = 1 (See allesfitter documentation)."
@@ -957,10 +1090,10 @@ fig = allesfitter.show_initial_guess('.')
         text2 += f"companions_phot,{' '.join(planets[:len(target_df)])}"
         text2 += f"""
 companions_rv,
-inst_phot,{fn}
+inst_phot,{' '.join(fns)}
 inst_rv,
 time_format,BJD_TDB
-#passbands,tess
+#passbands,{' '.join(fns)}
 ###############################################################################,
 # Fit performance settings,
 ###############################################################################,
@@ -975,7 +1108,7 @@ shift_epoch,True\n"""
         for i, row in target_df.iterrows():
             pl = planets[i]
             text2 += f"inst_for_{pl}_epoch,all\n"
-            text2 += f"#inst_for_{pl}_epoch,{fn}\n"
+            text2 += f"#inst_for_{pl}_epoch,{' '.join(fns)}\n"
         text2 += f"""###############################################################################,
 # MCMC settings,
 ###############################################################################,
@@ -994,35 +1127,39 @@ ns_tol,100
 ###############################################################################,
 # Limb darkening law per object and instrument,
 # if 'quad' two corresponding parameter called 'ldc_q1_inst' and 'ldc_q2_inst' have to be given in params.csv,
-###############################################################################,
-host_ld_law_{fn},quad
-#####################################,
+###############################################################################,\n"""
+        for inst in fns:
+            text2 += f"host_ld_law_{inst},quad\n"
+        text2 += """#####################################,
 # Exposure interpolation settings,
 #####################################,\n"""
         exptime = np.median(np.diff(df2.time)) if exptime is None else exptime/24/60/60
         assert exptime<1, "exp time should be in days"
         if exptime>0.0069:
-            text2 += f"""### crucial only for long (>600s) exposure times,
-t_exp_{fn},{exptime/60/24:.4f}
-#t_exp_{fn},0.020833
-#t_exp_n_int_{fn},10\n"""
-        text2 += f"""###############################################################################,
+            text2 += "### crucial only for long (>600s) exposure times,\n"
+            for inst in fns:
+                text2 += f"t_exp_{inst},{exptime/60/24:.4f}\n"
+                text2 += f"#t_exp_{inst},0.020833\n"
+                text2 += f"#t_exp_n_int_{inst},10\n"
+        text2 += """###############################################################################,
 # Baseline settings per instrument: sample / hybrid,
 # if 'sample_offset' one corresponding parameter called 'baseline_offset_key_inst' has to be given in params.csv,
 # if 'sample_linear' two corresponding parameters called 'baseline_offset_key_inst' and 'baseline_slope_key_inst' have to be given in params.csv,
 # if 'sample_GP' two corresponding parameters called 'baseline_gp1_key_inst' and 'baseline_gp2_key_inst' have to be given in params.csv,
-###############################################################################,
-#baseline_flux_{fn},sample_offset
-#baseline_flux_{fn},sample_linear
-#baseline_flux_{fn},hybrid_spline
-#baseline_flux_{fn},hybrid_poly_2
-baseline_flux_{fn},sample_GP_Matern32
-###############################################################################,
+###############################################################################,\n"""
+        for inst in fns:
+            text2 += f"#baseline_flux_{inst},sample_offset\n"
+            text2 += f"#baseline_flux_{inst},sample_linear\n"
+            text2 += f"#baseline_flux_{inst},hybrid_spline\n"
+            text2 += f"#baseline_flux_{inst},hybrid_poly_2\n"
+            text2 += f"baseline_flux_{inst},sample_GP_Matern32\n"
+        text2 += """###############################################################################,
 # Error settings (overall scaling) per instrument: sample / hybrid,
 # if 'sample' one corresponding parameter called 'ln_err_key_inst' (photometry) or 'ln_jitter_key_inst' (RV) has to be given in params.csv,
-###############################################################################,
-error_flux_{fn},sample
-###############################################################################,
+###############################################################################,\n"""
+        for inst in fns:
+            text2 += f"error_flux_{inst},sample\n"
+        text2 += """###############################################################################,
 # Flares,
 # if N>0 4xN corresponding parameters has to be given in params.csv,
 # See https://github.com/MNGuenther/allesfitter/blob/master/paper/GJ_1243/allesfit_0/params.csv,
@@ -1031,9 +1168,10 @@ error_flux_{fn},sample
 ###############################################################################,
 # Number of spots per object and instrument,
 # if N>0 3xN corresponding parameters has to be given in params.csv,
-###############################################################################,
-#host_N_spots_{fn},0
-###############################################################################,
+###############################################################################,\n"""
+        for inst in fns:
+            text2 += f"#host_N_spots_{inst},0\n"
+        text2 += """###############################################################################,
 # Host density prior,
 ###############################################################################,\n"""
         text2 += f"use_host_density_prior,{rhostar_prior}"
@@ -1051,13 +1189,15 @@ error_flux_{fn},sample
 fit_ttvs,False
 ###############################################################################,
 # Stellar grid per object and instrument,
-###############################################################################,
-host_grid_{fn},very_sparse\n"""
+###############################################################################,\n"""
+        for inst in fns:
+            text2 += f"host_grid_{inst},very_sparse\n"
         for i, row in target_df.iterrows():
             pl = planets[i]
-            text2 += f"#{pl}_grid_{fn},very_sparse\n"
-            text2 += f"#{pl}_shape_{fn},sphere\n"
-            text2 += f"#{pl}_flux_weighted_{fn},False\n"
+            for inst in fns:
+                text2 += f"#{pl}_grid_{inst},very_sparse\n"
+                text2 += f"#{pl}_shape_{inst},sphere\n"
+                text2 += f"#{pl}_flux_weighted_{inst},False\n"
 
         if debug:
             logger.info(text2)
