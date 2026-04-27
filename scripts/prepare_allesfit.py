@@ -51,6 +51,9 @@ from allesfitter.utils.scripting import (
     get_tdur,
     get_rsuma,
 )
+from allesfitter.exoworlds_rdx.lightcurves.index_transits import (
+    get_tmid_observed_transits,
+)
 logger.remove() 
 log_format = "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{message}</level>"
 logger.add(sys.stderr, format=log_format)
@@ -79,6 +82,17 @@ filter_widths = {
 #sys.path.insert(0, f"{home}/github/research/project/young_ttvs/code")
 
 cols = ["time", "flux", "flux_err"]
+
+# Preset t_exp values (days) keyed by the instrument label used in settings.csv.
+# When a --filename entry matches one of these keys, the t_exp_{fn} row is
+# written with the preset value instead of being recomputed from --exp.
+# Values are seconds / 86400.
+T_EXP_DAYS = {
+    120:   0.001389,   # 120 s
+    200:   0.002312,   # 200 s
+    600:   0.006944,   # 600 s
+    1800:  0.020833,   # 1800 s    
+}
 
 Nsamples = 10_000
 planets = "b c d e f g h i j k".split()
@@ -377,6 +391,18 @@ def main():
         action="store_true",
         default=False,
     )
+    ap.add_argument(
+        "--ttv",
+        help=(
+            "emit per-transit TTV parameters in params.csv (or params2.csv "
+            "when --results_dir is given). The number of rows per planet "
+            "equals the count of transits with actual data coverage, "
+            "computed via get_tmid_observed_transits. The index N in "
+            "{pl}_ttv_transit_N is the N-th chronologically observed transit."
+        ),
+        action="store_true",
+        default=False,
+    )
 
     args = ap.parse_args(None if sys.argv[1:] else ["-h"])
 
@@ -456,8 +482,9 @@ def main():
             logger.error("Lightcurve data is empty.")
             sys.exit()
         
-        # Handle time (lightkurve uses time as index)
-        df["time"] = df.index + 2457000
+        # Handle time (lightkurve uses time as index; add mission BJD offset)
+        _bjd_offset = {"tess": 2457000, "k2": 2454833, "kepler": 2454833}.get(mission, 2457000)
+        df["time"] = df.index + _bjd_offset
         df = df.reset_index(drop=True).sort_values(by="time")
 
         cols = ["time", "flux", "flux_err"]
@@ -517,6 +544,94 @@ def main():
                     logger.error(msg); sys.exit()       
         except Exception as e:
             logger.error(f"Error: {e}")
+
+        # Append per-transit TTV rows using the observed-transit midpoints.
+        # BASEMENT only caches `{c}_tmid_observed_transits` when
+        # settings['fit_ttvs']==True (basement.setup_ttv_fit). On a cache
+        # miss, recompute via get_tmid_observed_transits using the per-
+        # instrument time arrays and posterior-median epoch/period — same
+        # approach as afplot_per_transit in general_output.py.
+        if args.ttv:
+            _settings = alles.BASEMENT.settings
+            _data = alles.BASEMENT.data
+            _fast_fit_width = float(
+                _settings.get("fast_fit_width", 0.3333333333333333)
+            )
+            _inst_list = list(_settings.get("inst_phot", []))
+            # Per-instrument span / count diagnostic — surfaces cases where
+            # one instrument's data is missing, empty, or falls outside the
+            # epoch+period grid the cache was built against.
+            for _inst in _inst_list:
+                _t_arr = _data.get(_inst, {}).get("time")
+                if _t_arr is None or len(_t_arr) == 0:
+                    logger.warning(
+                        f"TTV: inst '{_inst}' has no time data in BASEMENT.data"
+                    )
+                else:
+                    _t_arr = np.asarray(_t_arr, dtype=float)
+                    logger.info(
+                        f"TTV: inst '{_inst}' N={len(_t_arr)} "
+                        f"time=[{_t_arr.min():.4f}, {_t_arr.max():.4f}] "
+                        f"span={_t_arr.max() - _t_arr.min():.3f} d"
+                    )
+            for _c in _settings.get("companions_phot", []):
+                _epoch = float(median.get(
+                    f"{_c}_epoch", alles.BASEMENT.params[f"{_c}_epoch"]
+                ))
+                _period = float(median.get(
+                    f"{_c}_period", alles.BASEMENT.params[f"{_c}_period"]
+                ))
+                _tmids = _data.get(f"{_c}_tmid_observed_transits")
+                _used_cache = _tmids is not None and len(_tmids) > 0
+                if not _used_cache:
+                    _times = []
+                    for _inst in _inst_list:
+                        _times += list(_data[_inst]["time"])
+                    _times = np.sort(np.asarray(_times, dtype=float))
+                    _tmids = get_tmid_observed_transits(
+                        _times, _epoch, _period, _fast_fit_width,
+                    )
+                    logger.info(
+                        f"TTV: {_c} cache miss; recomputed via "
+                        f"get_tmid_observed_transits "
+                        f"(width={_fast_fit_width:.4f} d)"
+                    )
+                else:
+                    logger.info(
+                        f"TTV: {_c} using BASEMENT cache "
+                        f"(populated by setup_ttv_fit; fit_ttvs={_settings.get('fit_ttvs')})"
+                    )
+                # Cross-check: independently recompute the transit count from
+                # the union of all inst_phot times. If this disagrees with
+                # the cache (which can happen if the cache was built from
+                # fast-fit-reduced data of only one instrument or with a
+                # stale epoch/period), prefer the fresh union count.
+                _times_union = []
+                for _inst in _inst_list:
+                    _times_union += list(_data[_inst]["time"])
+                _times_union = np.sort(np.asarray(_times_union, dtype=float))
+                _tmids_union = get_tmid_observed_transits(
+                    _times_union, _epoch, _period, _fast_fit_width,
+                )
+                if len(_tmids_union) != len(_tmids):
+                    logger.warning(
+                        f"TTV: {_c} cache_count={len(_tmids)} "
+                        f"vs fresh union_count={len(_tmids_union)} "
+                        f"(epoch={_epoch:.6f}, period={_period:.6f}, "
+                        f"width={_fast_fit_width:.4f}). "
+                        f"Using union count."
+                    )
+                    _tmids = _tmids_union
+                _n_obs = len(_tmids)
+                logger.info(f"TTV: {_c} has {_n_obs} transits with data")
+                if _n_obs == 0:
+                    continue
+                text += f"#TTV companion {_c},,,,,\n"
+                for _j in range(_n_obs):
+                    text += (
+                        f"{_c}_ttv_transit_{_j+1},0,1,uniform -0.1 0.1,"
+                        f"TTV$_\\mathrm{{ttv;{_j+1}}}$,d,\n"
+                    )
         if debug:
             logger.info(text)
         fp = Path(results_dir, f"params2.csv")
@@ -534,17 +649,35 @@ def main():
         quality_bitmask = args.quality
         sigma = args.sigma
         interactive = args.interactive
+        ttv = args.ttv
         fns = args.filename if isinstance(args.filename, list) else [args.filename]
         fn = fns[0]  # first instrument (used where a single filename is needed)
+
+        # Unify the "segment" concept across missions: `sector` is always a
+        # list-of-str id — TESS sector / K2 campaign / Kepler quarter.
+        # --campaign and --quarter act as scalar aliases when -s is not given.
+        def _as_segment_list(x):
+            if x is None:
+                return None
+            if isinstance(x, list):
+                return [str(v) for v in x]
+            return [str(x)]
 
         if mission == "tess":
             sector = args.sector
         elif mission == "k2":
-            campaign = -1 if args.campaign is None else args.campaign
-            raise NotImplementedError("TODO")
+            sector = args.sector if args.sector is not None else _as_segment_list(
+                args.campaign if args.campaign is not None else -1
+            )
         elif mission == "kepler":
-            quarter = -1 if args.quarter is None else args.quarter
-            raise NotImplementedError("TODO")
+            sector = args.sector if args.sector is not None else _as_segment_list(
+                args.quarter if args.quarter is not None else -1
+            )
+        else:
+            sector = args.sector
+
+        # Mission-appropriate BJD offset used when reconstructing full BJD.
+        bjd_offset = {"tess": 2457000, "k2": 2454833, "kepler": 2454833}[mission]
 
         pipeline = args.pipeline
         lc_type = "sap_flux" if pipeline == "qlp" else args.lc_type + "_flux"
@@ -557,10 +690,27 @@ def main():
         )
         if ticid:
             name = target_name.replace("-", "")
-        tic_id, outSec = get_tess_sectors(target_name, target_df, toiid, ctoiid, name)
-        sector_flag = check_if_sector_is_available(
-            target_name, given_sector=sector, all_sectors=outSec
-        )
+        if mission == "tess":
+            tic_id, outSec = get_tess_sectors(target_name, target_df, toiid, ctoiid, name)
+            sector_flag = check_if_sector_is_available(
+                target_name, given_sector=sector, all_sectors=outSec
+            )
+        else:
+            # K2/Kepler: skip TESS-point lookup. Mirror the check_if_sector_is_available
+            # flag logic without validating against a known segment list (lightkurve
+            # will surface missing campaigns/quarters when the search returns empty).
+            tic_id = None
+            outSec = np.array([])
+            if sector is None:
+                sector_flag = "default"
+            elif sector == ["all"]:
+                sector_flag = "all_sector"
+            elif sector == ["-1"]:
+                sector_flag = "last"
+            elif sector == ["0"]:
+                sector_flag = "first"
+            else:
+                sector_flag = "multi_sector"
 
         fp = Path(basedir, target_name).joinpath(f"{target_name}.log")
         logger.add(fp, format=log_format)
@@ -858,11 +1008,16 @@ def main():
             text += f"#baseline_gp_offset_flux_{inst},0,1,uniform -0.1 0.1,$\mathrm{{offset ({inst})}}$,,\n"
             text += f"baseline_gp_matern32_lnsigma_flux_{inst},-5,1,uniform -15 0,$\mathrm{{gp ln \sigma ({inst})}}$,,\n"
             text += f"baseline_gp_matern32_lnrho_flux_{inst},0,1,uniform -5 10,$\mathrm{{gp ln \\rho ({inst})}}$,,\n"
-        for i, row in target_df.iterrows():
-            pl = planets[i]
-            text += f"#TTV companion {pl},,,,,\n"
-            for i in range(5):
-                text += f"#{pl}_ttv_transit_{i+1},0,1,uniform -0.1 0.1,TTV$_\mathrm{{ttv;{i+1}}}$,d,\n"
+        # TTV rows: when --ttv is NOT set, keep the commented-out stub for
+        # reference. When --ttv IS set, the real per-transit rows are
+        # appended after the lightcurve download (below) because we need
+        # the observed time series to count transits with data coverage.
+        if not ttv:
+            for i, row in target_df.iterrows():
+                pl = planets[i]
+                text += f"#TTV companion {pl},,,,,\n"
+                for i in range(5):
+                    text += f"#{pl}_ttv_transit_{i+1},0,1,uniform -0.1 0.1,TTV$_\mathrm{{ttv;{i+1}}}$,d,\n"
         if debug:
             logger.info(text)
         fp = outdir.joinpath("params.csv")
@@ -938,8 +1093,11 @@ fig = allesfitter.show_initial_guess('.')
             unique_sectors = sorted(set(sectors))
             if sector_flag == "all_sector":
                 # case: sector='all'
+                # `sectors` mirrors `result.mission` (one row per exposure
+                # time / flux column), so it has duplicates and is in search
+                # order. Log the deduped+sorted view for human readability.
                 logger.info(
-                    f"Using {pipeline.upper()} pipeline in {len(sectors)} sectors: {sectors}"
+                    f"Using {pipeline.upper()} pipeline in {len(unique_sectors)} sectors: {unique_sectors}"
                 )
                 unique_exptimes = result.table.to_pandas().exptime.unique()
                 if len(unique_exptimes) > 1:
@@ -953,7 +1111,9 @@ fig = allesfitter.show_initial_guess('.')
                 logger.info(
                     "The lightcurves were not flattened/de-trended to avoid removing transits."
                 )
-                assert lc.sector == int(unique_sectors[-1])
+                _seg = getattr(lc, "sector", None) or getattr(lc, "campaign", None) or getattr(lc, "quarter", None)
+                if _seg is not None:
+                    assert int(_seg) == int(unique_sectors[-1])
                 if pipeline == "spoc":
                     lc1 = result.download_all(
                         quality_bitmask=quality_bitmask, flux_column="pdcsap_flux"
@@ -990,7 +1150,9 @@ fig = allesfitter.show_initial_guess('.')
                     "The lightcurves were not flattened/de-trended to avoid removing transits."
                 )
                 msg = f"sector={lc.sector} in header not in requested sector={sector}"
-                assert str(lc.sector) in np.array(sector), logger.error(msg)
+                _seg = getattr(lc, "sector", None) or getattr(lc, "campaign", None) or getattr(lc, "quarter", None)
+                if _seg is not None:
+                    assert str(int(_seg)) in np.array(sector), logger.error(msg)
                 if pipeline == "spoc":
                     lc1 = filtered_result.download_all(
                         quality_bitmask=quality_bitmask, flux_column="pdcsap_flux"
@@ -1013,7 +1175,9 @@ fig = allesfitter.show_initial_guess('.')
                 unique_exptimes = filtered_result.table.to_pandas().exptime.unique()
                 # logger.info(f"Exp times: {unique_exptimes}")
                 exptime = unique_exptimes[0] if exptime is None else exptime
-                assert lc.sector == sector
+                _seg = getattr(lc, "sector", None) or getattr(lc, "campaign", None) or getattr(lc, "quarter", None)
+                if _seg is not None:
+                    assert int(_seg) == int(sector)
                 logger.info(f"Using {pipeline.upper()} pipeline in sector {sector}.")
                 if pipeline == "spoc":
                     lc1 = filtered_result.download(
@@ -1060,7 +1224,7 @@ fig = allesfitter.show_initial_guess('.')
             df = lc.to_pandas()
             msg = "Somehow, the lightcurve data is empty."
             assert len(df)>0, logger.error(msg)
-            df["time"] = df.index + 2457000
+            df["time"] = df.index + bjd_offset
             df = df.reset_index(drop=True).sort_values(by="time")
             cols = ["time", "flux", "flux_err"]
             msg = f"Somehow, `flux_err` is all NaN.\n{df[cols]}\n"
@@ -1073,10 +1237,21 @@ fig = allesfitter.show_initial_guess('.')
             assert len(df2)>0, logger.error(msg)
             df2[cols].to_csv(fp.with_suffix('.csv'), sep=",", header=False, index=False)
             logger.info(f"Saved: {fp.with_suffix('.csv')}")
+            # Also save under the instrument label allesfitter expects
+            # (inst_phot in settings.csv). This is the file the fit and
+            # allesclass load at runtime.
+            inst_fp = outdir.joinpath(f"{fn}.csv")
+            df2[cols].to_csv(inst_fp, sep=",", header=False, index=False)
+            logger.info(f"Saved: {inst_fp}")
             logger.info(f"Ndata: {len(df):,}")
             logger.info(df[cols].head())
             if debug:
                 logger.info(df.head())
+
+            # TTV rows are appended at the very end of main() once all
+            # config files and the {fn}.csv lightcurve are on disk — that
+            # lets us use allesclass(outdir).BASEMENT.data to pick up the
+            # same observed-transit counts the fit will compute.
         else:
             msg = "No lightcurve downloaded. Check inputs."
             logger.error(msg); sys.exit()
@@ -1133,14 +1308,23 @@ ns_tol,100
         text2 += """#####################################,
 # Exposure interpolation settings,
 #####################################,\n"""
-        exptime = np.median(np.diff(df2.time)) if exptime is None else exptime/24/60/60
-        assert exptime<1, "exp time should be in days"
-        if exptime>0.0069:
-            text2 += "### crucial only for long (>600s) exposure times,\n"
-            for inst in fns:
-                text2 += f"t_exp_{inst},{exptime/60/24:.4f}\n"
-                text2 += f"#t_exp_{inst},0.020833\n"
-                text2 += f"#t_exp_n_int_{inst},10\n"
+        # Resolve exposure time in seconds. --exp is passed in seconds; if
+        # absent, fall back to the median cadence (which is in days) and
+        # convert. This integer value is the key for T_EXP_DAYS.
+        if args.exptime is not None:
+            exptime_sec = int(round(args.exptime))
+        else:
+            exptime_sec = int(round(float(np.median(np.diff(df2.time))) * 86400))
+        exptime = exptime_sec / 86400.0  # keep the days value for downstream use
+        assert exptime < 1, "exp time should be in days"
+        # Prefer the preset value for this exposure time; else use the
+        # computed days value directly.
+        t_exp_val = T_EXP_DAYS.get(exptime_sec, exptime)
+        text2 += "### crucial only for long (>600s) exposure times,\n"
+        for inst in fns:
+            text2 += f"t_exp_{inst},{t_exp_val:.6f}\n"
+            text2 += f"#t_exp_{inst},0.020833\n"
+            text2 += f"#t_exp_n_int_{inst},10\n"
         text2 += """###############################################################################,
 # Baseline settings per instrument: sample / hybrid,
 # if 'sample_offset' one corresponding parameter called 'baseline_offset_key_inst' has to be given in params.csv,
@@ -1205,6 +1389,69 @@ fit_ttvs,False
         fp = outdir.joinpath("settings.csv")
         np.savetxt(fp, [text2], fmt="%s")
         logger.info(f"Saved: {fp}")
+
+        # ===== Append TTV rows to params.csv using allesclass ===== #
+        # allesclass loads params.csv + settings.csv + {inst}.csv and,
+        # during BASEMENT init, may populate
+        #   BASEMENT.data[f'{c}_tmid_observed_transits']
+        # for every companion in companions_phot. That list holds exactly
+        # the transits the fit will see, so len(...) is the right count
+        # for {c}_ttv_transit_N (N indexes the N-th observed transit).
+        # If the cache is missing for a companion, replicate what
+        # afplot_per_transit does in allesfitter/general_output.py
+        # (lines ~887-892): build times_combined across inst_phot and
+        # call get_tmid_observed_transits with a window of fast_fit_width
+        # (= T_tra_tot equivalent in days).
+        if ttv:
+            try:
+                alles = allesclass(str(outdir))
+                _settings = alles.BASEMENT.settings
+                _params = alles.BASEMENT.params
+                _data = alles.BASEMENT.data
+                _fast_fit_width = float(_settings.get("fast_fit_width", 0.3333333333333333))
+                ttv_text = ""
+                for _c in _settings.get("companions_phot", []):
+                    _key = f"{_c}_tmid_observed_transits"
+                    _tmids = _data.get(_key)
+                    if _tmids is None or len(_tmids) == 0:
+                        # Fallback: compute on the fly, mirroring
+                        # afplot_per_transit in general_output.py.
+                        _times = []
+                        for _inst in _settings.get("inst_phot", []):
+                            _times += list(_data[_inst]["time"])
+                        _times = np.sort(np.asarray(_times, dtype=float))
+                        _epoch = float(_params[f"{_c}_epoch"])
+                        _period = float(_params[f"{_c}_period"])
+                        _T_tra_tot = _fast_fit_width  # days
+                        _tmids = get_tmid_observed_transits(
+                            _times, _epoch, _period, _T_tra_tot,
+                        )
+                        logger.info(
+                            f"TTV: {_c} cache miss; recomputed via "
+                            f"get_tmid_observed_transits (width={_T_tra_tot:.4f} d)"
+                        )
+                    _n_obs = len(_tmids)
+                    logger.info(f"TTV: {_c} has {_n_obs} transits with data")
+                    if _n_obs == 0:
+                        continue
+                    ttv_text += f"#TTV companion {_c},,,,,\n"
+                    for _j in range(_n_obs):
+                        ttv_text += (
+                            f"{_c}_ttv_transit_{_j+1},0,1,uniform -0.1 0.1,"
+                            f"TTV$_\\mathrm{{ttv;{_j+1}}}$,d,\n"
+                        )
+                if ttv_text:
+                    params_fp = outdir.joinpath("params.csv")
+                    with open(params_fp, "a") as _f:
+                        _f.write(ttv_text)
+                    logger.info(f"Appended TTV rows to {params_fp}")
+                else:
+                    logger.error(
+                        "TTV: no companion had observed transits; "
+                        "nothing appended to params.csv"
+                    )
+            except Exception as e:
+                logger.error(f"TTV append via allesclass failed: {e}")
 
 
 if __name__ == "__main__":

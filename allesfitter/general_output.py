@@ -923,7 +923,20 @@ def afplot_per_transit(samples, inst, companion, base=None, kwargs_dict=None):
             ax.set(xlim=[t-zoomwindow/2., t+zoomwindow/2.])
             ax.axvline(t,color='grey',lw=2,ls='--',label='linear prediction')
             if base.settings['fit_ttvs']==True:
-                ax.axvline(t+params_median[companion+'_ttv_transit_'+str(transit_label+1)],color='r',lw=2,ls='--',label='TTV midtime')
+                # Guard against fit_ttvs=True being set in settings.csv before
+                # params.csv has the matching `{c}_ttv_transit_N` rows (the
+                # common case during initial-guess preview, where the user
+                # ran `prepare_allesfit ... --ttv` only against `--results_dir`
+                # so params2.csv has TTV rows but params.csv does not). Skip
+                # the TTV-midtime axvline rather than crashing the whole plot.
+                _ttv_key = companion+'_ttv_transit_'+str(transit_label+1)
+                if _ttv_key in params_median:
+                    ax.axvline(t+params_median[_ttv_key],color='r',lw=2,ls='--',label='TTV midtime')
+                else:
+                    warnings.warn(
+                        "fit_ttvs=True but '%s' is missing from params.csv; "
+                        "skipping TTV midtime line for this transit." % _ttv_key
+                    )
             
             #::: axes decoration
             ax.set(xlabel='Time', ylabel=ylabel)
@@ -962,6 +975,19 @@ def get_params_from_samples(samples):
     return params_median, params_ll, params_ul
 
 
+def _key_should_be_included(key, companions_to_include):
+    if '_' not in key:
+        return False
+    parts = key.split('_')
+    companion_prefix = parts[0]
+    if companion_prefix in companions_to_include:
+        return True
+    if companion_prefix in ['host', 'dil', 'ln', 'baseline', 'error', 'gp',
+                            'R', 'M', 'Teff', 'flare', 'stellar']:
+        return True
+    return False
+
+
 
 ###############################################################################
 #::: save table
@@ -978,10 +1004,14 @@ def save_table(samples, mode):
     
     params, params_ll, params_ul = get_params_from_samples(samples)
     
+    companions_to_include = set(config.BASEMENT.settings.get('companions_phot', []) + config.BASEMENT.settings.get('companions_rv', []))
+
     with open( os.path.join(config.BASEMENT.outdir,mode+'_table.csv'), 'w' ) as f:
         f.write('#name,median,lower_error,upper_error,label,unit\n')
         f.write('#Fitted parameters,,,\n')
         for i, key in enumerate(config.BASEMENT.allkeys):
+            if not _key_should_be_included(key, companions_to_include):
+                continue
             if key not in config.BASEMENT.fitkeys:
                 f.write(key + ',' + str(params[key]) + ',' + '(fixed),(fixed),'+config.BASEMENT.labels[i]+','+config.BASEMENT.units[i]+'\n')
             else:
@@ -1003,16 +1033,20 @@ def save_latex_table(samples, mode):
     '''
     
     params_median, params_ll, params_ul = get_params_from_samples(samples)
-        
+    
+    companions_to_include = set(config.BASEMENT.settings.get('companions_phot', []) + config.BASEMENT.settings.get('companions_rv', []))
+    
     with open(os.path.join(config.BASEMENT.outdir,mode+'_latex_table.txt'),'w') as f,\
          open(os.path.join(config.BASEMENT.outdir,mode+'_latex_cmd.txt'),'w') as f_cmd:
-            
+
         f.write('Parameter & Value & Unit & Fit/Fixed \\\\ \n')
         f.write('\\hline \n')
         f.write('\\multicolumn{4}{c}{\\textit{Fitted parameters}} \\\\ \n')
         f.write('\\hline \n')
-        
+
         for i, key in enumerate(config.BASEMENT.allkeys):
+            if not _key_should_be_included(key, companions_to_include):
+                continue
             if key not in config.BASEMENT.fitkeys:                
                 value = str(params_median[key])
                 f.write(config.BASEMENT.labels[i] + ' & $' + value + '$ & '  + config.BASEMENT.units[i] + '& fixed \\\\ \n')            
@@ -1126,8 +1160,16 @@ def plot_initial_guess(return_figs=False, kwargs_dict=None):
                         else:
                             first_transit = -1
                     except Exception as e:
+                        # Surface the failure instead of silently moving on —
+                        # otherwise per-transit PDFs go missing without a
+                        # clue. Still break the inner loop so we don't spin.
+                        warnings.warn(
+                            "afplot_per_transit failed for inst='%s' "
+                            "companion='%s' first_transit=%d: %s: %s"
+                            % (inst, companion, first_transit,
+                               type(e).__name__, e)
+                        )
                         first_transit = -1
-                        pass
         return None
     
     else:

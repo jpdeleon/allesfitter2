@@ -1,22 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Fri Oct  5 00:17:06 2018
+Core data and settings container for everything.
 
-@author:
-Dr. Maximilian N. Günther
-European Space Agency (ESA)
-European Space Research and Technology Centre (ESTEC)
-Keplerlaan 1, 2201 AZ Noordwijk, The Netherlands
-Email: maximilian.guenther@esa.int
-GitHub: mnguenther
-Twitter: m_n_guenther
-Web: www.mnguenther.com
+The Basement class serves as the central data structure for allesfitter,
+containing all observational data, model parameters, fitting configuration,
+and derived quantities. It handles loading from CSV files, validation,
+and initialization of all components needed for Bayesian inference.
+
+Classes:
+    Basement: Main container class for all fitting data and settings.
+
+Module-Level Constants:
+    DEFAULT_LD_CODES: Mapping of limb darkening law integer codes to strings.
 """
 
 from __future__ import print_function, division, absolute_import
 
-#::: modules
+from typing import Any
 import numpy as np
 import os
 import sys
@@ -47,33 +48,83 @@ sns.set_context(rc={'lines.markeredgewidth': 1})
 ###############################################################################
 #::: 'Basement' class, which contains all the data, settings, etc.
 ###############################################################################
-class Basement():
-    '''
-    The 'Basement' class contains all the data, settings, etc.
-    '''
+class Basement:
+    """The 'Basement' class contains all the data, settings, etc.
+    
+    This is the core data container for everything, holding:
+        - All observational data (photometry, radial velocity)
+        - Model parameters and their priors
+        - Fitting configuration and settings
+        - Derived stellar parameters
+        - External priors (e.g., stellar density)
+    
+    Attributes
+    ----------
+    datadir : str
+        Path to the data directory.
+    outdir : str
+        Path to the output directory where results are saved.
+    settings : dict
+        Configuration settings loaded from settings.csv.
+    params : OrderedDict
+        Model parameters loaded from params.csv.
+    data : dict
+        Nested dict of observational data by instrument and type.
+    fulldata : dict
+        Complete data including all metadata.
+    labels : dict
+        Parameter labels for plotting and output.
+    external_priors : dict
+        External priors such as stellar density constraints.
+    
+    Examples
+    --------
+    >>> from allesfitter import config
+    >>> config.init('/path/to/datadir')
+    >>> base = config.BASEMENT
+    >>> print(base.settings['inst_phot'])
+    """
     
     ###############################################################################
     #::: init
     ###############################################################################
-    def __init__(self, datadir, quiet=False):
-        '''
-        Inputs:
-        -------
+    def __init__(self, datadir: str, quiet: bool = False) -> None:
+        """Initialize the Basement with data from a directory.
+        
+        Parameters
+        ----------
         datadir : str
-            the working directory for allesfitter
-            must contain all the data files
-            output directories and files will also be created inside datadir
-        fast_fit : bool (optional; default is False)
-            if False: 
-                use all photometric data for the plot
-            if True: 
-                only use photometric data in an 8h window around the transit 
-                requires a good initial guess of the epoch and period
-                
-        Returns:
-        --------
-        All the variables needed for allesfitter
-        '''
+            The working directory for allesfitter.
+            Must contain all the data files:
+            - settings.csv: Fitting configuration
+            - params.csv: Initial parameter guesses
+            - Data files: Light curves and/or RV measurements
+            Output directories and files will also be created inside datadir.
+        quiet : bool, optional
+            If True, suppress verbose output during initialization (default: False).
+        
+        Returns
+        -------
+        None
+        
+        Raises
+        ------
+        FileNotFoundError
+            If required input files are missing.
+        ValueError
+            If settings contain invalid values or conflicts.
+        
+        Notes
+        -----
+        This method:
+            1. Creates output directory structure
+            2. Loads and validates settings from settings.csv
+            3. Loads and validates parameters from params.csv
+            4. Loads observational data from CSV files
+            5. Applies epoch shifting if configured
+            6. Sets up TTV fitting if enabled
+            7. Loads stellar priors if available
+        """
         
         print('Filling the Basement')
         
@@ -132,11 +183,29 @@ class Basement():
     ###############################################################################
     #::: print function that prints into console and logfile at the same time
     ############################################################################### 
-    def logprint(self, *text):
+    def logprint(self, *text: Any) -> None:
+        """Print to both console and logfile.
+        
+        Outputs text to stdout and appends to a timestamped log file
+        in the output directory.
+        
+        Parameters
+        ----------
+        *text : Any
+            Any objects to be printed (like the built-in print function).
+        
+        Returns
+        -------
+        None
+        
+        Notes
+        -----
+        If quiet=True was set during initialization, this method does nothing.
+        """
         if not self.quiet:
             print(*text)
             original = sys.stdout
-            with open( os.path.join(self.outdir,'logfile_'+self.now+'.log'), 'a' ) as f:
+            with open(os.path.join(self.outdir, 'logfile_' + self.now + '.log'), 'a') as f:
                 sys.stdout = f
                 print(*text)
             sys.stdout = original
@@ -229,6 +298,40 @@ class Basement():
                 
 #        self.settings = {r[0]:r[1] for r in rows}
         self.settings = collections.OrderedDict( [('user-given:','')]+[ (r[0],r[1] ) for r in rows ]+[('automatically set:','')] )
+        
+        #::: check for unrecognized settings keys
+        valid_settings_keys = {
+            'companions_phot', 'companions_rv', 'companions_all', 'inst_phot', 'inst_rv', 'inst_rv2', 'inst_all',
+            'time_format', 'multiprocess', 'multiprocess_cores', 'fast_fit', 'fast_fit_width',
+            'secondary_eclipse', 'phase_curve', 'phase_curve_style', 'shift_epoch',
+            'inst_for_b_epoch', 'inst_for_c_epoch', 'inst_for_d_epoch', 'inst_for_e_epoch', 'inst_for_f_epoch', 'inst_for_g_epoch',
+            'mcmc_nwalkers', 'mcmc_total_steps', 'mcmc_burn_steps', 'mcmc_thin_by', 'mcmc_pre_run_loops', 'mcmc_pre_run_steps', 'mcmc_moves',
+            'ns_modus', 'ns_nlive', 'ns_bound', 'ns_sample', 'ns_tol',
+            'bandpass', 'chromatic',
+            'fit_ttvs', 'exact_grav', 'use_host_density_prior', 'use_tidal_eccentricity_prior',
+            'N_flares', 'N_spots',
+            't_exp_tess', 't_exp_kepler', 't_exp_n_int_tess', 't_exp_n_int_kepler',
+            'print_progress', 'quiet',
+            'flux_min_raw', 'flux_max_raw',
+            'flux_min_flat', 'flux_max_flat',
+        }
+        for key in self.settings:
+            if key in ['user-given:', 'automatically set:']:
+                continue
+            if key not in valid_settings_keys and not any(key.startswith(prefix) for prefix in [
+                'host_ld_law_', 'host_ld_space_', 'host_grid_', 'host_shape_', 'host_flux_weighted_',
+                'host_rotfac_', 'host_hf_', 'host_bfac_', 'host_heat_', 'host_lambda_', 'host_N_spots_',
+                'b_ld_law_', 'b_ld_space_', 'b_grid_', 'b_shape_', 'b_flux_weighted_', 'b_N_spots_',
+                'c_ld_law_', 'c_ld_space_', 'c_grid_', 'c_shape_', 'c_flux_weighted_', 'c_N_spots_',
+                'd_ld_law_', 'd_ld_space_', 'd_grid_', 'd_shape_', 'd_flux_weighted_', 'd_N_spots_',
+                'e_ld_law_', 'e_ld_space_', 'e_grid_', 'e_shape_', 'e_flux_weighted_', 'e_N_spots_',
+                'f_ld_law_', 'f_ld_space_', 'f_grid_', 'f_shape_', 'f_flux_weighted_', 'f_N_spots_',
+                'g_ld_law_', 'g_ld_space_', 'g_grid_', 'g_shape_', 'g_flux_weighted_', 'g_N_spots_',
+                'baseline_flux_', 'baseline_rv_', 'baseline_rv2_',
+                'error_flux_', 'error_rv_', 'error_rv2_',
+                't_exp_', 'stellar_var_flux', 'stellar_var_rv',
+            ]):
+                warnings.warn('Unrecognized setting key "'+key+'" in settings.csv. This may be a typo or deprecated keyword.')
 
         
         #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
@@ -355,6 +458,56 @@ class Basement():
             self.settings['fast_fit_width'] = float(self.settings['fast_fit_width'])
         else:
             self.settings['fast_fit_width'] = 8./24.
+
+        #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+        #::: Raw-flux outlier clip bounds (applied at load time in load_data())
+        #::: If `flux_min_raw` / `flux_max_raw` are present, rows with flux
+        #::: outside [flux_min_raw, flux_max_raw] are dropped from each
+        #::: photometric instrument's data before any further reduction.
+        #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+        if ('flux_min_raw' in self.settings.keys()) and not is_empty_or_none('flux_min_raw'):
+            self.settings['flux_min_raw'] = float(self.settings['flux_min_raw'])
+        else:
+            self.settings['flux_min_raw'] = None
+
+        if ('flux_max_raw' in self.settings.keys()) and not is_empty_or_none('flux_max_raw'):
+            self.settings['flux_max_raw'] = float(self.settings['flux_max_raw'])
+        else:
+            self.settings['flux_max_raw'] = None
+
+        if (self.settings['flux_min_raw'] is not None
+                and self.settings['flux_max_raw'] is not None
+                and self.settings['flux_min_raw'] >= self.settings['flux_max_raw']):
+            raise ValueError(
+                'flux_min_raw (%s) must be < flux_max_raw (%s) in settings.csv.'
+                % (self.settings['flux_min_raw'], self.settings['flux_max_raw'])
+            )
+
+        #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+        #::: Flattened-flux outlier clip bounds (applied by config.init() AFTER
+        #::: BASEMENT is constructed, since computing the trend requires
+        #::: calculate_baseline which reads config.BASEMENT.{settings,data}).
+        #::: Bounds are interpreted on the detrended flux:
+        #:::     flat = flux - baseline(initial-guess) - stellar_var(initial-guess)
+        #::: Rows with `flat` outside [flux_min_flat, flux_max_flat] are dropped.
+        #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+        if ('flux_min_flat' in self.settings.keys()) and not is_empty_or_none('flux_min_flat'):
+            self.settings['flux_min_flat'] = float(self.settings['flux_min_flat'])
+        else:
+            self.settings['flux_min_flat'] = None
+
+        if ('flux_max_flat' in self.settings.keys()) and not is_empty_or_none('flux_max_flat'):
+            self.settings['flux_max_flat'] = float(self.settings['flux_max_flat'])
+        else:
+            self.settings['flux_max_flat'] = None
+
+        if (self.settings['flux_min_flat'] is not None
+                and self.settings['flux_max_flat'] is not None
+                and self.settings['flux_min_flat'] >= self.settings['flux_max_flat']):
+            raise ValueError(
+                'flux_min_flat (%s) must be < flux_max_flat (%s) in settings.csv.'
+                % (self.settings['flux_min_flat'], self.settings['flux_max_flat'])
+            )
                 
             
         #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
@@ -718,7 +871,160 @@ class Basement():
         #==========================================================================
         #::: luser-proof: check for allowed keys to catch typos etc.
         #==========================================================================  
-        #TODO
+        def get_valid_param_patterns():
+            valid_patterns = set()
+            companions = self.settings.get('companions_all', [])
+            inst_all = self.settings.get('inst_all', [])
+            inst_phot = self.settings.get('inst_phot', [])
+            inst_rv = self.settings.get('inst_rv', [])
+            
+            for companion in companions:
+                valid_patterns.add(companion+'_rr')
+                valid_patterns.add(companion+'_rsuma')
+                valid_patterns.add(companion+'_cosi')
+                valid_patterns.add(companion+'_epoch')
+                valid_patterns.add(companion+'_period')
+                valid_patterns.add(companion+'_f_c')
+                valid_patterns.add(companion+'_f_s')
+                valid_patterns.add(companion+'_sbratio')
+                valid_patterns.add(companion+'_a')
+                valid_patterns.add(companion+'_q')
+                valid_patterns.add(companion+'_K')
+                valid_patterns.add(companion+'_dil')
+                valid_patterns.add(companion+'_ld_law')
+                valid_patterns.add(companion+'_ld_space')
+                valid_patterns.add(companion+'_shape')
+                valid_patterns.add(companion+'_grid')
+                valid_patterns.add(companion+'_flux_weighted')
+                valid_patterns.add(companion+'_rotfac')
+                valid_patterns.add(companion+'_hf')
+                valid_patterns.add(companion+'_bfac')
+                valid_patterns.add(companion+'_heat')
+                valid_patterns.add(companion+'_lambda')
+                valid_patterns.add(companion+'_vsini')
+                valid_patterns.add(companion+'_N_spots')
+                valid_patterns.add(companion+'_phase_curve_beaming')
+                valid_patterns.add(companion+'_phase_curve_atmospheric')
+                valid_patterns.add(companion+'_phase_curve_ellipsoidal')
+                for i in range(1, 50):
+                    valid_patterns.add(companion+'_ttv_transit_'+str(i))
+                
+                for inst in inst_all:
+                    valid_patterns.add(companion+'_ldc_'+inst)
+                    for j in range(1, 10):
+                        valid_patterns.add(companion+'_ldc_q'+str(j)+'_'+inst)
+                        valid_patterns.add(companion+'_ldc_u'+str(j)+'_'+inst)
+                    valid_patterns.add(companion+'_gdc_'+inst)
+                    valid_patterns.add(companion+'_spots_'+inst)
+                    for k in range(1, 10):
+                        valid_patterns.add(companion+'_spot_'+str(k)+'_long_'+inst)
+                        valid_patterns.add(companion+'_spot_'+str(k)+'_lat_'+inst)
+                        valid_patterns.add(companion+'_spot_'+str(k)+'_size_'+inst)
+                        valid_patterns.add(companion+'_spot_'+str(k)+'_brightness_'+inst)
+            
+            for inst in inst_all:
+                valid_patterns.add('host_ld_law_'+inst)
+                valid_patterns.add('host_ld_space_'+inst)
+                valid_patterns.add('host_grid_'+inst)
+                valid_patterns.add('host_shape_'+inst)
+                valid_patterns.add('host_flux_weighted_'+inst)
+                valid_patterns.add('host_rotfac_'+inst)
+                valid_patterns.add('host_hf_'+inst)
+                valid_patterns.add('host_bfac_'+inst)
+                valid_patterns.add('host_heat_'+inst)
+                valid_patterns.add('host_lambda_'+inst)
+                valid_patterns.add('host_N_spots_'+inst)
+                valid_patterns.add('host_spots_'+inst)
+                for j in range(1, 10):
+                    valid_patterns.add('host_ldc_q'+str(j)+'_'+inst)
+                    valid_patterns.add('host_ldc_u'+str(j)+'_'+inst)
+                    valid_patterns.add('host_spot_'+str(j)+'_long_'+inst)
+                    valid_patterns.add('host_spot_'+str(j)+'_lat_'+inst)
+                    valid_patterns.add('host_spot_'+str(j)+'_size_'+inst)
+                    valid_patterns.add('host_spot_'+str(j)+'_brightness_'+inst)
+            
+            for inst in inst_all:
+                valid_patterns.add('dil_'+inst)
+                valid_patterns.add('host_gdc_'+inst)
+            
+            for inst in inst_phot:
+                valid_patterns.add('ln_err_flux_'+inst)
+                valid_patterns.add('baseline_offset_flux_'+inst)
+                valid_patterns.add('baseline_slope_flux_'+inst)
+                valid_patterns.add('baseline_gp_matern32_lnsigma_flux_'+inst)
+                valid_patterns.add('baseline_gp_matern32_lnrho_flux_'+inst)
+                valid_patterns.add('baseline_gp_sho_omega_flux_'+inst)
+                valid_patterns.add('baseline_gp_sho_A_flux_'+inst)
+                valid_patterns.add('baseline_gp_real_omega_flux_'+inst)
+                valid_patterns.add('baseline_gp_real_A_flux_'+inst)
+                valid_patterns.add('baseline_gp_complex_omega_flux_'+inst)
+                valid_patterns.add('baseline_gp_complex_A_flux_'+inst)
+                valid_patterns.add('baseline_gp_complex_Q_flux_'+inst)
+            
+            for inst in inst_rv:
+                valid_patterns.add('ln_jitter_rv_'+inst)
+                valid_patterns.add('baseline_offset_rv_'+inst)
+                valid_patterns.add('baseline_slope_rv_'+inst)
+                valid_patterns.add('baseline_gp_matern32_lnsigma_rv_'+inst)
+                valid_patterns.add('baseline_gp_matern32_lnrho_rv_'+inst)
+            
+            valid_patterns.add('R_host')
+            valid_patterns.add('M_host')
+            valid_patterns.add('Teff_host')
+            valid_patterns.add('host_vsini')
+            valid_patterns.add('host_rotfac')
+            valid_patterns.add('R_host_err')
+            valid_patterns.add('M_host_err')
+            valid_patterns.add('Teff_host_err')
+            
+            for i in range(1, 10):
+                valid_patterns.add('flare_'+str(i)+'_epoch')
+                valid_patterns.add('flare_'+str(i)+'_duration')
+                valid_patterns.add('flare_'+str(i)+'_amplitude')
+                valid_patterns.add('flare_'+str(i)+'_beta')
+            
+            return valid_patterns
+        
+        def is_valid_key(key, valid_patterns):
+            if key in valid_patterns:
+                return True
+            for pattern in valid_patterns:
+                if key.startswith(pattern):
+                    return True
+            if key.startswith('host_ldc_q') and '_' in key:
+                return True
+            if key.startswith('host_ldc_u') and '_' in key:
+                return True
+            if '_ldc_q' in key and '_' in key:
+                return True
+            if '_ldc_u' in key and '_' in key:
+                return True
+            if key.startswith('dil_') and '_' in key:
+                return True
+            if key.startswith('ln_err_flux_') and '_' in key:
+                return True
+            if key.startswith('ln_jitter_rv_') and '_' in key:
+                return True
+            if key.startswith('baseline_') and '_' in key:
+                return True
+            return False
+        
+        valid_patterns = get_valid_param_patterns()
+        allkeys_list = list(buf['name'])
+        
+        unrecognized = []
+        for key in allkeys_list:
+            key_clean = key.strip()
+            if key_clean in ['user-given:', 'automatically set:']:
+                continue
+            if not is_valid_key(key_clean, valid_patterns):
+                unrecognized.append(key_clean)
+        
+        if unrecognized:
+            self.logprint('\nWARNING: The following parameters in params.csv are not recognized and will be ignored:')
+            for key in unrecognized:
+                self.logprint('  - '+key)
+            self.logprint('')
                 
                 
         #==========================================================================
@@ -1077,14 +1383,42 @@ class Basement():
 #                    pass
 #                else:
 #                    raise ValueError('User aborted operation.')
-                
+
+            #::: Raw-flux outlier removal (applied before fulldata is captured
+            #::: so that all downstream consumers see the clipped rows).
+            #::: Drops rows outside [flux_min_raw, flux_max_raw]; either bound
+            #::: may be None to make it one-sided.
+            _fmin = self.settings.get('flux_min_raw')
+            _fmax = self.settings.get('flux_max_raw')
+            if _fmin is not None or _fmax is not None:
+                _mask = np.ones_like(flux, dtype=bool)
+                if _fmin is not None:
+                    _mask &= (flux >= _fmin)
+                if _fmax is not None:
+                    _mask &= (flux <= _fmax)
+                _n_drop = int(np.sum(~_mask))
+                if _n_drop > 0:
+                    warnings.warn(
+                        '%d/%d rows in "%s.csv" dropped by flux_min_raw=%s, flux_max_raw=%s.'
+                        % (_n_drop, len(flux), inst, _fmin, _fmax)
+                    )
+                if not np.any(_mask):
+                    raise ValueError(
+                        'All rows in "'+inst+'.csv" were removed by flux_min_raw/flux_max_raw. '
+                        'Check that the bounds bracket your normalized flux level.'
+                    )
+                time = time[_mask]
+                flux = flux[_mask]
+                flux_err = flux_err[_mask]
+                custom_series = custom_series[_mask]
+
             self.fulldata[inst] = {
                           'time':time,
                           'flux':flux,
                           'err_scales_flux':flux_err/np.nanmean(flux_err),
                           'custom_series':custom_series
                          }
-            if (self.settings['fast_fit']) and (len(self.settings['inst_phot'])>0): 
+            if (self.settings['fast_fit']) and (len(self.settings['inst_phot'])>0):
                 time, flux, flux_err, custom_series = self.reduce_phot_data(time, flux, flux_err, custom_series=custom_series, inst=inst)
             self.data[inst] = {
                           'time':time,
@@ -1092,7 +1426,30 @@ class Basement():
                           'err_scales_flux':flux_err/np.nanmean(flux_err),
                           'custom_series':custom_series
                          }
-            
+
+        #======================================================================
+        #::: detect duplicate inst_phot input files (e.g. user accidentally
+        #::: copied qlp1800.csv to qlp600.csv). Pairwise compare the
+        #::: pre-fast-fit `fulldata` time+flux arrays — fulldata is the raw
+        #::: read-in data, so identical content here is unambiguous.
+        #======================================================================
+        _inst_phot_list = list(self.settings['inst_phot'])
+        for _i in range(len(_inst_phot_list)):
+            for _j in range(_i + 1, len(_inst_phot_list)):
+                _a_inst, _b_inst = _inst_phot_list[_i], _inst_phot_list[_j]
+                _a, _b = self.fulldata[_a_inst], self.fulldata[_b_inst]
+                if (len(_a['time']) == len(_b['time'])
+                        and np.array_equal(_a['time'], _b['time'])
+                        and np.array_equal(_a['flux'], _b['flux'])):
+                    raise ValueError(
+                        '"%s.csv" and "%s.csv" contain identical data '
+                        '(N=%d, time=[%.4f, %.4f]). Likely a duplicated file. '
+                        'Please verify each inst_phot points to a distinct '
+                        'lightcurve, or remove the duplicate from inst_phot.'
+                        % (_a_inst, _b_inst, len(_a['time']),
+                           float(_a['time'][0]), float(_a['time'][-1]))
+                    )
+
         #======================================================================
         #::: RV
         #======================================================================
@@ -1419,6 +1776,93 @@ class Basement():
             
                 
                 
+    ###############################################################################
+    #::: apply flattened-flux outlier clip
+    ###############################################################################
+    def apply_flat_clip(self):
+        '''
+        Drops rows from each photometric instrument whose detrended flux falls
+        outside [flux_min_flat, flux_max_flat]. The trend is computed from the
+        initial-guess parameters using the same primitives that
+        `show_initial_guess` plots:
+            flat = flux - calculate_baseline(...) - calculate_stellar_var(...)
+        Must be called AFTER config.BASEMENT has been assigned, because
+        calculate_baseline/calculate_stellar_var read config.BASEMENT.{settings,data}.
+        Re-runs setup_ttv_fit() if fit_ttvs is enabled, since per-transit
+        index arrays depend on the data length.
+        '''
+        fmin = self.settings.get('flux_min_flat')
+        fmax = self.settings.get('flux_max_flat')
+        if fmin is None and fmax is None:
+            return
+
+        # Local imports to avoid a circular import at module load time
+        # (computer.py imports config which imports basement).
+        from . import config as _config
+        from .computer import (
+            calculate_model, calculate_baseline, calculate_stellar_var,
+        )
+
+        if _config.BASEMENT is not self:
+            # Defensive: this method needs the global BASEMENT to point at us
+            # so the calculate_* helpers see the right data/settings.
+            warnings.warn(
+                'apply_flat_clip(): config.BASEMENT is not this Basement; '
+                'skipping flat clip.'
+            )
+            return
+
+        for inst in self.settings['inst_phot']:
+            try:
+                model = calculate_model(self.params, inst, 'flux')
+                baseline = calculate_baseline(self.params, inst, 'flux', model=model)
+                stellar_var = calculate_stellar_var(
+                    self.params, inst, 'flux', model=model, baseline=baseline,
+                )
+            except Exception as e:
+                warnings.warn(
+                    'apply_flat_clip(): could not compute trend for "%s" '
+                    '(%s); skipping flat clip for this instrument.' % (inst, e)
+                )
+                continue
+
+            flux = self.data[inst]['flux']
+            flat = flux - baseline - stellar_var
+
+            mask = np.ones_like(flat, dtype=bool)
+            if fmin is not None:
+                mask &= (flat >= fmin)
+            if fmax is not None:
+                mask &= (flat <= fmax)
+
+            n_drop = int(np.sum(~mask))
+            if n_drop == 0:
+                continue
+            if not np.any(mask):
+                raise ValueError(
+                    'All rows in "'+inst+'" were removed by flux_min_flat/flux_max_flat. '
+                    'Check the bounds against your detrended flux level.'
+                )
+            warnings.warn(
+                '%d/%d rows in "%s" dropped by flux_min_flat=%s, flux_max_flat=%s '
+                '(applied to flux - baseline - stellar_var from initial guess).'
+                % (n_drop, len(flat), inst, fmin, fmax)
+            )
+
+            for k in ('time', 'flux', 'err_scales_flux', 'custom_series'):
+                if k in self.data[inst]:
+                    self.data[inst][k] = self.data[inst][k][mask]
+
+        if self.settings.get('fit_ttvs'):
+            try:
+                self.setup_ttv_fit()
+            except Exception as e:
+                warnings.warn(
+                    'apply_flat_clip(): setup_ttv_fit() failed after clip (%s).' % e
+                )
+
+
+
     ###############################################################################
     #::: stellar priors
     ###############################################################################
