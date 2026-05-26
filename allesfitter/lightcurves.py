@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Fri May  8 12:14:53 2020
+Light curve processing and limb darkening utilities.
 
-@author:
-Dr. Maximilian N. Günther
-European Space Agency (ESA)
-European Space Research and Technology Centre (ESTEC)
-Keplerlaan 1, 2201 AZ Noordwijk, The Netherlands
-Email: maximilian.guenther@esa.int
-GitHub: mnguenther
-Twitter: m_n_guenther
-Web: www.mnguenther.com
+This module provides functions for:
+    - Limb darkening coefficient transformations (q to u and vice versa)
+    - Light curve masking and filtering
+    - Transit depth calculations
+    - Time series preprocessing
+
+Functions:
+    translate_limb_darkening_from_q_to_u: Convert q-based LDCs to u-based.
+    translate_limb_darkening_from_u_to_q: Convert u-based LDCs to q-based.
+    mask_ranges: Mask data within specified time ranges.
+    sigma_clip: Sigma clipping for outlier removal.
+    flatten: Detrend light curves using wotan.
+
+Submodules:
+    LDC3: Third-order limb darkening calculations.
 """
 
 from __future__ import print_function, division, absolute_import

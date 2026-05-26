@@ -1,36 +1,53 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-Created on Fri Oct  5 14:18:20 2018
+allesfitter - A global inference framework for photometry and radial velocity.
 
-@author:
-Dr. Maximilian N. Günther
-European Space Agency (ESA)
-European Space Research and Technology Centre (ESTEC)
-Keplerlaan 1, 2201 AZ Noordwijk, The Netherlands
-Email: maximilian.guenther@esa.int
-GitHub: mnguenther
-Twitter: m_n_guenther
-Web: www.mnguenther.com
+This package provides tools for joint modeling of photometric light curves
+and radial velocity measurements of exoplanetary and stellar systems.
+It supports various observational techniques including transit photometry,
+radial velocity, phase curves, and TTV (transit timing variations) analysis.
+
+Key Features:
+    - MCMC and Nested Sampling parameter estimation
+    - Gaussian Process regression for stellar variability
+    - Limb darkening modeling
+    - Flare and spot detection
+    - Chromatic transit modeling
+    - Injection-recovery simulations for transit detection
+
+Typical Usage:
+    >>> import allesfitter
+    >>> allesfitter.GUI()  # Launch Jupyter-based GUI
+    >>> # Or use command line:
+    >>> # prepare_allesfit /path/to/datadir
+
+Module Structure:
+    - config: Configuration and initialization
+    - basement: Core data and settings container
+    - computer: Model computation engine
+    - mcmc / nested_sampling: Bayesian inference methods
+    - priors: Prior transformations and noise estimation
+    - lightcurves: Limb darkening and light curve models
+    - plotting: Visualization utilities
+    - detection: Transit search and injection-recovery
+
+For detailed documentation, visit https://www.allesfitter.com
 """
 
-from __future__ import print_function, division, absolute_import
+from __future__ import print_function, division, absolute_import, annotations
 
-#::: modules
 import numpy as np
 import matplotlib.pyplot as plt
 import os
 import gzip
 import warnings
-try:
-   import cPickle as pickle
-except:
-   import pickle
+from typing import Any, Optional, Union
+import pickle
 from shutil import copyfile
+
 try:
     import emcee
-except:
-    pass
+except ImportError:
+    emcee = None
 
 #::: plotting settings
 import seaborn as sns
@@ -71,10 +88,14 @@ from .lightcurves import translate_limb_darkening_from_q_to_u as q_to_u
 from .lightcurves import translate_limb_darkening_from_u_to_q as u_to_q
 
 
-
-def GUI():
-    allesfitter_path = os.path.dirname( os.path.realpath(__file__) )
-    os.system( 'jupyter notebook "' + os.path.join(allesfitter_path,'GUI.ipynb') + '"' )
+def GUI() -> None:
+    """Launch the allesfitter Jupyter-based GUI.
+    
+    Opens the GUI notebook in a Jupyter environment for interactive
+    fitting and visualization of photometric and RV data.
+    """
+    allesfitter_path = os.path.dirname(os.path.realpath(__file__))
+    os.system('jupyter notebook "' + os.path.join(allesfitter_path, 'GUI.ipynb') + '"')
 
         
 

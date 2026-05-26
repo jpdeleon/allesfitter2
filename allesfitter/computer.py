@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Fri Oct  5 00:41:29 2018
+Model computation engine for allesfitter.
 
-@author:
-Dr. Maximilian N. Günther
-European Space Agency (ESA)
-European Space Research and Technology Centre (ESTEC)
-Keplerlaan 1, 2201 AZ Noordwijk, The Netherlands
-Email: maximilian.guenther@esa.int
-GitHub: mnguenther
-Twitter: m_n_guenther
-Web: www.mnguenther.com
+This module provides the core functions for computing astrophysical models
+including transit light curves, radial velocity curves, baseline models,
+and stellar variability. It interfaces with ellc (exoplanet light curve)
+and celerite for Gaussian Process modeling.
+
+Functions:
+    calculate_model: Compute the full astrophysical model (transit + RV + baseline).
+    calculate_baseline: Compute the baseline model only.
+    calculate_stellar_var: Compute stellar variability (spots, flares, etc.).
+    calculate_yerr_w: Calculate weighted error bars including jitter.
+    update_params: Update parameter dictionary with phased values.
+
+Module-Level Constants:
+    GPs: List of supported Gaussian Process kernel types.
+    FCTs: List of supported baseline function types.
 """
 
 from __future__ import print_function, division, absolute_import
@@ -138,19 +144,31 @@ def update_params(theta):
     for companion in config.BASEMENT.settings['companions_all']:
         try:
             params[companion+'_incl'] = np.arccos( params[companion+'_cosi'] )/np.pi*180.
-        except:
+        except (TypeError, KeyError, ValueError):
             params[companion+'_incl'] = None
         
        
     #=========================================================================
     #::: radii, per companion (radius_1 from rsuma, radius_2 from rr)
-    #::: radius_1 is shared (depends on rsuma)
-    #::: radius_2 is per-bandpass in chromatic mode (depends on rr_{bandpass})
+    #::: In achromatic mode radius_1 is a single shared value.
+    #::: In chromatic mode rsuma is achromatic but rr varies per bandpass,
+    #::: so rsuma = radius_1 + radius_2 cannot hold simultaneously across
+    #::: bands with one shared radius_1. We store a reference value here
+    #::: (from the achromatic base rr if present, else any bandpass rr) for
+    #::: callers that need a scalar (eclipse-geometry checks, phase-curve
+    #::: hacks). flux_subfct_ellc recomputes radius_1/radius_2 per-band so
+    #::: each bandpass's transit model is self-consistent.
     #=========================================================================
     for companion in config.BASEMENT.settings['companions_all']:
+        rr = params.get(companion+'_rr')
+        if rr is None and config.BASEMENT.settings.get('chromatic', False):
+            inst_phot = config.BASEMENT.settings.get('inst_phot', [])
+            if inst_phot:
+                rr_key = config.BASEMENT.get_rr_key(companion, inst_phot[0])
+                rr = params.get(rr_key)
         try:
-            params[companion+'_radius_1'] = params[companion+'_rsuma'] / (1. + params[companion+'_rr'])
-        except:
+            params[companion+'_radius_1'] = params[companion+'_rsuma'] / (1. + rr)
+        except (TypeError, KeyError, ZeroDivisionError):
             params[companion+'_radius_1'] = None
                 
                 
@@ -176,14 +194,35 @@ def update_params(theta):
                     params[obj+'_ldc_'+inst] = params[obj+'_ldc_q1'+ldc_suffix]
                     
                 elif config.BASEMENT.settings[obj+'_ld_law_'+inst] == 'quad':
-                    params[obj+'_ldc_'+inst] = q_to_u([params[obj+'_ldc_q1'+ldc_suffix],
-                                                       params[obj+'_ldc_q2'+ldc_suffix]], 
+                    _q1k = obj+'_ldc_q1'+ldc_suffix
+                    _q2k = obj+'_ldc_q2'+ldc_suffix
+                    if params.get(_q1k) is None or params.get(_q2k) is None:
+                        raise ValueError(
+                            "Limb-darkening coefficients '%s' and/or '%s' are "
+                            "missing from params.csv (got None) but settings.csv "
+                            "declares %s_ld_law_%s='quad'. Add the q1/q2 rows "
+                            "to params.csv, or set %s_ld_law_%s=None to disable "
+                            "limb darkening for this instrument."
+                            % (_q1k, _q2k, obj, inst, obj, inst)
+                        )
+                    params[obj+'_ldc_'+inst] = q_to_u([params[_q1k], params[_q2k]],
                                                       law='quad')
-                    
+
                 elif config.BASEMENT.settings[obj+'_ld_law_'+inst] == 'sing':
-                    params[obj+'_ldc_'+inst] = q_to_u([params[obj+'_ldc_q1'+ldc_suffix], 
-                                                       params[obj+'_ldc_q2'+ldc_suffix], 
-                                                       params[obj+'_ldc_q3'+ldc_suffix]],
+                    _q1k = obj+'_ldc_q1'+ldc_suffix
+                    _q2k = obj+'_ldc_q2'+ldc_suffix
+                    _q3k = obj+'_ldc_q3'+ldc_suffix
+                    if (params.get(_q1k) is None or params.get(_q2k) is None
+                            or params.get(_q3k) is None):
+                        raise ValueError(
+                            "Limb-darkening coefficients '%s', '%s', '%s' are "
+                            "missing from params.csv (got None) but settings.csv "
+                            "declares %s_ld_law_%s='sing'."
+                            % (_q1k, _q2k, _q3k, obj, inst)
+                        )
+                    params[obj+'_ldc_'+inst] = q_to_u([params[_q1k],
+                                                       params[_q2k],
+                                                       params[_q3k]],
                                                       law='sing')
         
                 else:
@@ -253,7 +292,7 @@ def update_params(theta):
         try:
             a_1 = 0.019771142 * params[companion+'_K'] * params[companion+'_period'] * np.sqrt(1. - params[companion+'_ecc']**2)/np.sin(params[companion+'_incl']*np.pi/180.)
             params[companion+'_a'] = (1.+1./params[companion+'_q'])*a_1
-        except:
+        except (TypeError, KeyError, ZeroDivisionError, ValueError):
             params[companion+'_a'] = None
         if params[companion+'_a'] == 0.:
             params[companion+'_a'] = None
@@ -486,14 +525,26 @@ def flux_subfct_ellc(params, inst, companion, xx=None, settings=None, t_exp=None
     rr_key = config.BASEMENT.get_rr_key(companion, inst)
     rr = params.get(rr_key)
     
+    # Fall back to achromatic key if chromatic key doesn't exist in params
+    if rr is None:
+        rr = params.get(f'{companion}_rr')
+    
     if (rr is not None) and (rr > 0):
-        # Compute radius_2 from bandpass-specific rr
-        radius_2 = params[companion+'_radius_1'] * rr
-        
+        # Recompute radius_1/radius_2 per-band so rsuma = radius_1 + radius_2
+        # holds for this bandpass (required for chromatic mode; reduces to the
+        # achromatic value when rr == params[companion+'_rr']).
+        rsuma = params[companion+'_rsuma']
+        if rsuma is not None:
+            radius_1 = rsuma / (1. + rr)
+            radius_2 = radius_1 * rr
+        else:
+            radius_1 = params[companion+'_radius_1']
+            radius_2 = radius_1 * rr
+
         model_flux1, model_flux2 = ellc.fluxes(
-                                    t_obs =       xx, 
-                                    radius_1 =    params[companion+'_radius_1'], 
-                                    radius_2 =    radius_2, 
+                                    t_obs =       xx,
+                                    radius_1 =    radius_1,
+                                    radius_2 =    radius_2,
                                     sbratio =     params[companion+'_sbratio_'+inst], 
                                     incl =        params[companion+'_incl'], 
                                     # light_3 =     _calc_light_3(params.get('dil_'+inst)), #fluxes does not take light_3

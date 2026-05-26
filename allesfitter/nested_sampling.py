@@ -1,17 +1,24 @@
 #!/usr/bin/env python2
 # -*- coding: utf-8 -*-
 """
-Created on Fri Oct  5 01:05:28 2018
+Nested Sampling inference module.
 
-@author:
-Dr. Maximilian N. Günther
-European Space Agency (ESA)
-European Space Research and Technology Centre (ESTEC)
-Keplerlaan 1, 2201 AZ Noordwijk, The Netherlands
-Email: maximilian.guenther@esa.int
-GitHub: mnguenther
-Twitter: m_n_guenther
-Web: www.mnguenther.com
+This module provides Dynamic Nested Sampling using dynesty for Bayesian
+parameter estimation. It computes the Bayesian evidence (log Z) which enables
+model comparison via Bayes factors. Supports both static and dynamic sampling
+modes for efficient evidence estimation.
+
+Functions:
+    ns_fit: Run nested sampling for parameter inference and evidence calculation.
+    ns_lnlike: Compute log-likelihood for nested sampling.
+    ns_lnprior: Compute log-prior for nested sampling.
+
+Notes
+-----
+    - Uses dynesty for nested sampling
+    - Supports static and dynamic sampling modes
+    - Computes Bayesian evidence for model comparison
+    - Saves results as compressed pickle files
 """
 
 from __future__ import print_function, division, absolute_import

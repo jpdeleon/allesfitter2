@@ -418,7 +418,13 @@ def tessplot(time, y, yerr=None, clip=False, sharey=False, axes=None, **kwargs):
     
         #::: set up the figure
         N = len(sectors)
-        fig, axes = plt.subplots(N, figsize=(12,3*N), tight_layout=True, sharey=sharey)
+        if N == 0:
+            fig, axes = plt.subplots(1, figsize=(12, 3), tight_layout=True)
+            axes = np.atleast_1d(axes)
+            axes[0].set_xlim(time.min()-0.5, time.max()+0.5)
+            _set_axes(axes[0], time, y, labels={'show_x': True})
+        else:
+            fig, axes = plt.subplots(N, figsize=(12,3*N), tight_layout=True, sharey=sharey)
             
         #::: loop over all sectors/axes to set up each axis
         for i, s in enumerate(sectors):

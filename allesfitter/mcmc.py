@@ -1,17 +1,27 @@
 #!/usr/bin/env python2
 # -*- coding: utf-8 -*-
 """
-Created on Fri Oct  5 01:03:21 2018
+MCMC (Markov Chain Monte Carlo) inference module.
 
-@author:
-Dr. Maximilian N. Günther
-European Space Agency (ESA)
-European Space Research and Technology Centre (ESTEC)
-Keplerlaan 1, 2201 AZ Noordwijk, The Netherlands
-Email: maximilian.guenther@esa.int
-GitHub: mnguenther
-Twitter: m_n_guenther
-Web: www.mnguenther.com
+This module provides MCMC sampling using emcee for Bayesian parameter estimation
+of exoplanetary and stellar systems. It supports parallel tempering via
+multiprocessing and produces posterior samples, burn-in diagnostics, and
+chain visualization.
+
+Functions:
+    mcmc_fit: Run MCMC sampling for parameter inference.
+    mcmc_lnlike: Compute log-likelihood for MCMC.
+    mcmc_lnprior: Compute log-prior for MCMC.
+    mcmc_lnprob: Compute log-posterior (prior + likelihood).
+
+Classes:
+    MCMCSampler: Custom sampler with additional diagnostics.
+
+Notes
+-----
+    - Uses emcee for ensemble sampling
+    - Supports parallel processing for multiple temperatures
+    - Produces HDF5 backend for chain storage
 """
 
 from __future__ import print_function, division, absolute_import

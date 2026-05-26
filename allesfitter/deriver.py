@@ -267,21 +267,35 @@ def derive(samples, mode):
     def get_rr_key_for_derive(companion, inst=None):
         """Get the rr key for derived parameters.
         
-        For chromatic mode: use first band's rr
+        For chromatic mode: use first band's rr (if it exists in fitkeys/params)
         For achromatic mode: use standard rr
         """
         bandpass = get_first_bandpass()
         if bandpass:
-            return f'{companion}_rr_{bandpass}'
+            chromatic_rr_key = f'{companion}_rr_{bandpass}'
+            if chromatic_rr_key in config.BASEMENT.fitkeys or chromatic_rr_key in config.BASEMENT.params:
+                return chromatic_rr_key
         return f'{companion}_rr'
     
     def get_all_rr_keys(companion):
-        """Get all rr keys for all bandpasses (for chromatic mode)."""
+        """Get all rr keys for all bandpasses (for chromatic mode).
+        
+        Only returns keys that actually exist in fitkeys or params.
+        Falls back to achromatic rr if no chromatic keys exist.
+        """
         bandpass_dict = config.BASEMENT.settings.get('bandpass', {})
         if not bandpass_dict:
             return [f'{companion}_rr']
-        unique_bandpasses = set(bandpass_dict.values())
-        return [f'{companion}_rr_{bp}' for bp in unique_bandpasses]
+        
+        chromatic_keys = []
+        for bp in set(bandpass_dict.values()):
+            rr_key = f'{companion}_rr_{bp}'
+            if rr_key in config.BASEMENT.fitkeys or rr_key in config.BASEMENT.params:
+                chromatic_keys.append(rr_key)
+        
+        if chromatic_keys:
+            return chromatic_keys
+        return [f'{companion}_rr']
 
     derived_samples = {}
     for cc in companions:
@@ -665,7 +679,7 @@ def derive(samples, mode):
                 
         
     names.append( 'combined_host_density' )
-    labels.append( 'Combined host density from all orbits; $\rho_\mathrm{\star; combined}$ (cgs)' )
+    labels.append( 'Combined host density from all orbits; $\\rho_{\\mathrm{\\star,\\,combined}}$ (cgs)' )
         
             
     ###############################################################################
@@ -673,8 +687,10 @@ def derive(samples, mode):
     ###############################################################################
     ind_good = []
     for i,name in enumerate(names):
-        if (name in derived_samples) and isinstance(derived_samples[name], np.ndarray) and not all(np.isnan(derived_samples[name])) and not all(np.array(derived_samples[name])==0):
-            ind_good.append(i)
+        if (name in derived_samples) and isinstance(derived_samples[name], np.ndarray):
+            arr = np.asarray(derived_samples[name], dtype=float)
+            if not np.all(np.isnan(arr)) and not np.all(arr == 0):
+                ind_good.append(i)
             
     names = [ names[i] for i in ind_good ]
     labels = [ labels[i] for i in ind_good ]
@@ -766,14 +782,15 @@ def derive(samples, mode):
                         #for tick in caxes[i,j].xaxis.get_major_ticks(): tick.label.set_fontsize(24) 
                         #for tick in caxes[i,j].yaxis.get_major_ticks(): tick.label.set_fontsize(24)    
             else:
-                caxes.set_title(ctitle)
-                caxes.xaxis.set_label_coords(0.5, -0.5)
-                caxes.yaxis.set_label_coords(-0.5, 0.5)
+                ax0 = np.atleast_2d(caxes)[0,0]
+                ax0.set_title(ctitle)
+                ax0.xaxis.set_label_coords(0.5, -0.5)
+                ax0.yaxis.set_label_coords(-0.5, 0.5)
         
         dpi = np.max(( 100. - len(names), 50 ))
         try: #some matplitlib versions cannot handle jpg
             fig.savefig( os.path.join(config.BASEMENT.outdir,mode+'_derived_corner.jpg'), dpi=dpi, bbox_inches='tight' )
-        except:
+        except Exception:
             fig.savefig( os.path.join(config.BASEMENT.outdir,mode+'_derived_corner.png'), bbox_inches='tight' )
         plt.close(fig)
         

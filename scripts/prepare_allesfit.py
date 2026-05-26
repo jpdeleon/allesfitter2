@@ -512,36 +512,69 @@ def main():
         logger.info("Updating params.csv")
 
         # =====Update params.csv=====
+        # Iterate BASEMENT.allkeys (every row in the prior params.csv), not
+        # just BASEMENT.fitkeys. Previously, fixed parameters (e.g. an LDC
+        # pair pinned at a fitted value, dilution, fixed eccentricity terms)
+        # were silently dropped from params2.csv — leading to None values at
+        # ns_fit time and a cryptic numpy ufunc TypeError when q_to_u tried
+        # to sqrt(None). Now fitted keys get the posterior-derived prior row
+        # and fixed keys get a faithful `name,value,0,,label,unit,` copy.
         text = """#name,value,fit,bounds,label,unit,coupled_with\n"""
         try:
-            # See https://github.com/MNGuenther/allesfitter/blob/master/allesfitter/general_output.py#L935
-            ll = alles.posterior_params_ll.copy() #1-sigma lower error: 16th per
-            median = alles.posterior_params_median.copy() #50th percentile
-            ul = alles.posterior_params_ul.copy() #1-sigma upper error: 84th perc - median
-            for name,label,unit in zip(alles.BASEMENT.fitkeys,
-                                       alles.BASEMENT.fitlabels,
-                                       alles.BASEMENT.fitunits):
-                norm_test = anderson(alles.posterior_params[name], dist='norm')
-                # critical values: 15%, 10%, 5%, 2.5%, 1%
-                # a crit val of 5% corresponds to 95% confidence level
-                # if statistic < crit val --> fail to reject normality
-                dist = 'normal' if norm_test.statistic < norm_test.critical_values[0] else 'uniform'
-                if dist=='normal':
-                    # or use scipy.normal.fit?
-                    l_err,mid,u_err = ll[name], median[name], ul[name]
-                    sig = np.sqrt(l_err**2+u_err**2)
-                    text += f"{name},{mid:6f},1,normal {mid:6f} {sig:6f},{label},{unit},\n"
-                    if debug:
-                        logger.info(f"{mid:.6f} +{u_err:.6f} -{l_err:.6f}")
-                elif dist=='uniform':                    
-                    # or use scipy.uniform.fit?
-                    l_limit,mid,u_limit = np.nanpercentile(alles.posterior_params[name], q=[1,50,99])
-                    text += f"{name},{mid:6f},1,uniform {l_limit:6f} {u_limit:6f},{label},{unit},\n"
-                    if debug:
-                        logger.info(f"{l_limit:.6f} < {mid:.6f} < {u_limit:.6f}")
+            ll = alles.posterior_params_ll.copy()      # 16th percentile
+            median = alles.posterior_params_median.copy()  # 50th percentile
+            ul = alles.posterior_params_ul.copy()      # 84th percentile
+            _fitkeys_set = set(alles.BASEMENT.fitkeys)
+            for i, name in enumerate(alles.BASEMENT.allkeys):
+                label = alles.BASEMENT.labels[i]
+                unit = alles.BASEMENT.units[i]
+                if name in _fitkeys_set:
+                    # Fitted parameter: derive prior from posterior shape.
+                    norm_test = anderson(alles.posterior_params[name], dist='norm')
+                    # crit vals at 15/10/5/2.5/1%; statistic < crit[0] (15%)
+                    # → fail to reject normality.
+                    dist = ('normal'
+                            if norm_test.statistic < norm_test.critical_values[0]
+                            else 'uniform')
+                    if dist == 'normal':
+                        l_err, mid, u_err = ll[name], median[name], ul[name]
+                        sig = np.sqrt(l_err**2 + u_err**2)
+                        text += (
+                            f"{name},{mid:6f},1,normal {mid:6f} {sig:6f},"
+                            f"{label},{unit},\n"
+                        )
+                        if debug:
+                            logger.info(
+                                f"{name}: {mid:.6f} +{u_err:.6f} -{l_err:.6f} (normal)"
+                            )
+                    elif dist == 'uniform':
+                        l_limit, mid, u_limit = np.nanpercentile(
+                            alles.posterior_params[name], q=[1, 50, 99]
+                        )
+                        text += (
+                            f"{name},{mid:6f},1,uniform {l_limit:6f} {u_limit:6f},"
+                            f"{label},{unit},\n"
+                        )
+                        if debug:
+                            logger.info(
+                                f"{name}: {l_limit:.6f} < {mid:.6f} < {u_limit:.6f} (uniform)"
+                            )
+                    else:
+                        msg = "distribution is not uniform or normal!"
+                        logger.error(msg); sys.exit()
                 else:
-                    msg = "distribution is not uniform or normal!"
-                    logger.error(msg); sys.exit()       
+                    # Fixed parameter: preserve from BASEMENT.params so the
+                    # generated params2.csv stays a complete drop-in for
+                    # params.csv. Skip None values (intentionally absent
+                    # entries — e.g. LD law set to None for an instrument).
+                    val = alles.BASEMENT.params.get(name)
+                    if val is None:
+                        if debug:
+                            logger.info(f"{name}: skipping (value is None)")
+                        continue
+                    text += f"{name},{val},0,,{label},{unit},\n"
+                    if debug:
+                        logger.info(f"{name}: {val} (fixed)")
         except Exception as e:
             logger.error(f"Error: {e}")
 
