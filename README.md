@@ -1,15 +1,19 @@
 # allesfitter2
 
-An extension of the original allesfitter package that streamlines the process of downloading TESS lightcurves and automatically generating all necessary files to run allesfitter.
+An extension of the original allesfitter package that streamlines the process of downloading TESS, K2, and Kepler lightcurves and automatically generating all necessary files to run allesfitter.
 
 ## Features
 
-- **Automated lightcurve download** from TESS mission data
-- **Multi-pipeline support** (SPOC, QLP) with configurable parameters
-- **Parameter derivation** from multiple astronomical databases
-- **Flexible sector selection** (single, multiple, or all available sectors)
+- **Automated lightcurve download** from TESS, K2, and Kepler mission data
+- **Multi-pipeline support** (SPOC, QLP, EVEREST, K2SFF) with configurable parameters
+- **Parameter derivation** from multiple astronomical databases (NExSci, TOI, CTOI, TIC)
+- **Flexible time-window selection** — TESS sectors, K2 campaigns (including split campaigns 11a/11b), and Kepler quarters (single, multiple, or all)
+- **Chromatic transit modeling** — fit a separate `Rp/Rs` per bandpass while keeping orbital parameters globally shared
+- **Strict configuration validation** — clear errors for bandpass/instrument count mismatch, duplicate params, unknown bandpass suffixes, or chromatic/achromatic shape inconsistencies (no more silent fallback)
+- **Raw-flux outlier clipping** via `flux_min_raw` / `flux_max_raw` — clipped points are removed from the fit but overlaid in red on `initial_guess.pdf`
 - **Built-in quality control** with outlier removal and quality masking
 - **Theoretical limb darkening** coefficients from Claret tables using [limbdark](https://github.com/jpdeleon/limbdark2)
+- **Test suite** under `tests/chromatic/` pins the chromatic contract with 46 unit, parsing, likelihood-assembly, and end-to-end fit tests
 
 ## Installation
 
@@ -158,6 +162,63 @@ baseline_flux_qlp,sample_GP_Matern32
 ```
 The pipeline will expect two lightcurves named `spoc.csv` and `qlp.csv`.
 
+### Chromatic transit modeling (per-band Rp/Rs)
+
+Fit a separate radius ratio per bandpass while keeping `period`, `epoch`, `cosi`, `rsuma`, and eccentricity globally shared. Useful when combining TESS+Kepler, multiple ground-based filters, or cross-mission archival data.
+
+```bash
+prepare_allesfit -name "K2-237" -m k2 -c all -p everest -f tess k2 -bp tess k2
+```
+
+This emits a `bandpass,tess k2` row in `settings.csv` and per-bandpass rows in `params.csv`:
+
+```csv
+# settings.csv
+inst_phot,tess k2
+bandpass,tess k2
+
+# params.csv
+b_rr_tess,0.0823,1,uniform 0 0.3,$R_b / R_\star (\mathrm{tess})$,,
+b_rr_k2,  0.0801,1,uniform 0 0.3,$R_b / R_\star (\mathrm{k2})$,,
+host_ldc_q1_tess, ...
+host_ldc_q1_k2,   ...
+```
+
+Chromatic mode activates when there are **≥ 2 unique** bandpass labels. The parser then requires:
+
+| Parameter family | Scope |
+|---|---|
+| `b_period`, `b_epoch`, `b_cosi`, `b_rsuma`, `b_f_c`, `b_f_s`, `b_K` | **Global** — single-keyed |
+| `b_rr_<bandpass>` | **Per bandpass** — one row per unique band |
+| `host_ldc_q1/q2_<bandpass>`, `host_ldc_u*_<bandpass>` | **Per bandpass** |
+| `dil_<inst>`, `baseline_*_flux_<inst>`, `ln_err_flux_<inst>`, `b_sbratio_<inst>` | **Per instrument** |
+
+The validator raises clearly on common mistakes:
+- `bandpass` entry count ≠ `inst_phot` entry count
+- Duplicate parameter rows in `params.csv`
+- Unknown bandpass suffix (e.g. typo `b_rr_tes` vs `tess`)
+- Chromatic `settings.csv` paired with achromatic `params.csv` (only `b_rr` row)
+- Mixed shape (`b_rr` + partial `b_rr_<bp>` rows)
+
+To **share** a single bandpass across multiple instruments (e.g. two TESS pipelines), repeat the label:
+```bash
+prepare_allesfit -name "HD 39091" -s 1 -f tess_pdcsap tess_qlp -bp tess tess
+```
+This stays `chromatic=False` (single unique band) but ties both instruments to one `b_rr_tess` and one set of bandpass-suffixed LDCs.
+
+If `-bp` is **omitted** with multiple distinct `-f` instruments, the script warns and falls back to an achromatic `params.csv` for backward compatibility.
+
+### Raw-flux outlier clipping
+
+Add to `settings.csv` to drop rows outside the given flux window:
+
+```
+flux_min_raw,0.9
+flux_max_raw,1.1
+```
+
+Either bound is optional (one-sided clipping). Clipped points are removed from the likelihood **and** retained for display — they appear as red ✕ markers on the photometric `full` panels in `initial_guess.pdf` and `ns_fit_<companion>.pdf`.
+
 ### Lightcurves from different exposure times
 You should also be specific which exposure time to use. By default, 120s is good enough to produce reliable results. 
 
@@ -180,28 +241,36 @@ In case only long cadence e.g. exp=1800s data is available, you should also set 
 | `-ctoi <ID>` | CTOI (Community TOI) ID | `-ctoi 12345` |
 | `-name <NAME>` | Target name (NExSci database) | `-name "HD 39091"` |
 
-### Data Selection (required)
+### Data Selection (mutually exclusive, required)
 
-| Option | Description | Example |
-|--------|-------------|---------|
-| `-s, --sector <SECTORS>` | TESS sectors | `-s 1 3 5` |
-| | Most recent sector | `-s -1` |
-| | First sector | `-s 0` |
-| | All available sectors | `-s all` |
+Exactly one of `-s`, `-c`, or `-q` must be given, matched to the mission supplied via `-m`.
+
+| Option | Mission | Description | Example |
+|--------|---------|-------------|---------|
+| `-s, --sector <S>` | TESS | Sector number(s) | `-s 1 3 5` |
+| `-c, --campaign <C>` | K2 | Campaign number(s) (supports `11a`, `11b`) | `-c all` |
+| `-q, --quarter <Q>` | Kepler | Quarter number(s) | `-q 4` |
+
+Each accepts:
+- explicit numbers/labels: `-s 1 3 5`, `-c 11a 11b`
+- `-1` for the most recent (default), `0` for the first
+- `all` for every available time window
 
 ### Data Processing Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `-e, --exptime <SEC>` | Exposure time filter | None |
+| `-m, --mission <NAME>` | `tess`, `k2`, or `kepler` | `tess` |
+| `-e, --exptime <SEC>` | Exposure time in seconds (`120`, `200`, `600`, `1800`); written to `settings.csv` as `t_exp_<inst>` in days (`-e 120` → `0.001389`) | None (uses lightkurve metadata) |
 | `-p, --pipeline <NAME>` | Data pipeline | `spoc` |
 | `-lc, --lc_type <TYPE>` | Light curve type | `pdcsap` |
 | `-sig, --sigma <N>` | Sigma clipping threshold | None |
 | `-qb, --quality <LEVEL>` | Quality bitmask | `default` |
 
 **Pipeline Options:**
-- `spoc`: TESS Science Processing Operations Center (recommended)
-- `qlp`: Quick Look Pipeline
+- TESS: `spoc` (recommended), `qlp`
+- K2: `k2`, `everest`, `k2sff`
+- Kepler: `kepler`
 
 **Light Curve Types:**
 - `pdcsap`: Pre-search Data Conditioning SAP (recommended)
@@ -209,14 +278,24 @@ In case only long cadence e.g. exp=1800s data is available, you should also set 
 
 **Quality Levels:** `none`, `default`, `hard`, `hardest`
 
+### Chromatic Modeling
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `-bp, --bandpass <LABELS>` | Space-separated bandpass labels, one per `--filename`. Activates chromatic mode in the generated `settings.csv` and emits per-band `{pl}_rr_<bp>` / `host_ldc_q*_<bp>` rows in `params.csv`. Repeat a label to share a band across instruments. | None (achromatic) |
+
+When `-f` has ≥2 distinct instruments and `-bp` is omitted, the script logs a warning that the run will stay achromatic and shows the exact command to enable chromatic mode.
+
 ### File Management
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `-f, --filename <NAME>` | Output filename prefix | `tess` |
+| `-f, --filename <NAME>` | Output filename prefix; accepts multiple instruments | `tess` |
 | `-dir <PATH>` | Base directory | current |
 | `-o, --overwrite` | Overwrite existing files | False |
 | `-r, --results_dir <PATH>` | Update from previous results | None |
+| `--lc-only` | Only download the lightcurve, skip generating config files | False |
+| `--ttv` | Emit per-transit TTV rows in `params.csv` (count derived from observed transits) | False |
 
 ### Interactive Options
 
@@ -265,6 +344,21 @@ In case only long cadence e.g. exp=1800s data is available, you should also set 
 - Check database connectivity with `-u`
 - Try interactive mode for manual input
 
+**"Chromatic configuration mismatch between settings.csv and params.csv"**
+- Your `settings.csv` declares `bandpass,<...>` (chromatic) but `params.csv` still has the achromatic `b_rr` row, or has only some of the expected `b_rr_<bandpass>` rows.
+- Replace `b_rr` with one row per unique bandpass: `b_rr_tess`, `b_rr_k2`, etc.
+- The error message lists exactly which keys to add and/or remove.
+
+**"params.csv references unknown bandpass(es)"**
+- A `b_rr_<suffix>` row uses a suffix that isn't in your `settings.csv` `bandpass` list — usually a typo (`b_rr_tes` vs `tess`).
+- Fix the suffix to match one of the labels in `bandpass`, or add a new label to `bandpass`.
+
+**"settings.csv 'bandpass' has N entries but inst_phot has M entries"**
+- `bandpass` and `inst_phot` must have the same number of space-separated entries; repeat a label to share a band across instruments.
+
+**`KeyError: 'b_rr'` in chromatic mode**
+- Fixed in current main; pull the latest and re-run `show_initial_guess`/`ns_fit`.
+
 ### Debug Mode
 
 Enable comprehensive diagnostics:
@@ -310,6 +404,33 @@ Shows:
 - **Memory usage** scales with sector count and cadence
 - **Convergence** varies by parameter complexity and data quality
 - **Parallel processing** significantly reduces fit time
+
+## Testing
+
+A pytest-based regression suite under `tests/` pins the chromatic contract and core utilities. Install the optional `test` extras and run:
+
+```bash
+pip install -e ".[test]"
+
+# Fast suite (default — excludes @pytest.mark.slow):
+pytest tests/
+
+# Chromatic-only:
+pytest tests/chromatic/
+
+# Include the end-to-end NS fits (~30 s extra):
+pytest tests/chromatic/ -m ''
+```
+
+`tests/chromatic/` covers:
+
+- **Scope mapping** — global vs. per-bandpass vs. per-instrument keys, `get_rr_key`/`get_ldc_key` semantics, three-state edge cases (achromatic / single-bandpass / chromatic).
+- **Parser errors** — bandpass count mismatch, duplicate rows, unknown bandpass suffix, chromatic-vs-achromatic shape inconsistencies.
+- **Likelihood assembly** — `ellc.fluxes` is monkeypatched to assert per-band `rr`, per-inst LDC, and bit-equal shared orbital params across instruments.
+- **Raw-flux clipping** — clipped rows excluded from the fit and retained under `data[inst]['raw_clipped_*']` for the red overlay.
+- **End-to-end NS fit** — recovers injected `b_rr_tess` and `b_rr_k2` from synthetic two-band data; achromatic backcompat baseline.
+
+See `docs/chromatic_validation.md` for the full requirement → code → test mapping.
 
 ## Citation
 
