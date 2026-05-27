@@ -1199,6 +1199,8 @@ def main():
         # =====Create run.py===== #
         text4 = """#!/usr/bin/env python
 import allesfitter
+import os
+os.nice(19)
 
 fig = allesfitter.show_initial_guess('.')
 #allesfitter.prepare_ttv_fit('.', style='tessplot')
