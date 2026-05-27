@@ -39,6 +39,12 @@ dependencies = [
     "limbdark @ git+https://github.com/jpdeleon/limbdark2.git",
 ]
 
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0.0",
+    "mypy>=1.0.0",
+]
+
 [project.urls]
 Homepage = "https://github.com/MNGuenther/allesfitter"
 Download = "https://github.com/jpdeleon/allesfitter2"

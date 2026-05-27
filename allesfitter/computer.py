@@ -166,6 +166,13 @@ def update_params(theta):
             if inst_phot:
                 rr_key = config.BASEMENT.get_rr_key(companion, inst_phot[0])
                 rr = params.get(rr_key)
+        # Backfill the achromatic key so legacy code paths that read
+        # `params[c+'_rr']` directly (host-density prior, host-density-only
+        # branch, phase-curve hack at ~805) still work in chromatic mode.
+        # flux_subfct_ellc keeps using get_rr_key first, so the per-band
+        # value still wins where it matters; this is only a fallback scalar.
+        if (companion+'_rr') not in params or params[companion+'_rr'] is None:
+            params[companion+'_rr'] = rr
         try:
             params[companion+'_radius_1'] = params[companion+'_rsuma'] / (1. + rr)
         except (TypeError, KeyError, ZeroDivisionError):

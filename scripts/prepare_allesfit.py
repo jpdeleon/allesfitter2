@@ -83,16 +83,48 @@ filter_widths = {
 
 cols = ["time", "flux", "flux_err"]
 
-# Preset t_exp values (days) keyed by the instrument label used in settings.csv.
-# When a --filename entry matches one of these keys, the t_exp_{fn} row is
-# written with the preset value instead of being recomputed from --exp.
-# Values are seconds / 86400.
-T_EXP_DAYS = {
-    120:   0.001389,   # 120 s
-    200:   0.002312,   # 200 s
-    600:   0.006944,   # 600 s
-    1800:  0.020833,   # 1800 s    
-}
+
+def _parse_segment_label(mission_str):
+    """Last whitespace token of a lightkurve `mission` string, kept as str.
+
+    TESS sectors and Kepler quarters are integers (e.g. 'TESS Sector 82'
+    → '82'); K2 campaigns may carry an alpha suffix when split, e.g.
+    'K2 Campaign 11a' → '11a' / '11b'. Returning the raw token preserves
+    that distinction; downstream comparisons must use string equality
+    (the helper below normalizes the other side).
+    """
+    return str(mission_str).split()[-1]
+
+
+def _segments_match(a, b):
+    """Tolerant segment-id equality (handles int vs str-with-suffix)."""
+    return str(a) == str(b)
+
+
+def _natural_segment_sort_key(s):
+    """Sort key for segment labels: numeric prefix then alpha suffix."""
+    s = str(s)
+    n = 0
+    while n < len(s) and s[n].isdigit():
+        n += 1
+    head = int(s[:n]) if n else float('inf')
+    return (head, s[n:])
+
+
+def _segment_word(mission, plural=False):
+    """User-facing word for a mission's time-window unit.
+
+    TESS uses 'sector', K2 uses 'campaign', Kepler uses 'quarter'. Used in
+    log messages and plot titles so output matches the mission the user
+    actually queried.
+    """
+    base = {
+        "tess": "sector",
+        "k2": "campaign",
+        "kepler": "quarter",
+    }.get(str(mission).lower(), "sector")
+    return base + ("s" if plural else "")
+
 
 Nsamples = 10_000
 planets = "b c d e f g h i j k".split()
@@ -403,6 +435,22 @@ def main():
         action="store_true",
         default=False,
     )
+    ap.add_argument(
+        "-bp", "--bandpass",
+        help=(
+            "Bandpass label(s) for chromatic transit modeling, one per "
+            "instrument given by --filename (space-separated). The count "
+            "must equal len(--filename); repeat a label to share a band "
+            "across instruments. Examples: "
+            "-f tess kepler -bp tess kepler (chromatic, separate Rp/Rs "
+            "per band); -f tess_pdcsap tess_qlp -bp tess tess (single-band, "
+            "two pipelines sharing one rr/LDC). "
+            "If omitted, params.csv is generated achromatically (a single "
+            "{pl}_rr row); a warning is logged when --filename has multiple "
+            "distinct instruments to make sure that's intentional."
+        ),
+        type=str, nargs="+", default=None,
+    )
 
     args = ap.parse_args(None if sys.argv[1:] else ["-h"])
 
@@ -446,20 +494,23 @@ def main():
         if not result:
             logger.error("No lightcurve found. Check inputs.")
             sys.exit()
-        
-        sectors = list(map(int, [s.split()[-1] for s in result.mission]))
-        unique_sectors = sorted(set(sectors))
-        
+
+        # Keep segment labels as strings so K2 campaigns like '11a'/'11b'
+        # (which can't cast to int) are preserved alongside TESS sectors.
+        sectors = [_parse_segment_label(s) for s in result.mission]
+        unique_sectors = sorted(set(sectors), key=_natural_segment_sort_key)
+
         # Handle sector flag (args.sector is a list like ["all"] or [10])
         if sector == ["all"]:
             sector_to_use = unique_sectors
         else:
             sector_to_use = sector if isinstance(sector, list) else [sector]
-        
+
         idx = [str(s) in [str(x) for x in sector_to_use] for s in sectors]
-        
+
         if sum(idx) == 0:
-            msg = f"Sector {sector} not available. Available: {unique_sectors}"
+            _w = _segment_word(mission).capitalize()
+            msg = f"{_w} {sector} not available. Available: {unique_sectors}"
             logger.error(msg)
             sys.exit()
         
@@ -685,6 +736,64 @@ def main():
         ttv = args.ttv
         fns = args.filename if isinstance(args.filename, list) else [args.filename]
         fn = fns[0]  # first instrument (used where a single filename is needed)
+
+        # ----------------------------------------------------------------- #
+        # Bandpass resolution for chromatic mode.
+        # bp_list  : one bandpass label per instrument, parallel to fns.
+        # rr_suffixes  : list of suffixes used to key per-band rr rows.
+        #                Empty list when achromatic (no `_<suffix>`).
+        # ldc_suffixes : list of suffixes used to key LDC rows.
+        #                When chromatic / bandpass-aware: unique bandpass set.
+        #                Otherwise: the per-inst names in fns.
+        # write_bandpass_line : whether settings.csv should carry a
+        #                       `bandpass,<...>` row.
+        # ----------------------------------------------------------------- #
+        if args.bandpass is None:
+            bp_list = None
+            rr_suffixes = []           # achromatic: single {pl}_rr row
+            ldc_suffixes = list(fns)   # per-instrument LDCs
+            write_bandpass_line = False
+            # Loud heads-up when the user gave several distinct instruments
+            # but didn't ask for chromatic — that combination usually means
+            # they wanted a per-band rr and forgot. Stay achromatic (backward
+            # compatible) but make sure they see what they're getting.
+            if len(set(fns)) >= 2:
+                _bp_hint = " ".join(fns)
+                logger.warning(
+                    f"--bandpass not set, --filename has {len(set(fns))} distinct "
+                    f"instruments ({fns}). The generated params.csv will be "
+                    f"ACHROMATIC: a single {{pl}}_rr row shared by all "
+                    f"instruments, and per-instrument LDCs."
+                )
+                logger.warning(
+                    f"  - For chromatic (separate Rp/Rs per band): "
+                    f"add `-bp {_bp_hint}` to your command."
+                )
+                logger.warning(
+                    f"  - To group all instruments under one shared "
+                    f"bandpass: add `-bp {fns[0]} {fns[0]}` (repeat one label)."
+                )
+        else:
+            if len(args.bandpass) != len(fns):
+                logger.error(
+                    f"--bandpass has {len(args.bandpass)} entries but --filename has "
+                    f"{len(fns)} entries; each instrument needs an explicit bandpass "
+                    f"label (repeat the same label to share). Got bandpass={args.bandpass}, "
+                    f"filenames={fns}."
+                )
+                sys.exit(1)
+            bp_list = list(args.bandpass)
+            # Preserve first-seen order so the emitted rows stay deterministic.
+            _seen = set()
+            unique_bp = [b for b in bp_list if not (b in _seen or _seen.add(b))]
+            rr_suffixes = list(unique_bp)   # one rr row per unique bandpass
+            ldc_suffixes = list(unique_bp)  # one LDC set per unique bandpass
+            write_bandpass_line = True
+            logger.info(
+                f"Chromatic config: inst_phot={fns}, bandpass={bp_list} "
+                f"({len(unique_bp)} unique → "
+                f"{'chromatic' if len(unique_bp) > 1 else 'shared single-band'})"
+            )
 
         # Unify the "segment" concept across missions: `sector` is always a
         # list-of-str id — TESS sector / K2 campaign / Kepler quarter.
@@ -998,7 +1107,20 @@ def main():
                 logger.info(f"inc={np.rad2deg(inc):.2f}")
                 logger.info(f"b={b:.2f}")
             text += f"#companion {pl} astrophysical params,,,,,,\n"
-            text += f"{pl}_rr,{rprs:.4f},1,uniform 0 {ceil(rprs_max*10)/10:.4f},$R_{pl} / R_\star$,,\n"
+            # rr: single achromatic key, or one per unique bandpass when
+            # --bandpass was given. rsuma stays globally shared either way.
+            _rr_upper = ceil(rprs_max * 10) / 10
+            if not rr_suffixes:
+                text += (
+                    f"{pl}_rr,{rprs:.4f},1,uniform 0 {_rr_upper:.4f},"
+                    f"$R_{pl} / R_\\star$,,\n"
+                )
+            else:
+                for _bp in rr_suffixes:
+                    text += (
+                        f"{pl}_rr_{_bp},{rprs:.4f},1,uniform 0 {_rr_upper:.4f},"
+                        f"$R_{pl} / R_\\star (\\mathrm{{{_bp}}})$,,\n"
+                    )
             text += f"{pl}_rsuma,{rsuma:.4f},1,uniform {rsuma_min:.4f} {ceil(rsuma_max*10)/10:.4f},$(R_\star + R_{pl}) / a_{pl}$,,\n"
             #text += f"{pl}_rsuma,{rsuma:.4f},1,uniform 0 1,$(R_\star + R_{pl}) / a_{pl}$,,\n"
             text += f"{pl}_cosi,0,1,uniform 0 1,$\cos" + "{i_" + pl + "}$,,\n"
@@ -1016,20 +1138,26 @@ def main():
         text += "#dilution per instrument,,,,,,\n"
         for inst in fns:
             text += f"dil_{inst},0,0,uniform -1 1,$D_\mathrm{{0; {inst}}}$,,\n"
-        text += "#limb darkening coefficients per instrument,,,,,,\n"
-        for inst in fns:
+        # Limb-darkening coefficients are keyed by bandpass in chromatic mode
+        # and by instrument otherwise — `ldc_suffixes` already encodes this
+        # decision (unique bandpasses when --bandpass was given, fns otherwise).
+        if write_bandpass_line:
+            text += "#limb darkening coefficients per bandpass,,,,,,\n"
+        else:
+            text += "#limb darkening coefficients per instrument,,,,,,\n"
+        for suffix in ldc_suffixes:
             text += (
-                f"#host_ldc_q1_{inst},{q1:.2f},1,normal {q1:.2f} {q1_err:.2f},"
-                + f"$q_{{1; \\mathrm{{{inst}}}}}$"
+                f"#host_ldc_q1_{suffix},{q1:.2f},1,normal {q1:.2f} {q1_err:.2f},"
+                + f"$q_{{1; \\mathrm{{{suffix}}}}}$"
                 + ",,\n"
             )
             text += (
-                f"#host_ldc_q2_{inst},{q2:.2f},1,normal {q2:.2f} {q2_err:.2f},"
-                + f"$q_{{2; \\mathrm{{{inst}}}}}$"
+                f"#host_ldc_q2_{suffix},{q2:.2f},1,normal {q2:.2f} {q2_err:.2f},"
+                + f"$q_{{2; \\mathrm{{{suffix}}}}}$"
                 + ",,\n"
             )
-            text += f"host_ldc_q1_{inst},0.5,1,uniform 0 1,$q_{{1; \\mathrm{{{inst}}}}}$,,\n"
-            text += f"host_ldc_q2_{inst},0.5,1,uniform 0 1,$q_{{2; \\mathrm{{{inst}}}}}$,,\n"
+            text += f"host_ldc_q1_{suffix},0.5,1,uniform 0 1,$q_{{1; \\mathrm{{{suffix}}}}}$,,\n"
+            text += f"host_ldc_q2_{suffix},0.5,1,uniform 0 1,$q_{{2; \\mathrm{{{suffix}}}}}$,,\n"
 
         text += "#errors per instrument,,,,,,\n"
         for inst in fns:
@@ -1122,19 +1250,22 @@ fig = allesfitter.show_initial_guess('.')
             query_name, author=pipeline, exptime=exptime, mission=mission
         )
         if result:
-            sectors = list(map(int, [s.split()[-1] for s in result.mission]))
-            unique_sectors = sorted(set(sectors))
+            # K2 campaigns 11a/11b cannot cast to int. Keep labels as
+            # strings throughout and natural-sort for display.
+            sectors = [_parse_segment_label(s) for s in result.mission]
+            unique_sectors = sorted(set(sectors), key=_natural_segment_sort_key)
             if sector_flag == "all_sector":
                 # case: sector='all'
                 # `sectors` mirrors `result.mission` (one row per exposure
                 # time / flux column), so it has duplicates and is in search
                 # order. Log the deduped+sorted view for human readability.
+                _w_p = _segment_word(mission, plural=True)
                 logger.info(
-                    f"Using {pipeline.upper()} pipeline in {len(unique_sectors)} sectors: {unique_sectors}"
+                    f"Using {pipeline.upper()} pipeline in {len(unique_sectors)} {_w_p}: {unique_sectors}"
                 )
                 unique_exptimes = result.table.to_pandas().exptime.unique()
                 if len(unique_exptimes) > 1:
-                    msg = f"Multiple exposure times are available for `all` sectors:\n{result}.\n"
+                    msg = f"Multiple exposure times are available for `all` {_w_p}:\n{result}.\n"
                     msg += f"Try using -exp={unique_exptimes}"
                     logger.error(msg); sys.exit()
                 exptime = unique_exptimes[0] if exptime is None else exptime
@@ -1144,9 +1275,14 @@ fig = allesfitter.show_initial_guess('.')
                 logger.info(
                     "The lightcurves were not flattened/de-trended to avoid removing transits."
                 )
+                # Header sanity check: only meaningful when a single segment
+                # was downloaded. After stitching multiple segments the
+                # collapsed lc.{sector,campaign,quarter} can't sensibly equal
+                # any one of them (and for K2 11a/11b the alpha suffix would
+                # never match the int the LightCurve carries).
                 _seg = getattr(lc, "sector", None) or getattr(lc, "campaign", None) or getattr(lc, "quarter", None)
-                if _seg is not None:
-                    assert int(_seg) == int(unique_sectors[-1])
+                if _seg is not None and len(unique_sectors) == 1:
+                    assert _segments_match(_seg, unique_sectors[-1])
                 if pipeline == "spoc":
                     lc1 = result.download_all(
                         quality_bitmask=quality_bitmask, flux_column="pdcsap_flux"
@@ -1156,22 +1292,24 @@ fig = allesfitter.show_initial_guess('.')
                     ).stitch()
             elif sector_flag == "multi_sector":
                 # case: sector int or list
+                _w = _segment_word(mission)
+                _w_p = _segment_word(mission, plural=True)
                 idx = [str(i) in sector for i in sectors]
-                msg = f"{pipeline.upper()} lightcurves for sector={sector} is not available. Try sector={unique_sectors}."
+                msg = f"{pipeline.upper()} lightcurves for {_w}={sector} is not available. Try {_w}={unique_sectors}."
                 assert sum(idx) > 0, logger.error(msg)
 
                 filtered_result = result[idx]
                 unique_exptimes = filtered_result.table.to_pandas().exptime.unique()
-                msg = f"Using {pipeline.upper()} pipeline in {len(sector)} sectors: {sector} (exptime={unique_exptimes} sec).\n"
+                msg = f"Using {pipeline.upper()} pipeline in {len(sector)} {_w_p}: {sector} (exptime={unique_exptimes} sec).\n"
                 if sector_flag != "all_sector":
-                    msg += f"Otherwise use sector=({unique_sectors}, all))."
+                    msg += f"Otherwise use {_w}=({unique_sectors}, all))."
                 logger.info(msg)
                 if len(sector) > len(filtered_result):
-                    msg = f"Not all sector={sector} have exptime={exptime} sec.\n"
-                    msg = "Try to limit the sectors.\n"
+                    msg = f"Not all {_w}={sector} have exptime={exptime} sec.\n"
+                    msg = f"Try to limit the {_w_p}.\n"
                     logger.error(msg); sys.exit()
                 elif len(sector) < len(filtered_result):
-                    msg = f"Multiple exposure times are available for the given sector:\n{filtered_result}.\n"
+                    msg = f"Multiple exposure times are available for the given {_w}:\n{filtered_result}.\n"
                     msg += f"Try using -exp={unique_exptimes}"
                     logger.error(msg); sys.exit()
                 assert len(sector) == len(filtered_result)
@@ -1182,10 +1320,13 @@ fig = allesfitter.show_initial_guess('.')
                 logger.info(
                     "The lightcurves were not flattened/de-trended to avoid removing transits."
                 )
-                msg = f"sector={lc.sector} in header not in requested sector={sector}"
+                _w = _segment_word(mission)
                 _seg = getattr(lc, "sector", None) or getattr(lc, "campaign", None) or getattr(lc, "quarter", None)
-                if _seg is not None:
-                    assert str(int(_seg)) in np.array(sector), logger.error(msg)
+                msg = f"{_w}={_seg} in header not in requested {_w}={sector}"
+                # Skip the header check when multiple segments were stitched —
+                # the collapsed attribute can't represent more than one.
+                if _seg is not None and len(sector) == 1:
+                    assert any(_segments_match(_seg, s) for s in sector), logger.error(msg)
                 if pipeline == "spoc":
                     lc1 = filtered_result.download_all(
                         quality_bitmask=quality_bitmask, flux_column="pdcsap_flux"
@@ -1210,8 +1351,8 @@ fig = allesfitter.show_initial_guess('.')
                 exptime = unique_exptimes[0] if exptime is None else exptime
                 _seg = getattr(lc, "sector", None) or getattr(lc, "campaign", None) or getattr(lc, "quarter", None)
                 if _seg is not None:
-                    assert int(_seg) == int(sector)
-                logger.info(f"Using {pipeline.upper()} pipeline in sector {sector}.")
+                    assert _segments_match(_seg, sector)
+                logger.info(f"Using {pipeline.upper()} pipeline in {_segment_word(mission)} {sector}.")
                 if pipeline == "spoc":
                     lc1 = filtered_result.download(
                         quality_bitmask=quality_bitmask, flux_column="pdcsap_flux"
@@ -1240,7 +1381,7 @@ fig = allesfitter.show_initial_guess('.')
                 fig, axs = plt.subplots(2, 1, figsize=(8,6), sharex=True)
                 _ = lc1.scatter(ax=axs[0], zorder=2, label="PDCSAP", c="C0")
                 _ = lc2.scatter(ax=axs[0], zorder=1, label="SAP", c="C1")
-                axs[0].set_title(f"Sector={secs}\nexptime={int(exptime)}s")
+                axs[0].set_title(f"{_segment_word(mission).capitalize()}={secs}\nexptime={int(exptime)}s")
                 (lc1-lc2).scatter(ax=axs[1], label='difference', c='k')
                 fp = outdir.joinpath(
                     f"{target_name}_{mission}_{lc_type.split('_')[0]}_s{secs}_exp{int(exptime)}s"
@@ -1248,7 +1389,7 @@ fig = allesfitter.show_initial_guess('.')
                 fig.savefig(fp.with_suffix('.png'))
             else:
                 ax = lc.scatter(label=pipeline)
-                ax.set_title(f"Sector={secs}\nexptime={int(exptime)}s")
+                ax.set_title(f"{_segment_word(mission).capitalize()}={secs}\nexptime={int(exptime)}s")
                 fp = outdir.joinpath(
                     f"{target_name}_{mission}_{pipeline}_s{secs}_exp{int(exptime)}s"
                 )
@@ -1296,12 +1437,21 @@ fig = allesfitter.show_initial_guess('.')
 ###############################################################################,\n"""
 
         text2 += f"companions_phot,{' '.join(planets[:len(target_df)])}"
+        # When --bandpass is provided, emit a real `bandpass,...` row so the
+        # parser activates chromatic mode (one rr per unique bandpass). When
+        # omitted, leave a commented stub so users can see where to add one.
+        if write_bandpass_line:
+            _bandpass_row = f"bandpass,{' '.join(bp_list)}"
+        else:
+            _bandpass_row = f"#bandpass,{' '.join(fns)}"
         text2 += f"""
 companions_rv,
 inst_phot,{' '.join(fns)}
 inst_rv,
 time_format,BJD_TDB
-#passbands,{' '.join(fns)}
+{_bandpass_row}
+#flux_min_raw,0.9
+#flux_max_raw,1.1
 ###############################################################################,
 # Fit performance settings,
 ###############################################################################,
@@ -1341,18 +1491,15 @@ ns_tol,100
         text2 += """#####################################,
 # Exposure interpolation settings,
 #####################################,\n"""
-        # Resolve exposure time in seconds. --exp is passed in seconds; if
-        # absent, fall back to the median cadence (which is in days) and
-        # convert. This integer value is the key for T_EXP_DAYS.
-        if args.exptime is not None:
-            exptime_sec = int(round(args.exptime))
-        else:
-            exptime_sec = int(round(float(np.median(np.diff(df2.time))) * 86400))
-        exptime = exptime_sec / 86400.0  # keep the days value for downstream use
-        assert exptime < 1, "exp time should be in days"
-        # Prefer the preset value for this exposure time; else use the
-        # computed days value directly.
-        t_exp_val = T_EXP_DAYS.get(exptime_sec, exptime)
+        # Resolve exposure time strictly from input: --exptime (in seconds)
+        # when supplied, else the value lightkurve reported for the selected
+        # data (also in seconds). The settings.csv row is the direct
+        # seconds → days conversion. We never derive exptime from
+        # np.diff(time) — that conflates sampling cadence with actual exposure
+        # and corrupts ellc's exposure-time integration.
+        exptime_sec = int(round(args.exptime if args.exptime is not None else exptime))
+        t_exp_val = exptime_sec / 86400.0
+        assert t_exp_val < 1, f"t_exp_val should be < 1 day, got {t_exp_val}"
         text2 += "### crucial only for long (>600s) exposure times,\n"
         for inst in fns:
             text2 += f"t_exp_{inst},{t_exp_val:.6f}\n"

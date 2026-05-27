@@ -522,9 +522,9 @@ def plot_1(ax, samples, inst, companion, style,
             alpha = 0.1
         
 
-    zoomwindow, y_zoomwindow, phase_shift = guesstimator(params_median, companion, base=base)
-        
- 
+    zoomwindow, y_zoomwindow, phase_shift = guesstimator(params_median, companion, base=base, inst=inst)
+
+
     #==========================================================================
     # full time series, not phased
     # plot the 'undetrended' data
@@ -559,13 +559,36 @@ def plot_1(ax, samples, inst, companion, style,
             y -= model+baseline+stellar_var
             
             
-        #::: plot data, not phase        
-#        ax.errorbar(base.fulldata[inst]['time'], base.fulldata[inst][key], yerr=np.nanmedian(yerr_w), marker='.', ls='none', color='lightgrey', zorder=-1, rasterized=True ) 
-        # ax.errorbar(x, y, yerr=yerr_w, marker=kwargs_data['marker'], markersize=kwargs_data['markersize'], ls=kwargs_data['ls'], color=kwargs_data['color'], alpha=kwargs_data['alpha'], capsize=0, rasterized=kwargs_data['rasterized'] )  
-        ax.errorbar(x, y, yerr=yerr_w, capsize=0, **kwargs_data)  
+        #::: plot data, not phase
+#        ax.errorbar(base.fulldata[inst]['time'], base.fulldata[inst][key], yerr=np.nanmedian(yerr_w), marker='.', ls='none', color='lightgrey', zorder=-1, rasterized=True )
+        # ax.errorbar(x, y, yerr=yerr_w, marker=kwargs_data['marker'], markersize=kwargs_data['markersize'], ls=kwargs_data['ls'], color=kwargs_data['color'], alpha=kwargs_data['alpha'], capsize=0, rasterized=kwargs_data['rasterized'] )
+        ax.errorbar(x, y, yerr=yerr_w, capsize=0, **kwargs_data)
         if base.settings['color_plot']:
-            ax.scatter(x, y, c=x, marker='o', rasterized=kwargs_data['rasterized'], cmap='inferno', zorder=11 ) 
-            
+            ax.scatter(x, y, c=x, marker='o', rasterized=kwargs_data['rasterized'], cmap='inferno', zorder=11 )
+
+        #::: overlay raw-clipped points in red. The clip is applied in
+        #::: basement.load_data; clipped rows are kept aside under
+        #::: data[inst]['raw_clipped_*'] for display only and never affect
+        #::: the likelihood. Only relevant on the photometric "full" axes;
+        #::: phase-folded styles intentionally hide clipped outliers.
+        if (key == 'flux'
+                and style in ['full', 'full_minus_offset']
+                and inst in base.settings['inst_phot']):
+            _xc = base.data[inst].get('raw_clipped_time')
+            _yc = base.data[inst].get('raw_clipped_flux')
+            if _xc is not None and len(_xc) > 0:
+                _yc_plot = np.asarray(_yc, dtype=float)
+                if style == 'full_minus_offset':
+                    _yc_plot = _yc_plot - np.median(
+                        calculate_baseline(params_median, inst, key)
+                    )
+                ax.scatter(
+                    _xc, _yc_plot,
+                    marker='x', s=30, color='red', alpha=0.9,
+                    rasterized=kwargs_data['rasterized'], zorder=13,
+                    label='clipped (flux_min/max_raw)',
+                )
+
         if timelabel=='Time_since':
             ax.set(xlabel='Time since %s [days]' % objttime[0].isot[:10], ylabel=ylabel, title=set_title(inst))
         elif timelabel=='Time':
@@ -741,9 +764,18 @@ def plot_1(ax, samples, inst, companion, style,
                 ax.errorbar( phi*zoomfactor, y, yerr=yerr_w, capsize=0, zorder=11, **kwargs_data )
                 if base.settings['color_plot']:
                     ax.scatter( phi*zoomfactor, y, c=x, marker='o', rasterized=kwargs_data['rasterized'], cmap='inferno', zorder=11 )          
-            ax.set(xlabel='Phase', ylabel=ylabel, title=set_title(inst+', companion '+companion))
-    
-    
+            #::: build a band-aware title. In chromatic mode, append the
+            #::: instrument's per-bandpass Rp/Rs so each panel shows its own
+            #::: value; in achromatic mode, fall back to the single _rr.
+            _rr_key = base.get_rr_key(companion, inst)
+            _rr_val = params_median.get(_rr_key, params_median.get(companion + '_rr'))
+            if _rr_val is not None and np.isfinite(_rr_val):
+                _panel_title = f'{inst}, companion {companion}  $R_p/R_\\star$={_rr_val:.4f}'
+            else:
+                _panel_title = inst + ', companion ' + companion
+            ax.set(xlabel='Phase', ylabel=ylabel, title=set_title(_panel_title))
+
+
             #::: plot model, phased (if wished)
             if style in ['phase', 'phasezoom', 'phasezoom_occ', 'phase_curve']:
                 
@@ -880,7 +912,7 @@ def afplot_per_transit(samples, inst, companion, base=None, kwargs_dict=None):
     #==========================================================================
     params_median, params_ll, params_ul = get_params_from_samples(samples)
     
-    zoomwindow, y_zoomwindow, phase_shift = guesstimator(params_median, companion, base=base)
+    zoomwindow, y_zoomwindow, phase_shift = guesstimator(params_median, companion, base=base, inst=inst)
     zoomwindow /= 24. #in days
     T_tra_tot = zoomwindow/3. #in days
     

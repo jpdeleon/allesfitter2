@@ -239,14 +239,14 @@ class Basement:
     def get_rr_key(self, companion, inst):
         """
         Return the parameter key for radius ratio (rr) for a given companion and instrument.
-        
+
         Parameters
         ----------
         companion : str
             Companion name (e.g., 'b', 'c')
         inst : str
             Instrument name (e.g., 'tess', 'kepler')
-        
+
         Returns
         -------
         str
@@ -256,8 +256,44 @@ class Basement:
         if bandpass:
             return f'{companion}_rr_{bandpass}'
         return f'{companion}_rr'
-    
-    
+
+
+    ###############################################################################
+    #::: get_ldc_key: helper to get the correct LDC scalar key for a role/n/inst
+    ###############################################################################
+    def get_ldc_key(self, role, n, inst, space='u'):
+        """
+        Return the per-coefficient LDC key for a role, coefficient index, and instrument.
+
+        The suffix is the instrument's bandpass when chromatic (so multiple
+        instruments sharing a bandpass share a single LDC scalar) and the
+        instrument name otherwise — matching the suffix used by the validator
+        in ``load_params`` and the assembler in ``computer.py``.
+
+        Parameters
+        ----------
+        role : str
+            'host' or a companion identifier ('b', 'c', ...).
+        n : int
+            Coefficient index (1..4).
+        inst : str
+            Instrument name (e.g., 'tess', 'kepler', 'tess_pdcsap').
+        space : str, optional
+            'u' (default) or 'q'.
+
+        Returns
+        -------
+        str
+            For example ``host_ldc_u1_tess`` (chromatic with bandpass='tess')
+            or ``host_ldc_u1_tess_pdcsap`` (achromatic, inst='tess_pdcsap').
+        """
+        if space not in ('u', 'q'):
+            raise ValueError(f"space must be 'u' or 'q', got {space!r}")
+        bandpass = self.get_bandpass(inst)
+        suffix = bandpass if bandpass else inst
+        return f'{role}_ldc_{space}{n}_{suffix}'
+
+
     ###############################################################################
     #::: load settings
     ###############################################################################
@@ -367,11 +403,21 @@ class Basement:
             self.settings['bandpass'] = {}  # empty = achromatic
         else:
             bp_list = str(self.settings['bandpass']).split()
+            n_inst = len(self.settings['inst_phot'])
+            if len(bp_list) != n_inst:
+                raise ValueError(
+                    "settings.csv 'bandpass' has {n_bp} entries but inst_phot has "
+                    "{n_inst} entries; each photometric instrument needs an explicit "
+                    "bandpass label (repeat the same label to keep instruments achromatic). "
+                    "Got bandpass={bp_list!r}, inst_phot={inst_phot!r}.".format(
+                        n_bp=len(bp_list), n_inst=n_inst,
+                        bp_list=bp_list, inst_phot=self.settings['inst_phot']
+                    )
+                )
             self.settings['bandpass'] = {
-                inst: bp_list[i] if i < len(bp_list) else bp_list[0]
-                for i, inst in enumerate(self.settings['inst_phot'])
+                inst: bp_list[i] for i, inst in enumerate(self.settings['inst_phot'])
             }
-        
+
         # Determine if chromatic (multiple unique bandpasses) or achromatic
         unique_bandpasses = set(self.settings['bandpass'].values())
         self.settings['chromatic'] = len(unique_bandpasses) > 1
@@ -837,10 +883,96 @@ class Basement:
     
         #==========================================================================
         #::: load params.csv
-        #==========================================================================   
+        #==========================================================================
         buf = np.genfromtxt(os.path.join(self.datadir,'params.csv'), delimiter=',',comments='#',dtype=None,encoding='utf-8',names=True)
-            
-           
+
+        #==========================================================================
+        #::: luser-proof: reject duplicate parameter rows
+        #::: numpy.genfromtxt is happy with duplicate names but downstream
+        #::: dict-assembly silently last-wins, which corrupts chromatic configs
+        #::: edited by hand (e.g. two rows for b_rr_tess with different priors).
+        #==========================================================================
+        _names = list(np.atleast_1d(buf['name']))
+        _stripped = [n.strip() for n in _names if str(n).strip() not in ('user-given:', 'automatically set:')]
+        _seen = {}
+        for _n in _stripped:
+            _seen[_n] = _seen.get(_n, 0) + 1
+        _dups = sorted(k for k, v in _seen.items() if v > 1)
+        if _dups:
+            raise ValueError(
+                "params.csv contains duplicate rows for: " + ", ".join(_dups) +
+                ". Each parameter must be defined exactly once."
+            )
+
+        #==========================================================================
+        #::: luser-proof: chromatic suffix must match a known bandpass
+        #::: Catches typos (e.g. b_rr_tes vs tess) that would otherwise be
+        #::: silently ignored, leaving the fit to use a default 0 for the rr.
+        #==========================================================================
+        _bandpass_map = self.settings.get('bandpass', {}) or {}
+        _known_bands = set(_bandpass_map.values())
+        _companions = self.settings.get('companions_all', []) or []
+        _is_chromatic = bool(self.settings.get('chromatic', False))
+        if _known_bands and _companions:
+            _bad_chromatic = []
+            for _c in _companions:
+                _prefix = _c + '_rr_'
+                for _n in _stripped:
+                    if _n.startswith(_prefix):
+                        _suffix = _n[len(_prefix):]
+                        if _suffix not in _known_bands:
+                            _bad_chromatic.append((_n, _suffix))
+            if _bad_chromatic:
+                _msg_pairs = "; ".join(f"{k} (suffix '{s}')" for k, s in _bad_chromatic)
+                raise ValueError(
+                    "params.csv references unknown bandpass(es): " + _msg_pairs +
+                    ". Known bandpasses (from settings.csv 'bandpass'): " +
+                    sorted(_known_bands).__repr__() + "."
+                )
+
+        #==========================================================================
+        #::: luser-proof: chromatic mode requires one rr row per (companion,
+        #::: bandpass). Without that, the validator silently defaults the
+        #::: missing keys to None and the likelihood falls back to the
+        #::: unsuffixed b_rr — a fit that looks chromatic in settings.csv but
+        #::: is achromatic in practice. Catch both half-states up front:
+        #:::   - chromatic settings + plain `<c>_rr` row present (ambiguous),
+        #:::   - chromatic settings + at least one expected `<c>_rr_<bp>` row missing.
+        #==========================================================================
+        if _is_chromatic and _companions:
+            _problems = []
+            _stripped_set = set(_stripped)
+            for _c in _companions:
+                _achromatic_key = _c + '_rr'
+                _expected = {f'{_c}_rr_{bp}' for bp in _known_bands}
+                _present = _expected & _stripped_set
+                _missing = sorted(_expected - _present)
+                _has_achromatic = _achromatic_key in _stripped_set
+                if _has_achromatic and not _present:
+                    _problems.append(
+                        f"companion '{_c}': params.csv has '{_achromatic_key}' but "
+                        f"settings.csv 'bandpass' is chromatic. Replace it with "
+                        f"one row per bandpass: " + ", ".join(sorted(_expected)) + "."
+                    )
+                elif _missing and not _has_achromatic:
+                    _problems.append(
+                        f"companion '{_c}': chromatic mode requires a row per "
+                        f"bandpass; missing " + ", ".join(_missing) + "."
+                    )
+                elif _missing and _has_achromatic:
+                    _problems.append(
+                        f"companion '{_c}': params.csv mixes the achromatic key "
+                        f"'{_achromatic_key}' with chromatic rows; missing "
+                        + ", ".join(_missing) + ". Pick one shape and remove "
+                        f"'{_achromatic_key}'."
+                    )
+            if _problems:
+                raise ValueError(
+                    "Chromatic configuration mismatch between settings.csv and "
+                    "params.csv:\n  - " + "\n  - ".join(_problems)
+                )
+
+
         #==========================================================================
         #::: function to assure backwards compability
         #==========================================================================
@@ -1387,9 +1519,14 @@ class Basement:
             #::: Raw-flux outlier removal (applied before fulldata is captured
             #::: so that all downstream consumers see the clipped rows).
             #::: Drops rows outside [flux_min_raw, flux_max_raw]; either bound
-            #::: may be None to make it one-sided.
+            #::: may be None to make it one-sided. Clipped points are kept
+            #::: aside under ``raw_clipped_*`` so initial_guess plots can
+            #::: surface them in red without affecting the fit.
             _fmin = self.settings.get('flux_min_raw')
             _fmax = self.settings.get('flux_max_raw')
+            _clipped_time = np.empty(0, dtype=float)
+            _clipped_flux = np.empty(0, dtype=float)
+            _clipped_flux_err = np.empty(0, dtype=float)
             if _fmin is not None or _fmax is not None:
                 _mask = np.ones_like(flux, dtype=bool)
                 if _fmin is not None:
@@ -1407,6 +1544,9 @@ class Basement:
                         'All rows in "'+inst+'.csv" were removed by flux_min_raw/flux_max_raw. '
                         'Check that the bounds bracket your normalized flux level.'
                     )
+                _clipped_time = time[~_mask]
+                _clipped_flux = flux[~_mask]
+                _clipped_flux_err = flux_err[~_mask]
                 time = time[_mask]
                 flux = flux[_mask]
                 flux_err = flux_err[_mask]
@@ -1416,7 +1556,10 @@ class Basement:
                           'time':time,
                           'flux':flux,
                           'err_scales_flux':flux_err/np.nanmean(flux_err),
-                          'custom_series':custom_series
+                          'custom_series':custom_series,
+                          'raw_clipped_time':_clipped_time,
+                          'raw_clipped_flux':_clipped_flux,
+                          'raw_clipped_flux_err':_clipped_flux_err,
                          }
             if (self.settings['fast_fit']) and (len(self.settings['inst_phot'])>0):
                 time, flux, flux_err, custom_series = self.reduce_phot_data(time, flux, flux_err, custom_series=custom_series, inst=inst)
@@ -1424,7 +1567,10 @@ class Basement:
                           'time':time,
                           'flux':flux,
                           'err_scales_flux':flux_err/np.nanmean(flux_err),
-                          'custom_series':custom_series
+                          'custom_series':custom_series,
+                          'raw_clipped_time':_clipped_time,
+                          'raw_clipped_flux':_clipped_flux,
+                          'raw_clipped_flux_err':_clipped_flux_err,
                          }
 
         #======================================================================
