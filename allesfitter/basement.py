@@ -421,7 +421,68 @@ class Basement:
         # Determine if chromatic (multiple unique bandpasses) or achromatic
         unique_bandpasses = set(self.settings['bandpass'].values())
         self.settings['chromatic'] = len(unique_bandpasses) > 1
-            
+
+
+        #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+        #::: Validate per-instrument settings suffixes
+        #::: Catches typos like ``host_ld_law_tess,quad`` when no instrument is
+        #::: named "tess" (e.g. inst_phot=['tglc120_s90', ...] + bandpass='tess').
+        #::: Without this guard, the default at ~685 silently sets the LD law to
+        #::: None for every real instrument, ldc_1=None reaches ellc, and the
+        #::: q1/q2 values in params.csv have zero effect on the transit shape.
+        #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+        _per_inst_prefixes = (
+            'host_ld_law_', 'host_ld_space_', 'host_grid_', 'host_shape_',
+            'host_flux_weighted_', 'host_rotfac_', 'host_hf_', 'host_bfac_',
+            'host_heat_', 'host_N_spots_',
+        )
+        for _comp in ('b', 'c', 'd', 'e', 'f', 'g'):
+            _per_inst_prefixes = _per_inst_prefixes + (
+                _comp + '_ld_law_', _comp + '_ld_space_', _comp + '_grid_',
+                _comp + '_shape_', _comp + '_flux_weighted_',
+                _comp + '_N_spots_',
+            )
+        _per_inst_prefixes = _per_inst_prefixes + (
+            'baseline_flux_', 'baseline_rv_', 'baseline_rv2_',
+            'error_flux_', 'error_rv_', 'error_rv2_',
+            't_exp_', 't_exp_n_int_',
+            'stellar_var_flux_', 'stellar_var_rv_',
+        )
+        _known_insts = set(self.settings['inst_all'])
+        _known_bands = unique_bandpasses
+        _orphans = []
+        for _key in list(self.settings.keys()):
+            if _key in ('user-given:', 'automatically set:'):
+                continue
+            for _pref in _per_inst_prefixes:
+                if _key.startswith(_pref):
+                    _suffix = _key[len(_pref):]
+                    if _suffix and _suffix not in _known_insts:
+                        _orphans.append((_key, _pref, _suffix))
+                    break
+        if _orphans:
+            _hint_lines = []
+            for _k, _p, _s in _orphans:
+                _msg = "  '{}': suffix '{}' is not in inst_phot+inst_rv+inst_rv2 ({})".format(
+                    _k, _s, sorted(_known_insts)
+                )
+                if _s in _known_bands:
+                    _affected = sorted(
+                        i for i, b in self.settings['bandpass'].items() if b == _s
+                    )
+                    _msg += (
+                        "  [hint: '{}' is a BANDPASS label, not an instrument. "
+                        "Repeat this row once per instrument using that bandpass: {}]"
+                    ).format(_s, _affected)
+                _hint_lines.append(_msg)
+            raise ValueError(
+                "settings.csv contains per-instrument keys whose suffix is "
+                "not a known instrument name. The suffix must match an entry "
+                "of inst_phot/inst_rv/inst_rv2 (NOT a bandpass label).\n"
+                "Offending rows:\n" + "\n".join(_hint_lines)
+            )
+
+
             
         #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
         #::: General settings

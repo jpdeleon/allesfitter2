@@ -245,3 +245,101 @@ class TestAchromaticBackcompat:
         # No bandpass-keyed rr leaked in
         chromatic_rr = [k for k in b.params if k.startswith("b_rr_")]
         assert chromatic_rr == [], f"unexpected chromatic rr keys: {chromatic_rr}"
+
+
+# --------------------------------------------------------------------------- #
+# Per-instrument settings suffix validation
+# --------------------------------------------------------------------------- #
+class TestOrphanPerInstSettings:
+    """Regression for the user-reported silent failure:
+
+    settings.csv had
+        inst_phot,tglc1800_s10s11 tglc600_s37s38 tglc120_s63s64 tglc120_s90
+        bandpass,tess tess tess tess
+        host_ld_law_tess,quad
+
+    No instrument is named 'tess', so host_ld_law_<actual_inst> defaulted
+    to None and ellc silently received ldc_1=None — host_ldc_q1_tess values
+    in params.csv had zero effect on the transit shape.
+
+    The validator must catch this at config-load time."""
+
+    def test_host_ld_law_keyed_by_bandpass_raises(self, make_datadir):
+        insts = ["tglc1800_s10s11", "tglc600_s37s38", "tglc120_s63s64", "tglc120_s90"]
+        rows = (
+            [{"name": "b_rr_tess", "value": TRUE_RR_TESS, "fit": 1,
+              "bounds": "uniform 0 0.3", "label": "rr_tess"}]
+            + _common_orbital_rows()
+            + _dilution_rows(insts)
+            + [{"name": f"ln_err_flux_{i}", "value": -7.0, "fit": 0,
+                "bounds": "uniform -15 0", "label": f"ln_err_{i}"} for i in insts]
+            + [{"name": f"baseline_offset_flux_{i}", "value": 0.0, "fit": 0,
+                "bounds": "uniform -0.05 0.05", "label": f"offset_{i}"} for i in insts]
+            + _ldc_rows("tess")
+        )
+        datadir = make_datadir(
+            "orphan_ld_law",
+            inst_phot=insts,
+            bandpass="tess tess tess tess",
+            params_rows=rows,
+            extra_settings=["host_ld_law_tess,quad", "host_ld_space_tess,q"],
+        )
+        with pytest.raises(ValueError, match=r"per-instrument keys whose suffix"):
+            config.init(str(datadir), quiet=True)
+
+    def test_error_message_hints_at_bandpass_confusion(self, make_datadir):
+        insts = ["tglc120_s90", "tglc120_s63s64"]
+        rows = (
+            [{"name": "b_rr_tess", "value": TRUE_RR_TESS, "fit": 1,
+              "bounds": "uniform 0 0.3", "label": "rr_tess"}]
+            + _common_orbital_rows()
+            + _dilution_rows(insts)
+            + [{"name": f"ln_err_flux_{i}", "value": -7.0, "fit": 0,
+                "bounds": "uniform -15 0", "label": f"ln_err_{i}"} for i in insts]
+            + [{"name": f"baseline_offset_flux_{i}", "value": 0.0, "fit": 0,
+                "bounds": "uniform -0.05 0.05", "label": f"offset_{i}"} for i in insts]
+            + _ldc_rows("tess")
+        )
+        datadir = make_datadir(
+            "orphan_hint",
+            inst_phot=insts,
+            bandpass="tess tess",
+            params_rows=rows,
+            extra_settings=["host_ld_law_tess,quad"],
+        )
+        with pytest.raises(ValueError) as exc:
+            config.init(str(datadir), quiet=True)
+        msg = str(exc.value)
+        # The hint must name the affected instruments and call out the
+        # bandpass/instrument confusion.
+        assert "BANDPASS label" in msg
+        assert "tglc120_s90" in msg or "tglc120_s63s64" in msg
+
+    def test_per_inst_rows_pass(self, make_datadir):
+        # Sanity: when the user correctly writes one row per actual instrument
+        # name, config.init succeeds. This locks the validator from over-firing.
+        insts = ["tglc120_s90", "tglc120_s63s64"]
+        rows = (
+            [{"name": "b_rr_tess", "value": TRUE_RR_TESS, "fit": 1,
+              "bounds": "uniform 0 0.3", "label": "rr_tess"}]
+            + _common_orbital_rows()
+            + _dilution_rows(insts)
+            + [{"name": f"ln_err_flux_{i}", "value": -7.0, "fit": 0,
+                "bounds": "uniform -15 0", "label": f"ln_err_{i}"} for i in insts]
+            + [{"name": f"baseline_offset_flux_{i}", "value": 0.0, "fit": 0,
+                "bounds": "uniform -0.05 0.05", "label": f"offset_{i}"} for i in insts]
+            + _ldc_rows("tess")
+        )
+        datadir = make_datadir(
+            "orphan_ok",
+            inst_phot=insts,
+            bandpass="tess tess",
+            params_rows=rows,
+            # no extra settings — write_settings already emits host_ld_law_<inst>
+            # for each inst in inst_phot, which is the correct shape.
+        )
+        config.init(str(datadir), quiet=True)
+        b = config.BASEMENT
+        assert b.settings["chromatic"] is False
+        for inst in insts:
+            assert b.settings["host_ld_law_" + inst] == "quad"

@@ -77,6 +77,70 @@ def draw_ns_posterior_samples(results, Nsamples=None, as_type='2d_array'):
 
 
 ###############################################################################
+#::: chromatic Rp/Rs posterior histogram
+###############################################################################
+def plot_chromatic_rr_histogram(posterior_samples):
+    '''
+    Overlay posterior histograms of per-bandpass Rp/Rs for chromatic fits.
+
+    Only runs when settings.csv defines ``bandpass`` with >=2 unique labels
+    (``config.BASEMENT.settings['chromatic'] is True``). One PDF is written
+    per photometric companion at
+    ``<outdir>/ns_chromatic_rr_<companion>.pdf``.
+
+    Inputs
+    ------
+    posterior_samples : 2d ndarray
+        Weighted posterior samples with shape (Nsamples, ndim) matching
+        ``config.BASEMENT.fitkeys`` ordering.
+    '''
+    if not config.BASEMENT.settings.get('chromatic', False):
+        return
+
+    bandpass_map = config.BASEMENT.settings.get('bandpass', {}) or {}
+    unique_bandpasses = sorted(set(bandpass_map.values()))
+    if len(unique_bandpasses) < 2:
+        return
+
+    fitkeys = list(config.BASEMENT.fitkeys)
+
+    for companion in config.BASEMENT.settings['companions_phot']:
+        per_band = []
+        for bp in unique_bandpasses:
+            key = '{}_rr_{}'.format(companion, bp)
+            if key in fitkeys:
+                ind = fitkeys.index(key)
+                per_band.append((bp, posterior_samples[:, ind]))
+
+        if len(per_band) < 2:
+            continue
+
+        fig, ax = plt.subplots(figsize=(7, 5))
+        colors = plt.cm.viridis(np.linspace(0.15, 0.85, len(per_band)))
+        for (bp, samples), color in zip(per_band, colors):
+            med = np.median(samples)
+            lo, hi = np.percentile(samples, [16, 84])
+            label = '{}: ${:.4f}^{{+{:.4f}}}_{{-{:.4f}}}$'.format(
+                bp, med, hi - med, med - lo)
+            ax.hist(samples, bins=40, density=True, alpha=0.5,
+                    color=color, label=label, histtype='stepfilled',
+                    edgecolor=color, linewidth=1.2)
+            ax.axvline(med, color=color, linestyle='--',
+                       linewidth=1.0, alpha=0.9)
+
+        ax.set_xlabel(r'$R_p / R_\star$ (companion ' + companion + ')')
+        ax.set_ylabel('Posterior density')
+        ax.set_title('Chromatic transit depth posterior (companion '
+                     + companion + ')')
+        ax.legend(loc='best', fontsize=10)
+        fig.tight_layout()
+        fig.savefig(os.path.join(config.BASEMENT.outdir,
+                                 'ns_chromatic_rr_' + companion + '.pdf'),
+                    bbox_inches='tight')
+        plt.close(fig)
+
+
+###############################################################################
 #::: analyse the output from save_ns.pickle file
 ###############################################################################
 def ns_output(datadir):
@@ -150,6 +214,13 @@ def ns_output(datadir):
     #::: retrieve the results
     posterior_samples = draw_ns_posterior_samples(results)                               # all weighted posterior_samples
     params_median, params_ll, params_ul = get_params_from_samples(posterior_samples)     # params drawn form these posterior_samples
+
+
+    #::: chromatic Rp/Rs posterior histograms (no-op when achromatic)
+    try:
+        plot_chromatic_rr_histogram(posterior_samples)
+    except Exception as _e:
+        logprint('\n! WARNING: chromatic Rp/Rs histogram could not be produced: ' + str(_e))
     
     
     #::: output the results
