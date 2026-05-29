@@ -26,6 +26,7 @@ import sys
 from typing import Tuple
 from argparse import ArgumentParser
 from pathlib import Path
+import math
 from math import ceil
 import numpy as np
 import lightkurve as lk
@@ -124,6 +125,429 @@ def _segment_word(mission, plural=False):
         "kepler": "quarter",
     }.get(str(mission).lower(), "sector")
     return base + ("s" if plural else "")
+
+
+def _write_spoc_contamination(lc_or_collection, outpath, mission):
+    """Extract CROWDSAP from SPOC headers and convert to allesfitter dilution.
+
+    SPOC light curves carry two crowding keywords in each FITS extension:
+
+    - ``CROWDSAP``: ratio of target flux to total flux in the optimal
+      aperture (in [0, 1]). A value of 1 means no contamination; 0.8 means
+      80% of measured flux is from the target and 20% is contaminants.
+    - ``FLFRCSAP``: fraction of the target's PSF flux captured by the
+      aperture (recorded for completeness, not used in the dilution).
+
+    The contamination ratio commonly reported in TESS literature is the
+    contaminant-to-target flux ratio:
+
+        contratio = (1 - CROWDSAP) / CROWDSAP
+
+    allesfitter's ``dil_<inst>`` parameter is the fraction of the *measured*
+    flux that does NOT come from the target — i.e. the contaminant fraction
+    of the total. Converting:
+
+        dilution = contratio / (1 + contratio)
+                 = (1 - CROWDSAP) / CROWDSAP / ((1 - CROWDSAP)/CROWDSAP + 1)
+                 = 1 - CROWDSAP
+
+    Per-segment values are extracted from the un-stitched LightCurveCollection
+    (``.stitch()`` keeps only the first segment's metadata). For a single
+    LightCurve the value comes straight from ``.meta``.
+
+    Writes ``outpath`` with a header explaining the math, one row per
+    segment, and the median across segments — suitable for pasting into
+    ``params.csv`` as the ``dil_<inst>`` value.
+
+    Returns a summary dict ``{'median_dilution', 'std_dilution', 'n_segments',
+    'median_crowdsap'}`` when the file was written, or ``False`` when no
+    CROWDSAP keyword was found (or lightkurve is unavailable).
+    """
+    try:
+        import lightkurve as _lk
+    except Exception:
+        return False
+
+    if isinstance(lc_or_collection, _lk.LightCurveCollection):
+        items = list(lc_or_collection)
+    else:
+        items = [lc_or_collection]
+
+    rows = []
+    for one in items:
+        meta = getattr(one, 'meta', None) or {}
+        crowdsap = meta.get('CROWDSAP')
+        if crowdsap is None:
+            continue
+        try:
+            crowdsap = float(crowdsap)
+        except (TypeError, ValueError):
+            continue
+        flfrcsap_raw = meta.get('FLFRCSAP')
+        try:
+            flfrcsap = float(flfrcsap_raw) if flfrcsap_raw is not None else None
+        except (TypeError, ValueError):
+            flfrcsap = None
+        seg = (
+            getattr(one, 'sector', None)
+            or getattr(one, 'campaign', None)
+            or getattr(one, 'quarter', None)
+            or '?'
+        )
+        if crowdsap > 0:
+            contratio = (1.0 - crowdsap) / crowdsap
+        else:
+            contratio = float('inf')
+        # dilution == 1 - CROWDSAP (algebraically equivalent to contratio/(1+contratio))
+        dilution = 1.0 - crowdsap
+        rows.append((seg, crowdsap, flfrcsap, contratio, dilution))
+
+    if not rows:
+        return False
+
+    seg_word = _segment_word(mission)
+    lines = [
+        "# SPOC photometric contamination -> allesfitter dilution",
+        "#",
+        "# Header keywords (per FITS extension):",
+        "#   CROWDSAP : target_flux / total_flux in the optimal aperture, in [0, 1]",
+        "#   FLFRCSAP : fraction of target PSF flux captured by the aperture",
+        "#",
+        "# allesfitter's dil_<inst> is the contaminant fraction of the measured flux:",
+        "#",
+        "#   contratio = (1 - CROWDSAP) / CROWDSAP     # contaminant / target",
+        "#   dilution  = contratio / (1 + contratio)   # contaminant / (contaminant + target)",
+        "#             = 1 - CROWDSAP                  # algebraically identical",
+        "#",
+        "# Suggested use: paste the median dilution below into params.csv as",
+        "#   dil_<inst>,<median_dilution>,0,uniform 0 1,...",
+        "# or use a tighter prior centred on the median if you trust SPOC's crowding model.",
+        "#",
+        "# {}\tCROWDSAP\tFLFRCSAP\tcontratio\tdilution".format(seg_word),
+    ]
+    crowds, dils = [], []
+    for seg, crowdsap, flfrcsap, contratio, dilution in rows:
+        flf = "{:.6f}".format(flfrcsap) if flfrcsap is not None else "NA"
+        lines.append(
+            "{}\t{:.6f}\t{}\t{:.6f}\t{:.6f}".format(seg, crowdsap, flf, contratio, dilution)
+        )
+        crowds.append(crowdsap)
+        dils.append(dilution)
+    lines.append("")
+    lines.append("# Median across {} segment(s):".format(len(rows)))
+    lines.append("median_CROWDSAP\t{:.6f}".format(float(np.median(crowds))))
+    lines.append("median_dilution\t{:.6f}".format(float(np.median(dils))))
+
+    Path(outpath).write_text("\n".join(lines) + "\n")
+    return {
+        'median_dilution': float(np.median(dils)),
+        'std_dilution': float(np.std(dils)),
+        'median_crowdsap': float(np.median(crowds)),
+        'n_segments': len(rows),
+    }
+
+
+def _safe_stitch(collection, logger=None):
+    """Normalise + stitch a LightCurveCollection without astropy's buggy
+    ``nanmedian`` path.
+
+    Background
+    ----------
+    The pinned astropy 5.1 + lightkurve 2.4 stack hits a known issue inside
+    ``LightCurveCollection.stitch()``: the default corrector is
+    ``lambda x: x.normalize()``, which calls ``np.nanmedian(self.flux)`` on
+    a ``MaskedQuantity``. If the segment's flux is all-NaN or fully masked
+    (frequent for short 20-s slots wiped by ``quality_bitmask``), the
+    median collapses to a scalar ``MaskedQuantity`` and astropy refuses to
+    iterate it (``'MaskedQuantity' object with a scalar value is not
+    iterable``). Even non-empty segments can hit this when the chosen
+    flux column is all-NaN.
+
+    Strategy
+    --------
+    1. Walk the collection; for each segment compute the median ourselves
+       on a plain ``np.ndarray`` (we strip units/mask first).
+    2. Drop any segment with fewer than 2 finite samples or a non-finite/
+       zero median (these are the ones lightkurve cannot normalise either).
+    3. Hand-roll the normalisation (``flux /= median``; same for
+       ``flux_err``) so we never invoke lightkurve's normalize and thus
+       never hit astropy's nanmedian.
+    4. Stitch the pre-normalised segments with an identity corrector.
+
+    Returns the stitched LightCurve, or ``None`` when every segment was
+    unusable (caller should treat that as a hard failure).
+    """
+    import lightkurve as _lk
+    if not isinstance(collection, _lk.LightCurveCollection):
+        return collection  # already a single LightCurve
+
+    def _to_plain_array(arr):
+        # Strip astropy units and any Masked wrapper down to a numpy ndarray.
+        if arr is None:
+            return None
+        try:
+            arr = arr.value  # astropy Quantity / MaskedQuantity -> ndarray-like
+        except AttributeError:
+            pass
+        try:
+            arr = arr.filled(np.nan)  # numpy MaskedArray -> ndarray with NaN
+        except AttributeError:
+            pass
+        return np.asarray(arr, dtype=float)
+
+    good = []
+    for one in collection:
+        seg = (
+            getattr(one, 'sector', None)
+            or getattr(one, 'campaign', None)
+            or getattr(one, 'quarter', None)
+            or '?'
+        )
+        try:
+            flux_arr = _to_plain_array(one.flux)
+        except Exception as exc:
+            if logger is not None:
+                logger.warning(f"Dropping segment {seg}: cannot read flux ({exc})")
+            continue
+        if flux_arr is None or flux_arr.size == 0:
+            if logger is not None:
+                logger.warning(f"Dropping empty segment {seg}")
+            continue
+        finite = np.isfinite(flux_arr)
+        n_finite = int(finite.sum())
+        if n_finite < 2:
+            if logger is not None:
+                logger.warning(
+                    f"Dropping segment {seg} (n_finite={n_finite})"
+                )
+            continue
+        med = float(np.median(flux_arr[finite]))
+        if not np.isfinite(med) or med == 0.0:
+            if logger is not None:
+                logger.warning(
+                    f"Dropping segment {seg} (median flux = {med})"
+                )
+            continue
+        # Hand-roll normalize: divide flux and flux_err by their (finite)
+        # median. Doing it through the LightCurve's __truediv__ preserves
+        # units and metadata without ever calling astropy's nanmedian.
+        try:
+            norm = one.copy()
+            norm.flux = one.flux / med
+            if getattr(one, 'flux_err', None) is not None:
+                norm.flux_err = one.flux_err / med
+        except Exception as exc:
+            if logger is not None:
+                logger.warning(f"Dropping segment {seg}: normalize failed ({exc})")
+            continue
+        good.append(norm)
+
+    if not good:
+        if logger is not None:
+            logger.error("All segments dropped — nothing to stitch.")
+        return None
+    # Identity corrector — already normalised above.
+    return _lk.LightCurveCollection(good).stitch(corrector_func=lambda x: x)
+
+
+def _dataset_aware_gp_bounds(time, flux, tdur_days):
+    """Derive sensible GP / noise prior bounds from a loaded lightcurve.
+
+    The current hardcoded defaults (``uniform -10 -3`` for ``ln σ_GP`` and
+    ``uniform -1 5`` for ``ln ρ_GP``) routinely allow the GP to absorb the
+    transit signal or fit the transit shape itself. This helper grounds
+    those bounds in the actual data:
+
+    * ``ln_err_flux``  centred near the observed point-to-point RMS,
+      bounded so the prior never permits >10% relative-flux jitter.
+    * ``ln σ_GP``      lower bound an order of magnitude below the RMS
+      (otherwise the GP is useless), upper capped at
+      ``min(5% rel flux, 100× RMS)`` to keep it away from transit depth.
+    * ``ln ρ_GP``      lower bound at ``max(2 × cadence, 0.5 × tdur)`` so
+      the GP cannot fit transit ingress/egress; upper at the actual
+      observation baseline (anything longer is degenerate with a slope).
+
+    Returns ``None`` when the lightcurve is too short to estimate noise
+    (caller should fall back to a generic default).
+    """
+    t = np.asarray(time, dtype=float)
+    f = np.asarray(flux, dtype=float)
+    mask = np.isfinite(t) & np.isfinite(f)
+    if int(mask.sum()) < 20:
+        return None
+    t = t[mask]
+    f = f[mask]
+    order = np.argsort(t)
+    t = t[order]
+    f = f[order]
+
+    # Per-cadence RMS via MAD of point-to-point differences.
+    diff = np.diff(f)
+    if diff.size == 0:
+        return None
+    mad = float(np.median(np.abs(diff - np.median(diff))))
+    rms = 1.4826 * mad / math.sqrt(2.0)
+    if not math.isfinite(rms) or rms <= 0:
+        rms = float(np.nanstd(f))
+    rms = max(rms, 1e-6)
+
+    cadence = float(np.median(np.diff(t)))
+    baseline = float(t[-1] - t[0])
+    tdur_days = max(float(tdur_days), 1.0 / 24.0)  # floor at 1 h to avoid degenerate priors
+
+    # ln_err_flux: centre at observed RMS, ±2 dex, but always cap upper at 10% flux.
+    lnerr_init = math.log(rms)
+    lnerr_lo = lnerr_init - 3.0
+    lnerr_hi = min(lnerr_init + 2.0, math.log(0.10))
+    if lnerr_hi <= lnerr_lo:
+        lnerr_hi = lnerr_lo + 1.0
+
+    # ln σ_GP: at least 1/10 RMS (else useless), at most min(5%, 100× RMS).
+    sigma_hi_phys = min(0.05, 100.0 * rms)
+    sigma_lo_phys = max(rms / 10.0, 1e-7)
+    lnsigma_lo = math.log(sigma_lo_phys)
+    lnsigma_hi = math.log(sigma_hi_phys)
+    if lnsigma_hi <= lnsigma_lo:
+        lnsigma_hi = lnsigma_lo + 2.0  # guard against rms tiny edge cases
+    lnsigma_init = math.log(max(3.0 * rms, sigma_lo_phys * 2))
+    lnsigma_init = min(max(lnsigma_init, lnsigma_lo + 0.1), lnsigma_hi - 0.1)
+
+    # ln ρ_GP: must be > 2 cadences AND > 0.5 × transit duration; < baseline.
+    # 2% safety margins keep the bounds strictly inside the physical limits
+    # after the .3f rounding round-trip when written to params.csv.
+    rho_lo_phys = 1.02 * max(2.0 * cadence, 0.5 * tdur_days)
+    rho_hi_phys = 0.98 * baseline
+    if rho_hi_phys <= rho_lo_phys:
+        rho_hi_phys = rho_lo_phys * 4.0
+    lnrho_lo = math.log(rho_lo_phys)
+    lnrho_hi = math.log(rho_hi_phys)
+    lnrho_init = 0.5 * (lnrho_lo + lnrho_hi)
+
+    return {
+        "lnerr_init": lnerr_init,
+        "lnerr_lo": lnerr_lo,
+        "lnerr_hi": lnerr_hi,
+        "lnsigma_init": lnsigma_init,
+        "lnsigma_lo": lnsigma_lo,
+        "lnsigma_hi": lnsigma_hi,
+        "lnrho_init": lnrho_init,
+        "lnrho_lo": lnrho_lo,
+        "lnrho_hi": lnrho_hi,
+        "_rms": rms,
+        "_cadence_days": cadence,
+        "_baseline_days": baseline,
+    }
+
+
+def _update_params_gp_bounds(params_csv_path, inst, bounds, logger=None):
+    """Rewrite ``ln_err_flux_<inst>`` and the GP rows for ``inst`` in
+    ``params.csv`` with dataset-aware values from
+    :func:`_dataset_aware_gp_bounds`.
+
+    Preserves the existing label/unit/coupled columns when present.
+    Returns the number of rows replaced (0 if nothing matched).
+    """
+    if not bounds:
+        return 0
+    path = Path(params_csv_path)
+    if not path.exists():
+        return 0
+    text = path.read_text()
+
+    def _rebuild(name, value, fit, bounds_str, tail):
+        return ",".join([name, value, str(fit), bounds_str] + tail)
+
+    def _split_keep_tail(line):
+        # name,value,fit,bounds,label,unit,coupled — keep fields 4+ verbatim.
+        parts = line.split(",")
+        if len(parts) < 4:
+            return None
+        return parts[0], parts[1], parts[2], parts[3], parts[4:]
+
+    prefixes = {
+        f"ln_err_flux_{inst}": (
+            "{:.3f}".format(bounds["lnerr_init"]),
+            "uniform {:.3f} {:.3f}".format(bounds["lnerr_lo"], bounds["lnerr_hi"]),
+        ),
+        f"baseline_gp_matern32_lnsigma_flux_{inst}": (
+            "{:.3f}".format(bounds["lnsigma_init"]),
+            "uniform {:.3f} {:.3f}".format(bounds["lnsigma_lo"], bounds["lnsigma_hi"]),
+        ),
+        f"baseline_gp_matern32_lnrho_flux_{inst}": (
+            "{:.3f}".format(bounds["lnrho_init"]),
+            "uniform {:.3f} {:.3f}".format(bounds["lnrho_lo"], bounds["lnrho_hi"]),
+        ),
+    }
+
+    new_lines = []
+    replaced = 0
+    for line in text.splitlines():
+        if line.startswith("#") or not line.strip():
+            new_lines.append(line)
+            continue
+        split = _split_keep_tail(line)
+        if split is None:
+            new_lines.append(line)
+            continue
+        name, _value, fit, _bounds, tail = split
+        if name in prefixes and "uniform" in _bounds:
+            init_str, bounds_str = prefixes[name]
+            new_lines.append(_rebuild(name, init_str, fit, bounds_str, tail))
+            replaced += 1
+        else:
+            new_lines.append(line)
+    if replaced == 0:
+        return 0
+    suffix = "\n" if text.endswith("\n") else ""
+    path.write_text("\n".join(new_lines) + suffix)
+    if logger is not None:
+        logger.info(
+            f"params.csv: refined GP/noise priors for {inst} from data "
+            f"(RMS={bounds['_rms']:.2e}, cadence={bounds['_cadence_days']*86400:.0f}s, "
+            f"baseline={bounds['_baseline_days']:.2f}d) — {replaced} row(s) updated"
+        )
+    return replaced
+
+
+def _inject_dilution_normal_prior(params_csv_path, inst, median, std, sigma_floor=0.01):
+    """Inject a commented normal-prior dilution row above the uniform one.
+
+    Looks for the existing ``dil_<inst>,...,uniform ...`` line in
+    ``params_csv_path`` and prepends a commented-out twin using a Gaussian
+    prior centred on the SPOC-derived ``median`` dilution with width
+    ``max(std, sigma_floor)``. CROWDSAP carries no formal uncertainty, so a
+    1% absolute floor keeps the prior physically reasonable even when only
+    one segment is available.
+
+    The row is commented out so the original uniform row remains the active
+    default — users who trust the SPOC crowding model uncomment the new
+    row (and comment the uniform one) to fit dilution under the tight
+    Gaussian prior.
+
+    Returns True when a row was inserted, False otherwise.
+    """
+    path = Path(params_csv_path)
+    if not path.exists():
+        return False
+    text = path.read_text()
+    needle = "dil_{},".format(inst)
+    sigma = max(float(std), float(sigma_floor))
+    new_row = (
+        "#dil_{},{:.6f},1,normal {:.6f} {:.6f},"
+        "$D_\\mathrm{{0; {}}}$ (SPOC),,"
+    ).format(inst, median, median, sigma, inst)
+    new_lines = []
+    inserted = False
+    for line in text.splitlines():
+        if (not inserted) and line.startswith(needle) and 'uniform' in line:
+            new_lines.append(new_row)
+            inserted = True
+        new_lines.append(line)
+    if not inserted:
+        return False
+    suffix = "\n" if text.endswith("\n") else ""
+    path.write_text("\n".join(new_lines) + suffix)
+    return True
 
 
 Nsamples = 10_000
@@ -569,10 +993,15 @@ def main():
             logger.error(msg)
             sys.exit()
         
-        lc = filtered_result.download_all(
-            flux_column=lc_type, quality_bitmask=quality_bitmask
-        ).stitch()
-        
+        lc = _safe_stitch(
+            filtered_result.download_all(
+                flux_column=lc_type, quality_bitmask=quality_bitmask
+            ),
+            logger=logger,
+        )
+        if lc is None:
+            logger.error("No usable segments downloaded."); sys.exit()
+
         df = lc.to_pandas()
         if len(df) == 0:
             logger.error("Lightcurve data is empty.")
@@ -1012,15 +1441,27 @@ def main():
         )
         # ===== Write files =====#
         outdir = Path(basedir, target_name)
-        try:
-            outdir.mkdir(parents=True, exist_ok=overwrite)
-        except FileExistsError:
-            raise FileExistsError(
-                f"{outdir} already exists. Use --overwrite to overwrite files."
-            )
+        # An existing directory is only a real conflict when it already holds
+        # the canonical outputs of a successful prepare_allesfit run. An empty
+        # dir (or one containing only stray artefacts from an aborted attempt)
+        # should not block re-running without --overwrite.
+        _CANONICAL_OUTPUTS = ("params.csv", "settings.csv", "run.py")
+        if outdir.exists():
+            existing = {p.name for p in outdir.iterdir()} if outdir.is_dir() else set()
+            collisions = existing & set(_CANONICAL_OUTPUTS)
+            if collisions and not overwrite:
+                raise FileExistsError(
+                    f"{outdir} already contains {sorted(collisions)}. "
+                    "Use --overwrite to overwrite files."
+                )
+        outdir.mkdir(parents=True, exist_ok=True)
 
         # ===== Create params.csv =====#
         text = """#name,value,fit,bounds,label,unit,coupled_with\n"""
+        # Track the shortest transit duration across all companions; used
+        # after each lightcurve download to set ln_ρ_GP lower bounds that
+        # the GP cannot use to fit the transit shape itself.
+        min_tdur_hours = float("inf")
         for i, row in target_df.iterrows():
             pl = planets[i]
             if debug:
@@ -1033,6 +1474,11 @@ def main():
             epocherr = row["Epoch (BJD) err"]
             tdur = row["Duration (hours)"]
             tdurerr = row["Duration (hours) err"]
+            try:
+                if math.isfinite(float(tdur)) and float(tdur) > 0:
+                    min_tdur_hours = min(min_tdur_hours, float(tdur))
+            except (TypeError, ValueError):
+                pass
 
             if interactive and not np.all([Porb > 0, epoch > 0, tdur > 0]):
                 Porb = float(input("Porb: "))
@@ -1226,8 +1672,8 @@ def main():
         text += "#baseline per instrument,,,,,,\n"
         for inst in fns:
             text += f"#baseline_gp_offset_flux_{inst},0,1,uniform -0.1 0.1,$\mathrm{{offset ({inst})}}$,,\n"
-            text += f"baseline_gp_matern32_lnsigma_flux_{inst},-5,1,uniform -15 0,$\mathrm{{gp ln \sigma ({inst})}}$,,\n"
-            text += f"baseline_gp_matern32_lnrho_flux_{inst},0,1,uniform -5 5,$\mathrm{{gp ln \\rho ({inst})}}$,,\n"
+            text += f"baseline_gp_matern32_lnsigma_flux_{inst},-5,1,uniform -10 -3,$\mathrm{{gp ln \sigma ({inst})}}$,,\n"
+            text += f"baseline_gp_matern32_lnrho_flux_{inst},0,1,uniform -1 5,$\mathrm{{gp ln \\rho ({inst})}}$,,\n"
         # TTV rows: when --ttv is NOT set, keep the commented-out stub for
         # reference. When --ttv IS set, the real per-transit rows are
         # appended after the lightcurve download (below) because we need
@@ -1343,9 +1789,14 @@ fig = allesfitter.show_initial_guess('.')
                     msg += f"Try using -exp={unique_exptimes}"
                     logger.error(msg); sys.exit()
                 exptime = unique_exptimes[0] if exptime is None else exptime
-                lc = result.download_all(
-                    flux_column=lc_type, quality_bitmask=quality_bitmask
-                ).stitch()
+                lc = _safe_stitch(
+                    result.download_all(
+                        flux_column=lc_type, quality_bitmask=quality_bitmask
+                    ),
+                    logger=logger,
+                )
+                if lc is None:
+                    logger.error("No usable segments downloaded."); sys.exit()
                 logger.info(
                     "The lightcurves were not flattened/de-trended to avoid removing transits."
                 )
@@ -1358,12 +1809,16 @@ fig = allesfitter.show_initial_guess('.')
                 if _seg is not None and len(unique_sectors) == 1:
                     assert _segments_match(_seg, unique_sectors[-1])
                 if pipeline == "spoc":
-                    lc1 = result.download_all(
+                    _lc1_for_meta = result.download_all(
                         quality_bitmask=quality_bitmask, flux_column="pdcsap_flux"
-                    ).stitch()
-                    lc2 = result.download_all(
-                        quality_bitmask=quality_bitmask, flux_column="sap_flux"
-                    ).stitch()
+                    )
+                    lc1 = _safe_stitch(_lc1_for_meta, logger=logger)
+                    lc2 = _safe_stitch(
+                        result.download_all(
+                            quality_bitmask=quality_bitmask, flux_column="sap_flux"
+                        ),
+                        logger=logger,
+                    )
             elif sector_flag == "multi_sector":
                 # case: sector int or list
                 _w = _segment_word(mission)
@@ -1388,9 +1843,14 @@ fig = allesfitter.show_initial_guess('.')
                     logger.error(msg); sys.exit()
                 assert len(sector) == len(filtered_result)
                 exptime = unique_exptimes[0] if exptime is None else exptime
-                lc = filtered_result.download_all(
-                    quality_bitmask=quality_bitmask, flux_column=lc_type
-                ).stitch()
+                lc = _safe_stitch(
+                    filtered_result.download_all(
+                        quality_bitmask=quality_bitmask, flux_column=lc_type
+                    ),
+                    logger=logger,
+                )
+                if lc is None:
+                    logger.error("No usable segments downloaded."); sys.exit()
                 logger.info(
                     "The lightcurves were not flattened/de-trended to avoid removing transits."
                 )
@@ -1402,12 +1862,16 @@ fig = allesfitter.show_initial_guess('.')
                 if _seg is not None and len(sector) == 1:
                     assert any(_segments_match(_seg, s) for s in sector), logger.error(msg)
                 if pipeline == "spoc":
-                    lc1 = filtered_result.download_all(
+                    _lc1_for_meta = filtered_result.download_all(
                         quality_bitmask=quality_bitmask, flux_column="pdcsap_flux"
-                    ).stitch()
-                    lc2 = filtered_result.download_all(
-                        quality_bitmask=quality_bitmask, flux_column="sap_flux"
-                    ).stitch()
+                    )
+                    lc1 = _safe_stitch(_lc1_for_meta, logger=logger)
+                    lc2 = _safe_stitch(
+                        filtered_result.download_all(
+                            quality_bitmask=quality_bitmask, flux_column="sap_flux"
+                        ),
+                        logger=logger,
+                    )
             else:
                 if sector_flag == "first":
                     idx = 0
@@ -1431,6 +1895,7 @@ fig = allesfitter.show_initial_guess('.')
                     lc1 = filtered_result.download(
                         quality_bitmask=quality_bitmask, flux_column="pdcsap_flux"
                     ).normalize()
+                    _lc1_for_meta = lc1   # single LightCurve carries its own .meta
                     lc2 = filtered_result.download(
                         quality_bitmask=quality_bitmask, flux_column="sap_flux"
                     ).normalize()
@@ -1461,6 +1926,31 @@ fig = allesfitter.show_initial_guess('.')
                     f"{target_name}_{mission}_{lc_type.split('_')[0]}_s{secs}_exp{int(exptime)}s"
                 )
                 fig.savefig(fp.with_suffix('.png'))
+                # Record SPOC CROWDSAP -> allesfitter dilution next to the lightcurve
+                # so users can fill in dil_<inst> in params.csv without guessing.
+                contam_fp = outdir.joinpath("spoc_contamination.txt")
+                try:
+                    summary = _write_spoc_contamination(_lc1_for_meta, contam_fp, mission)
+                    if summary:
+                        logger.info(f"Saved: {contam_fp}")
+                        # Prepend a commented normal-prior dilution row above the
+                        # existing uniform row so users can opt into the
+                        # SPOC-informed prior without recomputing the value.
+                        params_fp = outdir.joinpath("params.csv")
+                        if _inject_dilution_normal_prior(
+                            params_fp, fn,
+                            median=summary['median_dilution'],
+                            std=summary['std_dilution'],
+                        ):
+                            logger.info(
+                                f"params.csv: added commented SPOC normal-prior row for dil_{fn} "
+                                f"(median={summary['median_dilution']:.4f}, "
+                                f"n_segments={summary['n_segments']})"
+                            )
+                    else:
+                        logger.info("CROWDSAP not present in SPOC header — skipping spoc_contamination.txt.")
+                except Exception as _e:
+                    logger.warning(f"Could not write spoc_contamination.txt: {_e}")
             else:
                 ax = lc.scatter(label=pipeline)
                 ax.set_title(f"{_segment_word(mission).capitalize()}={secs}\nexptime={int(exptime)}s")
@@ -1491,6 +1981,29 @@ fig = allesfitter.show_initial_guess('.')
             inst_fp = outdir.joinpath(f"{fn}.csv")
             df2[cols].to_csv(inst_fp, sep=",", header=False, index=False)
             logger.info(f"Saved: {inst_fp}")
+
+            # Refine the GP / noise prior bounds for this instrument using
+            # the actual cadence, baseline, and per-cadence scatter of the
+            # downloaded lightcurve. Replaces the generic, hardcoded
+            # bounds with data-aware ones (see _dataset_aware_gp_bounds).
+            try:
+                _tdur_d = (
+                    (min_tdur_hours / 24.0)
+                    if math.isfinite(min_tdur_hours)
+                    else 0.1
+                )
+                _gp = _dataset_aware_gp_bounds(
+                    df2["time"].to_numpy(),
+                    df2["flux"].to_numpy(),
+                    tdur_days=_tdur_d,
+                )
+                if _gp is not None:
+                    _update_params_gp_bounds(
+                        outdir.joinpath("params.csv"), fn, _gp, logger=logger
+                    )
+            except Exception as _e:
+                logger.warning(f"Could not refine GP priors for {fn}: {_e}")
+
             logger.info(f"Ndata: {len(df):,}")
             logger.info(df[cols].head())
             if debug:
@@ -1553,7 +2066,7 @@ mcmc_thin_by,2
 ###############################################################################,
 ns_modus,dynamic
 ns_nlive,1000
-ns_bound,single
+ns_bound,multi
 ns_sample,auto
 ns_tol,100
 ###############################################################################,
@@ -1708,6 +2221,18 @@ fit_ttvs,False
                     )
             except Exception as e:
                 logger.error(f"TTV append via allesclass failed: {e}")
+
+        # ===== Prior-bound sanity checks =====
+        # Surface obvious problems with GP/noise priors (e.g. GP amplitude
+        # large enough to swallow the transit, GP timescale longer than the
+        # observation baseline) before the user kicks off a multi-hour fit.
+        try:
+            from allesfitter.utils.prior_sanity import validate_gp_priors
+            warnings = validate_gp_priors(outdir, log=logger.warning)
+            if not warnings:
+                logger.info("Prior sanity: GP / noise bounds look reasonable.")
+        except Exception as e:
+            logger.warning(f"Prior sanity check skipped: {e}")
 
 
 if __name__ == "__main__":
