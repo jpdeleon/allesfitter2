@@ -9,11 +9,14 @@ An extension of the original allesfitter package that streamlines the process of
 - **Parameter derivation** from multiple astronomical databases (NExSci, TOI, CTOI, TIC)
 - **Flexible time-window selection** — TESS sectors, K2 campaigns (including split campaigns 11a/11b), and Kepler quarters (single, multiple, or all)
 - **Chromatic transit modeling** — fit a separate `Rp/Rs` per bandpass while keeping orbital parameters globally shared
-- **Strict configuration validation** — clear errors for bandpass/instrument count mismatch, duplicate params, unknown bandpass suffixes, or chromatic/achromatic shape inconsistencies (no more silent fallback)
+- **Per-bandpass Rp/Rs posterior plot** — `ns_output()` automatically emits `ns_chromatic_rr_<companion>.pdf` overlaying per-bandpass posteriors with a canonical color map (`tess=k`, `g=C0`, `r=C2`, `i=C8`, `z=C3`; viridis fallback for unknown labels)
+- **Strict configuration validation** — clear errors for bandpass/instrument count mismatch, duplicate params, unknown bandpass suffixes, chromatic/achromatic shape inconsistencies, or per-instrument settings keys with orphan suffixes (catches `host_ld_law_<bandpass>` typos)
+- **Sensible LD default** — `host_ld_law_<inst>` now defaults to `quad` (was `None`, which silently disabled limb darkening); explicit `host_ld_law_<inst>,none` still opts out
 - **Raw-flux outlier clipping** via `flux_min_raw` / `flux_max_raw` — clipped points are removed from the fit but overlaid in red on `initial_guess.pdf`
+- **Centralized run log** — every `ns_fit` / `ns_output` / `mcmc_fit` call records a JSONL row at `~/.allesfitter/runs.jsonl` (override via `ALLESFITTER_RUN_LOG`) with absolute datadir, pid, hostname, duration, and status. Inspect with `jq` or `allesfitter.run_log_tail()`.
 - **Built-in quality control** with outlier removal and quality masking
 - **Theoretical limb darkening** coefficients from Claret tables using [limbdark](https://github.com/jpdeleon/limbdark2)
-- **Test suite** under `tests/chromatic/` pins the chromatic contract with 46 unit, parsing, likelihood-assembly, and end-to-end fit tests
+- **Test suite** under `tests/chromatic/` pins the chromatic + logger contracts with 64+ unit, parsing, likelihood-assembly, end-to-end fit, and run-logger tests
 
 ## Installation
 
@@ -208,6 +211,90 @@ This stays `chromatic=False` (single unique band) but ties both instruments to o
 
 If `-bp` is **omitted** with multiple distinct `-f` instruments, the script warns and falls back to an achromatic `params.csv` for backward compatibility.
 
+After `ns_fit` + `ns_output`, the per-bandpass `Rp/Rs` posteriors are overlaid in `ns_chromatic_rr_<companion>.pdf` — useful for spotting wavelength-dependent depth differences (atmospheric features, spot contamination, dilution mismatch) at a glance. When `params_star.csv` is present, a second panel below the histograms shows the implied planet radius posterior with twin x-axes (`R⊕` bottom, `R_Jup` top) — R★ uncertainty is propagated from the asymmetric normal in `params_star.csv`.
+
+### Fitting dilution (`dil_<inst>`) in a chromatic model
+
+`dil_<inst>` is **per-instrument**, never per-bandpass — two instruments mapped to the same bandpass each get their own dilution variable, independent of `chromatic=True`/`False`. The parser, validator, and likelihood-assembly tests all enforce this scope.
+
+**How it enters the model.** In `flux_subfct_ellc`:
+
+```
+model_flux = 1 + ( (host_flux + companion_flux - 1) · (1 - dil_<inst>) )
+```
+
+So `dil` scales the **depth** of the transit for that instrument by `(1 − dil)`. Orbital geometry (`rsuma`, `cosi`, `period`, `epoch`) and limb-darkening shape are unaffected — only the in-transit floor moves up or down. Negative `dil` is allowed by the prior (`uniform -1 1` by default) and corresponds to *over*-correction (the true depth is deeper than the observed one).
+
+**The chromatic-specific concern: degeneracy with per-band `rr`.** Observed transit depth in band `bp` for instrument `i` is approximately
+
+```
+δ_observed  ≈  rr_bp²  ·  (1 − dil_i)
+```
+
+Fit both `rr_bp` (per-band) and `dil_i` (per-inst) with broad priors and the photometry only pins down the **product**. Posteriors become highly anti-correlated (a deeper planet trades for a larger dilution and vice versa). Chromatic mode makes this worse because:
+
+- the per-band rr keys multiply the number of `(rr_bp, dil_i)` ridges in the joint posterior;
+- a real wavelength-dependent depth signal (atmosphere, spots, true dilution mismatch) can be absorbed into per-instrument dilution offsets, making the `ns_chromatic_rr_<companion>.pdf` overlays look artificially flat across bands.
+
+**When to fit `dil`, when to fix it:**
+
+| Case | Recommendation |
+|---|---|
+| Single instrument per bandpass, no known contamination | `fit=0, value=0` (default). Leave it alone. |
+| Crowded TESS field, known contaminant in aperture | `fit=1` on the affected instrument with a **tight** prior, e.g. `normal <TICv8_contam> <σ≈0.05>`. Avoid the broad `uniform -1 1`. |
+| Two instruments sharing one bandpass with different aperture sizes | Fit `dil` on the larger-aperture inst, fix it at 0 on the smaller-aperture inst. This anchors the contrast. |
+| Bandpass A is known-clean (small-aperture ground-based) and bandpass B is known-dirty (TESS) | Fix `dil` on inst-A, fit it on inst-B with a strong informative prior from a contamination catalog. |
+| You want to disentangle atmosphere/spots vs. dilution as the cause of band-to-band depth differences | Run two fits: one with `dil` fixed, one with `dil` fit under informative priors. Compare `log Z` (Bayes factor) — the data choose. |
+
+**Practical diagnostics.** After a chromatic fit with free `dil`, check:
+
+1. **Posterior correlation** between `b_rr_<bp>` and `dil_<inst>` for each instrument mapped to that bandpass (from `ns_corner.pdf` or the posterior samples). `|r| > 0.7` means the degeneracy is dominating.
+2. **Width of the `dil_<inst>` posterior**: if it spans the full prior interval, the data isn't constraining it — you've added a free parameter that absorbs noise and inflates the `rr` uncertainty.
+3. **`ns_chromatic_rr_<companion>.pdf`**: if all bandpasses' `rr` posteriors collapse to similar widths despite very different photometric S/N, dilution is likely soaking up the band-to-band variation.
+
+**Bottom line.** The chromatic depth signal you're hunting for is *exactly the same kind of signal* a free dilution parameter can mimic. Fit `dil` only with strong external priors from contamination catalogs, and never fit it on every instrument simultaneously without anchoring at least one. The conservative `fit=0, value=0` default that `prepare_allesfit.py` emits is the right starting point; promote to `fit=1` only when you have catalog evidence of a contaminant and a defensible prior.
+
+### Tracking long-running fits with the centralized run log
+
+Every `ns_fit` / `ns_output` / `mcmc_fit` / `mcmc_output` call wrapped with `allesfitter.log_run(...)` appends start and end rows to `~/.allesfitter/runs.jsonl` (one JSON object per line). Use it to answer "which fits are still running, where, against which datadir?" with a single `tail` or `jq`.
+
+`prepare_allesfit` already emits a `run.py` template with the wrapping pre-written; uncomment and go:
+
+```python
+import allesfitter
+
+with allesfitter.log_run("ns_fit", "."):
+    allesfitter.ns_fit(".")
+
+with allesfitter.log_run("ns_output", "."):
+    allesfitter.ns_output(".")
+```
+
+Inspect the log:
+
+```bash
+# raw
+tail -n 20 ~/.allesfitter/runs.jsonl
+
+# pretty-print the last 5 entries
+jq -c '.' ~/.allesfitter/runs.jsonl | tail -n 5
+
+# only currently-running fits
+jq -c 'select(.event=="start")' ~/.allesfitter/runs.jsonl | \
+  comm -23 - <(jq -c 'select(.event=="end") | {run_id, command}' \
+                ~/.allesfitter/runs.jsonl)
+```
+
+Or from Python:
+
+```python
+import allesfitter
+for row in allesfitter.run_log_tail(50):
+    print(row)
+```
+
+Override the log path with `export ALLESFITTER_RUN_LOG=/abs/path/runs.jsonl` (useful for shared/networked logs across machines). Each row carries `pid`, `hostname`, `user`, absolute `datadir`, `run_id`, `duration_sec` and (on failure) `error` + truncated `traceback`. Writes are serialized with `fcntl.flock`, so concurrent fits on the same host append cleanly.
+
 ### Raw-flux outlier clipping
 
 Add to `settings.csv` to drop rows outside the given flux window:
@@ -359,6 +446,17 @@ When `-f` has ≥2 distinct instruments and `-bp` is omitted, the script logs a 
 **`KeyError: 'b_rr'` in chromatic mode**
 - Fixed in current main; pull the latest and re-run `show_initial_guess`/`ns_fit`.
 
+**`settings.csv contains per-instrument keys whose suffix is not a known instrument name`**
+- A per-instrument settings row (e.g. `host_ld_law_`, `host_grid_`, `baseline_flux_`, `t_exp_`, …) carries a suffix that is **not** in `inst_phot ∪ inst_rv ∪ inst_rv2`. The most common cause is confusing a bandpass label with an instrument name. If the orphan suffix matches a bandpass, the error explicitly hints at the affected instruments — repeat the row once per instrument that uses that bandpass.
+- Example: with `inst_phot,tglc120_s90 tglc120_s63s64` and `bandpass,tess tess`, write `host_ld_law_tglc120_s90,quad` and `host_ld_law_tglc120_s63s64,quad`, **not** `host_ld_law_tess,quad`.
+
+**Transit shape looks unchanged when editing `host_ldc_q1/q2`**
+- Until v2 the `host_ld_law_<inst>` default was `None`, which silently disabled limb darkening — `ldc_1=None` reached `ellc` and the q1/q2 values had no effect. The current default is `quad`, so this is fixed for new datadirs; for hand-edited configs, ensure `host_ld_law_<inst>,quad` is present per actual instrument. Explicit `host_ld_law_<inst>,none` still opts out cleanly.
+- Note that small q1 deltas (~0.03) only move ellc's `u1, u2` by ~1–2%, which is sub-mmag and often invisible at the default plot scale. Use a larger delta (e.g. 0.1 → 0.9) when sanity-checking the LDC pipeline visually.
+
+**Where are my fits running?**
+- Tail the centralized run log: `tail -n 10 ~/.allesfitter/runs.jsonl` (or whatever path `$ALLESFITTER_RUN_LOG` resolves to). Each `start` row carries `pid`, `hostname`, absolute `datadir`, and `run_id`; the matching `end` row carries `status` and `duration_sec`. See the "Tracking long-running fits" use case above.
+
 ### Debug Mode
 
 Enable comprehensive diagnostics:
@@ -425,10 +523,13 @@ pytest tests/chromatic/ -m ''
 `tests/chromatic/` covers:
 
 - **Scope mapping** — global vs. per-bandpass vs. per-instrument keys, `get_rr_key`/`get_ldc_key` semantics, three-state edge cases (achromatic / single-bandpass / chromatic).
-- **Parser errors** — bandpass count mismatch, duplicate rows, unknown bandpass suffix, chromatic-vs-achromatic shape inconsistencies.
-- **Likelihood assembly** — `ellc.fluxes` is monkeypatched to assert per-band `rr`, per-inst LDC, and bit-equal shared orbital params across instruments.
+- **Parser errors** — bandpass count mismatch, duplicate rows, unknown bandpass suffix, chromatic-vs-achromatic shape inconsistencies, and orphan per-instrument suffixes (e.g. `host_ld_law_<bandpass>` when no instrument has that name).
+- **LD law defaults** — `host_ld_law_<inst>` defaults to `quad` when absent/blank; explicit `none` still disables limb darkening.
+- **Likelihood assembly** — `ellc.fluxes` is monkeypatched to assert per-band `rr`, per-inst LDC, and bit-equal shared orbital params across instruments. Includes the shared-bandpass q-space propagation regression: editing `host_ldc_q1_<bp>` in `params.csv` must actually change the LDC vector ellc receives (atol 1e-12).
+- **`prepare_allesfit` emission shapes** — pins the four `settings.csv` / `params.csv` shapes the script writes (achromatic, chromatic with inst==bandpass, chromatic with distinct inst/bandpass, shared bandpass) and asserts they all pass `config.init`.
 - **Raw-flux clipping** — clipped rows excluded from the fit and retained under `data[inst]['raw_clipped_*']` for the red overlay.
 - **End-to-end NS fit** — recovers injected `b_rr_tess` and `b_rr_k2` from synthetic two-band data; achromatic backcompat baseline.
+- **Run logger** (`tests/chromatic/test_run_logger.py`) — start/end rows, failure traceback capture, `ALLESFITTER_RUN_LOG` env override, `extra` field merging into start row only, `tail()` semantics, and concurrent-append smoke.
 
 See `docs/chromatic_validation.md` for the full requirement → code → test mapping.
 

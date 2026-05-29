@@ -161,7 +161,19 @@ def update_params(theta):
     #=========================================================================
     for companion in config.BASEMENT.settings['companions_all']:
         rr = params.get(companion+'_rr')
-        if rr is None and config.BASEMENT.settings.get('chromatic', False):
+        if rr is None:
+            # Fall back to the bandpass-suffixed key. Covers both:
+            #   * true chromatic (>=2 unique bandpasses): rr lives under
+            #     `{c}_rr_<bandpass>`; the achromatic `{c}_rr` is never
+            #     written by the parser.
+            #   * single-band chromatic infrastructure (bandpass set with
+            #     one label → chromatic=False): rr still lives under
+            #     `{c}_rr_<bandpass>`, NOT `{c}_rr`, because the parser
+            #     uses the bandpass suffix as soon as the bandpass row is
+            #     present. Without this fallback, b_radius_1 and the b_rr
+            #     legacy alias would silently be None in that mode.
+            # For true achromatic (no bandpass row), get_rr_key returns
+            # `{c}_rr` and this lookup is a no-op identical to the first.
             inst_phot = config.BASEMENT.settings.get('inst_phot', [])
             if inst_phot:
                 rr_key = config.BASEMENT.get_rr_key(companion, inst_phot[0])

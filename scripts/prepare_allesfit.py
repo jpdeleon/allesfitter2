@@ -132,6 +132,51 @@ quartiles_1sig = [16.0, 50.0, 84.0]  # 1-sigma
 quartiles_2sig = [2.275, 50.0, 97.725]  # 2-sigma
 quartiles_3sig = [0.135, 50.0, 99.865]  # 3-sigma
 
+
+def _default_prior_bounds(rprs_max, rsuma_min, rsuma_max):
+    """Compute the physics-informed default prior upper/lower bounds.
+
+    The wide unbounded defaults of older versions wasted sampler time in
+    unphysical regions (non-transiting geometries, brown-dwarf depths,
+    GP correlation lengths >>1 yr, etc.). These tighter bounds reject
+    those regions without biasing physical solutions:
+
+    * ``_rr_upper``  — radius-ratio upper limit. Round literature
+      ``rprs_max`` up to the nearest 0.1, add 5% safety headroom, cap at
+      0.5 (brown-dwarf regime).
+    * ``_rsuma_lo``  — lower bound on ``(R★+Rp)/a``. Prevents ``a→∞`` at
+      the prior boundary (degenerate with f_c/f_s).
+    * ``_rsuma_hi``  — upper bound. Covers ultra-short period planets at
+      the wide end (``a ≈ 2 R★``) without over-extending.
+    * ``_cosi_max``  — transit geometry requires ``cos i < (R★+Rp)/a =
+      rsuma·(1+rr)``. Outside that the likelihood is zero. Cap with a
+      1.2× safety factor, hard-bounded at 1.
+
+    Parameters
+    ----------
+    rprs_max, rsuma_min, rsuma_max : float
+        3-sigma upper/lower estimates of Rp/R★ and rsuma from the
+        catalog-resolved literature values (computed by the caller via
+        sampling).
+
+    Returns
+    -------
+    dict
+        Keys: ``rr_upper``, ``rsuma_lo``, ``rsuma_hi``, ``cosi_max``.
+        All floats, suitable for direct substitution into params.csv.
+    """
+    rr_upper = min(0.5, ceil(rprs_max * 10) / 10 + 0.05)
+    rsuma_lo = max(1e-3, rsuma_min)
+    rsuma_hi = min(0.5, 2.0 * rsuma_max)
+    cosi_max = min(1.0, 1.2 * rsuma_max * (1.0 + rprs_max))
+    return {
+        "rr_upper": rr_upper,
+        "rsuma_lo": rsuma_lo,
+        "rsuma_hi": rsuma_hi,
+        "cosi_max": cosi_max,
+    }
+
+
 def catalog_info_name(df) -> Tuple:
     Teff, Teff_err = df["st_teff"].astype(float), np.sqrt(
         df["st_tefferr1"] ** 2 + df["st_tefferr2"] ** 2
@@ -713,7 +758,7 @@ def main():
                 text += f"#TTV companion {_c},,,,,\n"
                 for _j in range(_n_obs):
                     text += (
-                        f"{_c}_ttv_transit_{_j+1},0,1,uniform -0.1 0.1,"
+                        f"{_c}_ttv_transit_{_j+1},0,1,uniform -0.05 0.05,"
                         f"TTV$_\\mathrm{{ttv;{_j+1}}}$,d,\n"
                     )
         if debug:
@@ -1109,7 +1154,13 @@ def main():
             text += f"#companion {pl} astrophysical params,,,,,,\n"
             # rr: single achromatic key, or one per unique bandpass when
             # --bandpass was given. rsuma stays globally shared either way.
-            _rr_upper = ceil(rprs_max * 10) / 10
+            # Bounds computed by _default_prior_bounds (see docstring for
+            # the physical rationale).
+            _bounds = _default_prior_bounds(rprs_max, rsuma_min, rsuma_max)
+            _rr_upper = _bounds["rr_upper"]
+            _rsuma_lo = _bounds["rsuma_lo"]
+            _rsuma_hi = _bounds["rsuma_hi"]
+            _cosi_max = _bounds["cosi_max"]
             if not rr_suffixes:
                 text += (
                     f"{pl}_rr,{rprs:.4f},1,uniform 0 {_rr_upper:.4f},"
@@ -1121,9 +1172,9 @@ def main():
                         f"{pl}_rr_{_bp},{rprs:.4f},1,uniform 0 {_rr_upper:.4f},"
                         f"$R_{pl} / R_\\star (\\mathrm{{{_bp}}})$,,\n"
                     )
-            text += f"{pl}_rsuma,{rsuma:.4f},1,uniform {rsuma_min:.4f} {ceil(rsuma_max*10)/10:.4f},$(R_\star + R_{pl}) / a_{pl}$,,\n"
+            text += f"{pl}_rsuma,{rsuma:.4f},1,uniform {_rsuma_lo:.4f} {_rsuma_hi:.4f},$(R_\star + R_{pl}) / a_{pl}$,,\n"
             #text += f"{pl}_rsuma,{rsuma:.4f},1,uniform 0 1,$(R_\star + R_{pl}) / a_{pl}$,,\n"
-            text += f"{pl}_cosi,0,1,uniform 0 1,$\cos" + "{i_" + pl + "}$,,\n"
+            text += f"{pl}_cosi,0,1,uniform 0 {_cosi_max:.4f},$\cos" + "{i_" + pl + "}$,,\n"
             text += (
                 f"{pl}_epoch,{epoch:.6f},1,normal {epoch:.6f} {epocherr:.6f},$T_"
                 + "{0;"
@@ -1159,16 +1210,24 @@ def main():
             text += f"host_ldc_q1_{suffix},0.5,1,uniform 0 1,$q_{{1; \\mathrm{{{suffix}}}}}$,,\n"
             text += f"host_ldc_q2_{suffix},0.5,1,uniform 0 1,$q_{{2; \\mathrm{{{suffix}}}}}$,,\n"
 
+        # ln(err) upper bound = -3 → exp(-3) ≈ 5% relative scatter, already
+        # generous; the previous -1 (exp(-1) ≈ 37%) covered a regime where
+        # no transit signal is recoverable, so samples there were wasted.
         text += "#errors per instrument,,,,,,\n"
         for inst in fns:
             text += (
-                f"ln_err_flux_{inst},-6,1,uniform -10 -1,$\log{{\sigma ({inst})}}$,rel. flux,\n"
+                f"ln_err_flux_{inst},-6,1,uniform -10 -3,$\log{{\sigma ({inst})}}$,rel. flux,\n"
             )
+        # GP Matern32 ln(rho) upper bound = 5 → exp(5) ≈ 148 days, beyond
+        # any plausible TESS systematic or Kepler quarter, and short of
+        # the regime where the kernel is degenerate with the baseline
+        # offset (correlations >>1 yr). The previous 10 (exp(10) ≈ 60 yr)
+        # was unhelpful.
         text += "#baseline per instrument,,,,,,\n"
         for inst in fns:
             text += f"#baseline_gp_offset_flux_{inst},0,1,uniform -0.1 0.1,$\mathrm{{offset ({inst})}}$,,\n"
             text += f"baseline_gp_matern32_lnsigma_flux_{inst},-5,1,uniform -15 0,$\mathrm{{gp ln \sigma ({inst})}}$,,\n"
-            text += f"baseline_gp_matern32_lnrho_flux_{inst},0,1,uniform -5 10,$\mathrm{{gp ln \\rho ({inst})}}$,,\n"
+            text += f"baseline_gp_matern32_lnrho_flux_{inst},0,1,uniform -5 5,$\mathrm{{gp ln \\rho ({inst})}}$,,\n"
         # TTV rows: when --ttv is NOT set, keep the commented-out stub for
         # reference. When --ttv IS set, the real per-transit rows are
         # appended after the lightcurve download (below) because we need
@@ -1177,8 +1236,11 @@ def main():
             for i, row in target_df.iterrows():
                 pl = planets[i]
                 text += f"#TTV companion {pl},,,,,\n"
+                # ±0.05 d = ±72 min; real TTV uncertainties for TESS-class
+                # transit S/N are of order minutes, so a narrower default
+                # is fine and converges faster.
                 for i in range(5):
-                    text += f"#{pl}_ttv_transit_{i+1},0,1,uniform -0.1 0.1,TTV$_\mathrm{{ttv;{i+1}}}$,d,\n"
+                    text += f"#{pl}_ttv_transit_{i+1},0,1,uniform -0.05 0.05,TTV$_\mathrm{{ttv;{i+1}}}$,d,\n"
         if debug:
             logger.info(text)
         fp = outdir.joinpath("params.csv")
@@ -1628,8 +1690,10 @@ fit_ttvs,False
                         continue
                     ttv_text += f"#TTV companion {_c},,,,,\n"
                     for _j in range(_n_obs):
+                        # ±0.05 d = ±72 min — matches the comment-out
+                        # default and the early-TTV emission block.
                         ttv_text += (
-                            f"{_c}_ttv_transit_{_j+1},0,1,uniform -0.1 0.1,"
+                            f"{_c}_ttv_transit_{_j+1},0,1,uniform -0.05 0.05,"
                             f"TTV$_\\mathrm{{ttv;{_j+1}}}$,d,\n"
                         )
                 if ttv_text:
