@@ -315,6 +315,77 @@ class TestOrphanPerInstSettings:
         assert "BANDPASS label" in msg
         assert "tglc120_s90" in msg or "tglc120_s63s64" in msg
 
+    def test_missing_host_ld_law_defaults_to_quad(self, make_datadir):
+        # When settings.csv does not specify host_ld_law_<inst> at all, the
+        # default must be 'quad' (not None). The prior None default silently
+        # disabled limb darkening and made host_ldc_q1/q2 in params.csv have
+        # zero effect on the transit shape.
+        insts = ["tess"]
+        rows = (
+            [{"name": "b_rr", "value": TRUE_RR_TESS, "fit": 1,
+              "bounds": "uniform 0 0.3", "label": "rr"}]
+            + _common_orbital_rows()
+            + _dilution_rows(insts)
+            + [{"name": f"ln_err_flux_{i}", "value": -7.0, "fit": 0,
+                "bounds": "uniform -15 0", "label": f"ln_err_{i}"} for i in insts]
+            + [{"name": f"baseline_offset_flux_{i}", "value": 0.0, "fit": 0,
+                "bounds": "uniform -0.05 0.05", "label": f"offset_{i}"} for i in insts]
+            + _ldc_rows("tess")
+        )
+        # make_datadir's write_settings auto-emits host_ld_law_<inst>,quad —
+        # write the project manually here so the host_ld_law row is missing.
+        import pathlib
+        datadir = make_datadir(
+            "default_quad",
+            inst_phot=insts,
+            bandpass=None,
+            params_rows=rows,
+        )
+        # Strip the host_ld_law row to test the *default* code path.
+        settings_path = pathlib.Path(datadir) / "settings.csv"
+        kept = [
+            line for line in settings_path.read_text().splitlines()
+            if not line.startswith("host_ld_law_")
+        ]
+        settings_path.write_text("\n".join(kept) + "\n")
+
+        config.init(str(datadir), quiet=True)
+        assert config.BASEMENT.settings["host_ld_law_tess"] == "quad"
+
+    def test_host_ld_law_none_string_disables_ld(self, make_datadir):
+        # Users who explicitly want no limb darkening must still be able to
+        # opt out via host_ld_law_<inst>,none — the default-to-quad change
+        # must not override an explicit 'none'.
+        insts = ["tess"]
+        rows = (
+            [{"name": "b_rr", "value": TRUE_RR_TESS, "fit": 1,
+              "bounds": "uniform 0 0.3", "label": "rr"}]
+            + _common_orbital_rows()
+            + _dilution_rows(insts)
+            + [{"name": f"ln_err_flux_{i}", "value": -7.0, "fit": 0,
+                "bounds": "uniform -15 0", "label": f"ln_err_{i}"} for i in insts]
+            + [{"name": f"baseline_offset_flux_{i}", "value": 0.0, "fit": 0,
+                "bounds": "uniform -0.05 0.05", "label": f"offset_{i}"} for i in insts]
+            + _ldc_rows("tess")
+        )
+        import pathlib
+        datadir = make_datadir(
+            "explicit_none",
+            inst_phot=insts,
+            bandpass=None,
+            params_rows=rows,
+        )
+        # Replace the auto-emitted host_ld_law_tess,quad with ,none.
+        settings_path = pathlib.Path(datadir) / "settings.csv"
+        new_lines = [
+            "host_ld_law_tess,none" if line.startswith("host_ld_law_tess,") else line
+            for line in settings_path.read_text().splitlines()
+        ]
+        settings_path.write_text("\n".join(new_lines) + "\n")
+
+        config.init(str(datadir), quiet=True)
+        assert config.BASEMENT.settings["host_ld_law_tess"] is None
+
     def test_per_inst_rows_pass(self, make_datadir):
         # Sanity: when the user correctly writes one row per actual instrument
         # name, config.init succeeds. This locks the validator from over-firing.

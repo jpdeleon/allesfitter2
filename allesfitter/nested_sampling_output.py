@@ -116,7 +116,13 @@ def plot_chromatic_rr_histogram(posterior_samples):
             continue
 
         fig, ax = plt.subplots(figsize=(7, 5))
-        colors = plt.cm.viridis(np.linspace(0.15, 0.85, len(per_band)))
+        # Canonical per-bandpass color map; unknown bandpasses fall back to
+        # the viridis ramp so the plot still works for arbitrary labels.
+        color_map = {'tess': 'k', 'g': 'C0', 'r': 'C2', 'i': 'C8', 'z': 'C3'}
+        fallback = plt.cm.viridis(np.linspace(0.15, 0.85, len(per_band)))
+        colors = [
+            color_map.get(bp, fallback[i]) for i, (bp, _) in enumerate(per_band)
+        ]
         for (bp, samples), color in zip(per_band, colors):
             med = np.median(samples)
             lo, hi = np.percentile(samples, [16, 84])

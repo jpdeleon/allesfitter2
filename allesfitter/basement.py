@@ -743,9 +743,18 @@ class Basement:
                 if companion+'_grid_'+inst not in self.settings: 
                     self.settings[companion+'_grid_'+inst] = 'default'
                     
-                if is_empty_or_none('host_ld_law_'+inst): 
-                    self.settings['host_ld_law_'+inst] = None
-                    
+                # host_ld_law default: when the key is absent or blank, fall
+                # back to 'quad'. The prior None default silently disabled
+                # limb darkening, which made host_ldc_q1/q2 in params.csv
+                # appear to have no effect on the transit shape. Users who
+                # genuinely want no LD must write host_ld_law_<inst>,none
+                # explicitly (handled by the elif → None below).
+                _h_key = 'host_ld_law_'+inst
+                if (_h_key not in self.settings) or (len(str(self.settings[_h_key]))==0):
+                    self.settings[_h_key] = 'quad'
+                elif str(self.settings[_h_key]).lower() == 'none':
+                    self.settings[_h_key] = None
+
                 if is_empty_or_none(companion+'_ld_law_'+inst):
                     self.settings[companion+'_ld_law_'+inst] = None
  
