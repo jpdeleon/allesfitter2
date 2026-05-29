@@ -74,6 +74,9 @@ from .mcmc_output import get_mcmc_posterior_samples, mcmc_output, draw_mcmc_post
 # Centralized run logger — see allesfitter/run_logger.py and run.py template.
 from .run_logger import log_run, log_event, get_log_path as get_run_log_path, tail as run_log_tail
 
+# Plot composition helpers (broken x-axis layout, etc.)
+from .plot_utils import broken_xaxis_subplots, detect_time_gaps
+
 from .computer import calculate_model, calculate_baseline, calculate_stellar_var, calculate_yerr_w, update_params
 
 from .priors import transform_priors

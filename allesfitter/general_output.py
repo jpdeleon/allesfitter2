@@ -43,6 +43,7 @@ from .computer import update_params,\
                      flux_subfct_sinusoidal_phase_curves
 from .exoworlds_rdx.lightcurves import lightcurve_tools as lct
 from .exoworlds_rdx.lightcurves.index_transits import get_tmid_observed_transits
+from .plot_utils import broken_xaxis_subplots, detect_time_gaps
                     
                     
  
@@ -266,21 +267,49 @@ def afplot(samples, companion):
     print('Plotting collage for companion', companion+'...')
     
     if config.BASEMENT.settings['fit_ttvs'] is False:
-      
+
         N_inst = len(config.BASEMENT.settings['inst_all'])
-        
+
         if 'do_not_phase_fold' in config.BASEMENT.settings and config.BASEMENT.settings['do_not_phase_fold']:
-            fig, axes = plt.subplots(N_inst,1,figsize=(6*1,4*N_inst))
             styles = ['full']
         elif config.BASEMENT.settings['phase_curve']:
-            fig, axes = plt.subplots(N_inst,5,figsize=(6*5,4*N_inst))
             styles = ['full','phase','phase_curve','phasezoom','phasezoom_occ']
         elif config.BASEMENT.settings['secondary_eclipse']:
-            fig, axes = plt.subplots(N_inst,4,figsize=(6*4,4*N_inst))
             styles = ['full','phase','phasezoom','phasezoom_occ']
         else:
-            fig, axes = plt.subplots(N_inst,3,figsize=(6*3,4*N_inst))
             styles = ['full','phase','phasezoom']
+
+        # Pre-detect how many broken-x-axis segments the widest 'full'
+        # panel will need; we use that to widen the 'full' column so its
+        # sub-Axes don't get squashed into a thin band. The figure width
+        # scales linearly with max_segs so the per-segment aspect stays
+        # close to the unsplit case.
+        # Default 5 days: skips typical TESS intra-sector gaps (momentum
+        # dumps, ~1-day mid-sector data-downlink) and only breaks at
+        # inter-sector / inter-campaign / inter-mission scales.
+        _gap_threshold_days = config.BASEMENT.settings.get(
+            'xaxis_break_gap_days', 5.0
+        )
+        _max_segs = 1
+        if _gap_threshold_days is not None:
+            for _inst in config.BASEMENT.settings['inst_all']:
+                _inst_data = config.BASEMENT.data.get(_inst, {})
+                _t = _inst_data.get('time')
+                if _t is not None and len(_t) > 1:
+                    _max_segs = max(
+                        _max_segs,
+                        len(detect_time_gaps(_t, _gap_threshold_days)),
+                    )
+
+        n_cols = len(styles)
+        # Column 0 ('full') gets _max_segs× width; others get 1× each.
+        width_ratios = [_max_segs] + [1] * (n_cols - 1)
+        total_units = sum(width_ratios)
+        fig, axes = plt.subplots(
+            N_inst, n_cols,
+            figsize=(6 * total_units, 4 * N_inst),
+            gridspec_kw={'width_ratios': width_ratios},
+        )
         axes = np.atleast_2d(axes)
         
         for i,inst in enumerate(config.BASEMENT.settings['inst_all']):
@@ -299,6 +328,58 @@ def afplot(samples, companion):
                 elif (inst in config.BASEMENT.settings['inst_rv']) & (companion not in config.BASEMENT.settings['companions_rv']):
                     axes[i,j].axis('off')
                 else:
+                    #::: For 'full'-style time-series panels, detect large
+                    #::: time gaps (cross-mission archival or multi-sector
+                    #::: campaigns) and replace the single Axes with a
+                    #::: broken-x-axis sub-Axes layout so each contiguous
+                    #::: segment is rendered side-by-side. The plot_1 call
+                    #::: is then issued once per sub-Axes; matplotlib
+                    #::: clips to each sub-Axes' xlim, and the xlim is
+                    #::: re-applied after plot_1 to undo any autoscaling
+                    #::: from ax.errorbar.
+                    #:::
+                    #::: After the sub-Axes are filled, ylabel/title/text
+                    #::: artifacts duplicated across them are stripped so
+                    #::: each appears once at the left / center of the
+                    #::: broken-row layout.
+                    if (style == 'full'
+                            and _gap_threshold_days is not None
+                            and inst in config.BASEMENT.data
+                            and 'time' in config.BASEMENT.data[inst]):
+                        _t = config.BASEMENT.data[inst]['time']
+                        _segs = detect_time_gaps(_t, _gap_threshold_days)
+                        if len(_segs) > 1:
+                            _ss = axes[i, j].get_subplotspec()
+                            fig.delaxes(axes[i, j])
+                            _sub_axes = broken_xaxis_subplots(
+                                fig, _ss, _t,
+                                gap_threshold_days=_gap_threshold_days,
+                            )
+                            for _sub_ax in _sub_axes:
+                                _xlim = _sub_ax.get_xlim()
+                                plot_1(_sub_ax, samples, inst, companion, style)
+                                _sub_ax.set_xlim(_xlim)
+
+                            # Dedupe: keep ylabel + title on the first
+                            # sub-Axes only; keep xlabel only on the
+                            # middle sub-Axes; drop any plot_1-injected
+                            # ax.text annotations from non-first sub-Axes.
+                            _n = len(_sub_axes)
+                            _mid = _n // 2
+                            for k, _sub_ax in enumerate(_sub_axes):
+                                if k > 0:
+                                    _sub_ax.set_ylabel('')
+                                    _sub_ax.set_title('')
+                                    for _txt in list(_sub_ax.texts):
+                                        _txt.remove()
+                                if k != _mid:
+                                    _sub_ax.set_xlabel('')
+
+                            # Keep the broken sub-Axes reachable for the
+                            # caller — replace the slot with the first
+                            # sub-Axes so axes[i,j].figure etc. still work.
+                            axes[i, j] = _sub_axes[0]
+                            continue
                     plot_1(axes[i,j], samples, inst, companion, style)
     
         plt.tight_layout()

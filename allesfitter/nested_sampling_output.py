@@ -79,6 +79,34 @@ def draw_ns_posterior_samples(results, Nsamples=None, as_type='2d_array'):
 ###############################################################################
 #::: chromatic Rp/Rs posterior histogram
 ###############################################################################
+def _load_R_star_samples(n_samples, seed=42):
+    '''Load R_star posterior from params_star.csv and draw n_samples
+    from an asymmetric normal. Returns (R_star_samples_in_Rsun, R_star_med)
+    or (None, None) if params_star.csv is absent or malformed.
+
+    Honors both columns ``R_star_lerr`` (lower 1-sigma) and ``R_star_uerr``
+    (upper 1-sigma); a sample's draw uses the side appropriate to its sign.
+    '''
+    path = os.path.join(config.BASEMENT.datadir, 'params_star.csv')
+    if not os.path.exists(path):
+        return None, None
+    try:
+        buf = np.genfromtxt(
+            path, delimiter=',', names=True, dtype=None,
+            encoding='utf-8', comments='#',
+        )
+        R_star = float(np.atleast_1d(buf['R_star'])[0])
+        R_lerr = float(np.atleast_1d(buf['R_star_lerr'])[0])
+        R_uerr = float(np.atleast_1d(buf['R_star_uerr'])[0])
+    except (KeyError, ValueError, TypeError, IndexError):
+        return None, None
+    rng = np.random.default_rng(seed)
+    z = rng.standard_normal(n_samples)
+    samples = np.where(z < 0, R_star + z * R_lerr, R_star + z * R_uerr)
+    samples = np.clip(samples, 1e-4, None)  # guard against negatives
+    return samples, R_star
+
+
 def plot_chromatic_rr_histogram(posterior_samples):
     '''
     Overlay posterior histograms of per-bandpass Rp/Rs for chromatic fits.
@@ -87,6 +115,12 @@ def plot_chromatic_rr_histogram(posterior_samples):
     (``config.BASEMENT.settings['chromatic'] is True``). One PDF is written
     per photometric companion at
     ``<outdir>/ns_chromatic_rr_<companion>.pdf``.
+
+    When ``params_star.csv`` is present in the datadir, a second panel is
+    added below showing the implied planet radius posterior with twin
+    x-axes: the bottom axis in Earth radii and the top axis in Jupiter
+    radii (sharing the same data). R_star uncertainty is propagated by
+    sampling from the asymmetric normal described in params_star.csv.
 
     Inputs
     ------
@@ -104,6 +138,15 @@ def plot_chromatic_rr_histogram(posterior_samples):
 
     fitkeys = list(config.BASEMENT.fitkeys)
 
+    # Solar / planetary radius constants (CODATA-consistent with astropy).
+    # Local constants keep this function importable without astropy at top
+    # level; matches the conversions used in deriver.py:329-330.
+    R_SUN_KM = 6.957e5
+    R_EARTH_KM = 6.3781e3
+    R_JUP_KM = 7.1492e4
+    SUN_TO_EARTH = R_SUN_KM / R_EARTH_KM   # ~109.08
+    EARTH_TO_JUP = R_EARTH_KM / R_JUP_KM   # ~0.0892
+
     for companion in config.BASEMENT.settings['companions_phot']:
         per_band = []
         for bp in unique_bandpasses:
@@ -115,7 +158,11 @@ def plot_chromatic_rr_histogram(posterior_samples):
         if len(per_band) < 2:
             continue
 
-        fig, ax = plt.subplots(figsize=(7, 5))
+        # Decide layout: 2 panels if params_star.csv is available, else 1.
+        n_post = len(per_band[0][1])
+        R_star_samples, R_star_med = _load_R_star_samples(n_post)
+        two_panel = R_star_samples is not None
+
         # Canonical per-bandpass color map; unknown bandpasses fall back to
         # the viridis ramp so the plot still works for arbitrary labels.
         color_map = {'tess': 'k', 'g': 'C0', 'r': 'C2', 'i': 'C8', 'z': 'C3'}
@@ -123,6 +170,14 @@ def plot_chromatic_rr_histogram(posterior_samples):
         colors = [
             color_map.get(bp, fallback[i]) for i, (bp, _) in enumerate(per_band)
         ]
+
+        if two_panel:
+            fig, (ax, ax_r) = plt.subplots(2, 1, figsize=(7, 9))
+        else:
+            fig, ax = plt.subplots(figsize=(7, 5))
+            ax_r = None
+
+        # Top panel: Rp/Rs histograms (unchanged).
         for (bp, samples), color in zip(per_band, colors):
             med = np.median(samples)
             lo, hi = np.percentile(samples, [16, 84])
@@ -139,6 +194,42 @@ def plot_chromatic_rr_histogram(posterior_samples):
         ax.set_title('Chromatic transit depth posterior (companion '
                      + companion + ')')
         ax.legend(loc='best', fontsize=10)
+
+        # Bottom panel: implied R_p in Earth radii (bottom x-axis) with a
+        # twin top x-axis in Jupiter radii. Only when R_star is available.
+        if two_panel:
+            for (bp, rr_samples), color in zip(per_band, colors):
+                # Propagate R_star uncertainty by drawing fresh R_star
+                # samples per band so the two posteriors are independent
+                # (they share the same R_star prior, so any correlated
+                # offset would be a stellar-systematic, not band).
+                R_p_earth = R_star_samples * rr_samples * SUN_TO_EARTH
+                med = np.median(R_p_earth)
+                lo, hi = np.percentile(R_p_earth, [16, 84])
+                label = '{}: ${:.2f}^{{+{:.2f}}}_{{-{:.2f}}}\\,R_\\oplus$'.format(
+                    bp, med, hi - med, med - lo)
+                ax_r.hist(R_p_earth, bins=40, density=True, alpha=0.5,
+                          color=color, label=label, histtype='stepfilled',
+                          edgecolor=color, linewidth=1.2)
+                ax_r.axvline(med, color=color, linestyle='--',
+                             linewidth=1.0, alpha=0.9)
+
+            ax_r.set_xlabel(
+                r'$R_p$ ($R_\oplus$)  '
+                + r'(assuming $R_\star = {:.2f}\,R_\odot$)'.format(
+                    R_star_med)
+            )
+            ax_r.set_ylabel('Posterior density')
+            ax_r.legend(loc='best', fontsize=10)
+
+            # Twin top x-axis in Jupiter radii.
+            ax_r_jup = ax_r.secondary_xaxis(
+                'top',
+                functions=(lambda r: r * EARTH_TO_JUP,
+                           lambda r: r / EARTH_TO_JUP),
+            )
+            ax_r_jup.set_xlabel(r'$R_p$ ($R_\mathrm{Jup}$)')
+
         fig.tight_layout()
         fig.savefig(os.path.join(config.BASEMENT.outdir,
                                  'ns_chromatic_rr_' + companion + '.pdf'),
