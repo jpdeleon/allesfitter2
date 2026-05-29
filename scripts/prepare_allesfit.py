@@ -26,6 +26,7 @@ import sys
 from typing import Tuple
 from argparse import ArgumentParser
 from pathlib import Path
+import math
 from math import ceil
 import numpy as np
 import lightkurve as lk
@@ -347,6 +348,165 @@ def _safe_stitch(collection, logger=None):
         return None
     # Identity corrector — already normalised above.
     return _lk.LightCurveCollection(good).stitch(corrector_func=lambda x: x)
+
+
+def _dataset_aware_gp_bounds(time, flux, tdur_days):
+    """Derive sensible GP / noise prior bounds from a loaded lightcurve.
+
+    The current hardcoded defaults (``uniform -15 0`` for ``ln σ_GP`` and
+    ``uniform -5 5`` for ``ln ρ_GP``) routinely allow the GP to absorb the
+    transit signal or fit the transit shape itself. This helper grounds
+    those bounds in the actual data:
+
+    * ``ln_err_flux``  centred near the observed point-to-point RMS,
+      bounded so the prior never permits >10% relative-flux jitter.
+    * ``ln σ_GP``      lower bound an order of magnitude below the RMS
+      (otherwise the GP is useless), upper capped at
+      ``min(5% rel flux, 100× RMS)`` to keep it away from transit depth.
+    * ``ln ρ_GP``      lower bound at ``max(2 × cadence, 0.5 × tdur)`` so
+      the GP cannot fit transit ingress/egress; upper at the actual
+      observation baseline (anything longer is degenerate with a slope).
+
+    Returns ``None`` when the lightcurve is too short to estimate noise
+    (caller should fall back to a generic default).
+    """
+    t = np.asarray(time, dtype=float)
+    f = np.asarray(flux, dtype=float)
+    mask = np.isfinite(t) & np.isfinite(f)
+    if int(mask.sum()) < 20:
+        return None
+    t = t[mask]
+    f = f[mask]
+    order = np.argsort(t)
+    t = t[order]
+    f = f[order]
+
+    # Per-cadence RMS via MAD of point-to-point differences.
+    diff = np.diff(f)
+    if diff.size == 0:
+        return None
+    mad = float(np.median(np.abs(diff - np.median(diff))))
+    rms = 1.4826 * mad / math.sqrt(2.0)
+    if not math.isfinite(rms) or rms <= 0:
+        rms = float(np.nanstd(f))
+    rms = max(rms, 1e-6)
+
+    cadence = float(np.median(np.diff(t)))
+    baseline = float(t[-1] - t[0])
+    tdur_days = max(float(tdur_days), 1.0 / 24.0)  # floor at 1 h to avoid degenerate priors
+
+    # ln_err_flux: centre at observed RMS, ±2 dex, but always cap upper at 10% flux.
+    lnerr_init = math.log(rms)
+    lnerr_lo = lnerr_init - 3.0
+    lnerr_hi = min(lnerr_init + 2.0, math.log(0.10))
+    if lnerr_hi <= lnerr_lo:
+        lnerr_hi = lnerr_lo + 1.0
+
+    # ln σ_GP: at least 1/10 RMS (else useless), at most min(5%, 100× RMS).
+    sigma_hi_phys = min(0.05, 100.0 * rms)
+    sigma_lo_phys = max(rms / 10.0, 1e-7)
+    lnsigma_lo = math.log(sigma_lo_phys)
+    lnsigma_hi = math.log(sigma_hi_phys)
+    if lnsigma_hi <= lnsigma_lo:
+        lnsigma_hi = lnsigma_lo + 2.0  # guard against rms tiny edge cases
+    lnsigma_init = math.log(max(3.0 * rms, sigma_lo_phys * 2))
+    lnsigma_init = min(max(lnsigma_init, lnsigma_lo + 0.1), lnsigma_hi - 0.1)
+
+    # ln ρ_GP: must be > 2 cadences AND > 0.5 × transit duration; < baseline.
+    # 2% safety margins keep the bounds strictly inside the physical limits
+    # after the .3f rounding round-trip when written to params.csv.
+    rho_lo_phys = 1.02 * max(2.0 * cadence, 0.5 * tdur_days)
+    rho_hi_phys = 0.98 * baseline
+    if rho_hi_phys <= rho_lo_phys:
+        rho_hi_phys = rho_lo_phys * 4.0
+    lnrho_lo = math.log(rho_lo_phys)
+    lnrho_hi = math.log(rho_hi_phys)
+    lnrho_init = 0.5 * (lnrho_lo + lnrho_hi)
+
+    return {
+        "lnerr_init": lnerr_init,
+        "lnerr_lo": lnerr_lo,
+        "lnerr_hi": lnerr_hi,
+        "lnsigma_init": lnsigma_init,
+        "lnsigma_lo": lnsigma_lo,
+        "lnsigma_hi": lnsigma_hi,
+        "lnrho_init": lnrho_init,
+        "lnrho_lo": lnrho_lo,
+        "lnrho_hi": lnrho_hi,
+        "_rms": rms,
+        "_cadence_days": cadence,
+        "_baseline_days": baseline,
+    }
+
+
+def _update_params_gp_bounds(params_csv_path, inst, bounds, logger=None):
+    """Rewrite ``ln_err_flux_<inst>`` and the GP rows for ``inst`` in
+    ``params.csv`` with dataset-aware values from
+    :func:`_dataset_aware_gp_bounds`.
+
+    Preserves the existing label/unit/coupled columns when present.
+    Returns the number of rows replaced (0 if nothing matched).
+    """
+    if not bounds:
+        return 0
+    path = Path(params_csv_path)
+    if not path.exists():
+        return 0
+    text = path.read_text()
+
+    def _rebuild(name, value, fit, bounds_str, tail):
+        return ",".join([name, value, str(fit), bounds_str] + tail)
+
+    def _split_keep_tail(line):
+        # name,value,fit,bounds,label,unit,coupled — keep fields 4+ verbatim.
+        parts = line.split(",")
+        if len(parts) < 4:
+            return None
+        return parts[0], parts[1], parts[2], parts[3], parts[4:]
+
+    prefixes = {
+        f"ln_err_flux_{inst}": (
+            "{:.3f}".format(bounds["lnerr_init"]),
+            "uniform {:.3f} {:.3f}".format(bounds["lnerr_lo"], bounds["lnerr_hi"]),
+        ),
+        f"baseline_gp_matern32_lnsigma_flux_{inst}": (
+            "{:.3f}".format(bounds["lnsigma_init"]),
+            "uniform {:.3f} {:.3f}".format(bounds["lnsigma_lo"], bounds["lnsigma_hi"]),
+        ),
+        f"baseline_gp_matern32_lnrho_flux_{inst}": (
+            "{:.3f}".format(bounds["lnrho_init"]),
+            "uniform {:.3f} {:.3f}".format(bounds["lnrho_lo"], bounds["lnrho_hi"]),
+        ),
+    }
+
+    new_lines = []
+    replaced = 0
+    for line in text.splitlines():
+        if line.startswith("#") or not line.strip():
+            new_lines.append(line)
+            continue
+        split = _split_keep_tail(line)
+        if split is None:
+            new_lines.append(line)
+            continue
+        name, _value, fit, _bounds, tail = split
+        if name in prefixes and "uniform" in _bounds:
+            init_str, bounds_str = prefixes[name]
+            new_lines.append(_rebuild(name, init_str, fit, bounds_str, tail))
+            replaced += 1
+        else:
+            new_lines.append(line)
+    if replaced == 0:
+        return 0
+    suffix = "\n" if text.endswith("\n") else ""
+    path.write_text("\n".join(new_lines) + suffix)
+    if logger is not None:
+        logger.info(
+            f"params.csv: refined GP/noise priors for {inst} from data "
+            f"(RMS={bounds['_rms']:.2e}, cadence={bounds['_cadence_days']*86400:.0f}s, "
+            f"baseline={bounds['_baseline_days']:.2f}d) — {replaced} row(s) updated"
+        )
+    return replaced
 
 
 def _inject_dilution_normal_prior(params_csv_path, inst, median, std, sigma_floor=0.01):
@@ -1298,6 +1458,10 @@ def main():
 
         # ===== Create params.csv =====#
         text = """#name,value,fit,bounds,label,unit,coupled_with\n"""
+        # Track the shortest transit duration across all companions; used
+        # after each lightcurve download to set ln_ρ_GP lower bounds that
+        # the GP cannot use to fit the transit shape itself.
+        min_tdur_hours = float("inf")
         for i, row in target_df.iterrows():
             pl = planets[i]
             if debug:
@@ -1310,6 +1474,11 @@ def main():
             epocherr = row["Epoch (BJD) err"]
             tdur = row["Duration (hours)"]
             tdurerr = row["Duration (hours) err"]
+            try:
+                if math.isfinite(float(tdur)) and float(tdur) > 0:
+                    min_tdur_hours = min(min_tdur_hours, float(tdur))
+            except (TypeError, ValueError):
+                pass
 
             if interactive and not np.all([Porb > 0, epoch > 0, tdur > 0]):
                 Porb = float(input("Porb: "))
@@ -1812,6 +1981,29 @@ fig = allesfitter.show_initial_guess('.')
             inst_fp = outdir.joinpath(f"{fn}.csv")
             df2[cols].to_csv(inst_fp, sep=",", header=False, index=False)
             logger.info(f"Saved: {inst_fp}")
+
+            # Refine the GP / noise prior bounds for this instrument using
+            # the actual cadence, baseline, and per-cadence scatter of the
+            # downloaded lightcurve. Replaces the generic, hardcoded
+            # bounds with data-aware ones (see _dataset_aware_gp_bounds).
+            try:
+                _tdur_d = (
+                    (min_tdur_hours / 24.0)
+                    if math.isfinite(min_tdur_hours)
+                    else 0.1
+                )
+                _gp = _dataset_aware_gp_bounds(
+                    df2["time"].to_numpy(),
+                    df2["flux"].to_numpy(),
+                    tdur_days=_tdur_d,
+                )
+                if _gp is not None:
+                    _update_params_gp_bounds(
+                        outdir.joinpath("params.csv"), fn, _gp, logger=logger
+                    )
+            except Exception as _e:
+                logger.warning(f"Could not refine GP priors for {fn}: {_e}")
+
             logger.info(f"Ndata: {len(df):,}")
             logger.info(df[cols].head())
             if debug:
@@ -2029,6 +2221,18 @@ fit_ttvs,False
                     )
             except Exception as e:
                 logger.error(f"TTV append via allesclass failed: {e}")
+
+        # ===== Prior-bound sanity checks =====
+        # Surface obvious problems with GP/noise priors (e.g. GP amplitude
+        # large enough to swallow the transit, GP timescale longer than the
+        # observation baseline) before the user kicks off a multi-hour fit.
+        try:
+            from allesfitter.utils.prior_sanity import validate_gp_priors
+            warnings = validate_gp_priors(outdir, log=logger.warning)
+            if not warnings:
+                logger.info("Prior sanity: GP / noise bounds look reasonable.")
+        except Exception as e:
+            logger.warning(f"Prior sanity check skipped: {e}")
 
 
 if __name__ == "__main__":

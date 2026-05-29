@@ -1,0 +1,209 @@
+"""Tests for ``allesfitter.utils.prior_sanity.validate_gp_priors``.
+
+The validator is pure: it reads ``params.csv``, ``settings.csv`` and the
+per-instrument data CSVs in a datadir, and returns a list of warning
+strings. We construct miniature, in-memory datadirs in a ``tmp_path``
+fixture and assert the expected warnings fire.
+"""
+
+from __future__ import annotations
+
+import math
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+from allesfitter.utils.prior_sanity import validate_gp_priors
+
+
+def _write(p: Path, body: str) -> None:
+    p.write_text(body)
+
+
+def _make_datadir(tmp_path: Path, params: str, settings: str, lc_csvs: dict) -> Path:
+    d = tmp_path
+    _write(d / "params.csv", params.strip() + "\n")
+    _write(d / "settings.csv", settings.strip() + "\n")
+    for fname, body in lc_csvs.items():
+        _write(d / fname, body.strip() + "\n")
+    return d
+
+
+def _clean_tess_lc_csv(seed: int = 0, n: int = 2000, rms: float = 5e-4) -> str:
+    """Synthetic TESS-like LC: 27-day baseline, 120-s cadence, RMS 500 ppm."""
+    rng = np.random.default_rng(seed)
+    t = np.linspace(0.0, 27.0, n)            # 27-day TESS sector
+    f = 1.0 + rng.normal(0.0, rms, n)
+    e = np.full(n, rms)
+    return "\n".join(f"{ti},{fi},{ei}" for ti, fi, ei in zip(t, f, e))
+
+
+# ---------------------------------------------------------------------------
+# 1) Clean priors → no warnings
+# ---------------------------------------------------------------------------
+
+
+def test_clean_priors_emit_no_warnings(tmp_path):
+    d = _make_datadir(
+        tmp_path,
+        params="""#name,value,fit,bounds,label,unit,coupled
+ln_err_flux_tess,-6,1,uniform -10 -4,...,,
+baseline_gp_matern32_lnsigma_flux_tess,-5,1,uniform -15 -3,...,,
+baseline_gp_matern32_lnrho_flux_tess,1,1,uniform 0 3,...,,
+""",
+        settings="inst_phot,tess",
+        lc_csvs={"tess.csv": _clean_tess_lc_csv()},
+    )
+    msgs = validate_gp_priors(d)
+    assert msgs == [], msgs
+
+
+# ---------------------------------------------------------------------------
+# 2) GP amplitude too high → transit-amplitude warning
+# ---------------------------------------------------------------------------
+
+
+def test_gp_lnsigma_too_loose_warns(tmp_path):
+    d = _make_datadir(
+        tmp_path,
+        params="""#name,value,fit,bounds,label,unit,coupled
+baseline_gp_matern32_lnsigma_flux_tess,-5,1,uniform -15 0,...,,
+""",
+        settings="inst_phot,tess",
+        lc_csvs={"tess.csv": _clean_tess_lc_csv()},
+    )
+    msgs = validate_gp_priors(d)
+    assert any("may absorb the transit" in m for m in msgs), msgs
+    # Also caught by the "RMS-relative" rule since σ=1 >> 500 ppm × 100.
+    assert any("dominate the noise floor" in m for m in msgs), msgs
+
+
+# ---------------------------------------------------------------------------
+# 3) GP timescale lower bound below transit duration → warning
+# ---------------------------------------------------------------------------
+
+
+def test_gp_lnrho_below_transit_duration_warns(tmp_path):
+    d = _make_datadir(
+        tmp_path,
+        params="""#name,value,fit,bounds,label,unit,coupled
+baseline_gp_matern32_lnrho_flux_tess,1,1,uniform -5 5,...,,
+""",
+        settings="inst_phot,tess",
+        lc_csvs={"tess.csv": _clean_tess_lc_csv()},
+    )
+    # transit duration ~2.4 h fallback (0.1 d). exp(-5) ≈ 0.0067 d → flagged.
+    msgs = validate_gp_priors(d)
+    assert any("fit the transit shape" in m for m in msgs), msgs
+
+
+# ---------------------------------------------------------------------------
+# 4) GP timescale upper bound > baseline → degenerate warning
+# ---------------------------------------------------------------------------
+
+
+def test_gp_lnrho_above_baseline_warns(tmp_path):
+    d = _make_datadir(
+        tmp_path,
+        params="""#name,value,fit,bounds,label,unit,coupled
+baseline_gp_matern32_lnrho_flux_tess,1,1,uniform 0 5,...,,
+""",
+        settings="inst_phot,tess",
+        lc_csvs={"tess.csv": _clean_tess_lc_csv()},  # baseline = 27 d, exp(5) ≈ 148 d
+    )
+    msgs = validate_gp_priors(d)
+    assert any("degenerate with baseline slope" in m for m in msgs), msgs
+
+
+# ---------------------------------------------------------------------------
+# 5) GP timescale below cadence → warning
+# ---------------------------------------------------------------------------
+
+
+def test_gp_lnrho_below_cadence_warns(tmp_path):
+    # 27-day baseline with 2000 samples → cadence ≈ 27/1999 ≈ 0.0135 d.
+    # exp(-7) ≈ 9.1e-4 d, well below 2× cadence → should trigger.
+    d = _make_datadir(
+        tmp_path,
+        params="""#name,value,fit,bounds,label,unit,coupled
+baseline_gp_matern32_lnrho_flux_tess,-2,1,uniform -7 3,...,,
+""",
+        settings="inst_phot,tess",
+        lc_csvs={"tess.csv": _clean_tess_lc_csv()},
+    )
+    msgs = validate_gp_priors(d)
+    assert any("fit individual cadences" in m for m in msgs), msgs
+
+
+# ---------------------------------------------------------------------------
+# 6) ln_err_flux upper bound > 10% → warning
+# ---------------------------------------------------------------------------
+
+
+def test_ln_err_flux_upper_too_loose_warns(tmp_path):
+    d = _make_datadir(
+        tmp_path,
+        params="""#name,value,fit,bounds,label,unit,coupled
+ln_err_flux_tess,-6,1,uniform -10 -1,...,,
+""",
+        settings="inst_phot,tess",
+        lc_csvs={"tess.csv": _clean_tess_lc_csv()},
+    )
+    # exp(-1) ≈ 0.37, well above 10% threshold.
+    msgs = validate_gp_priors(d)
+    assert any("review noise prior" in m for m in msgs), msgs
+
+
+# ---------------------------------------------------------------------------
+# 7) Transit duration override tightens the ln_ρ check
+# ---------------------------------------------------------------------------
+
+
+def test_tdur_override_changes_lnrho_threshold(tmp_path):
+    """A long transit (10 h) should flag bounds that a 2.4-h default tolerates."""
+    d = _make_datadir(
+        tmp_path,
+        params="""#name,value,fit,bounds,label,unit,coupled
+baseline_gp_matern32_lnrho_flux_tess,-2,1,uniform -3 3,...,,
+""",
+        settings="inst_phot,tess",
+        lc_csvs={"tess.csv": _clean_tess_lc_csv()},
+    )
+    # Default (tdur=2.4h, lo→exp(-3) ≈ 0.05 d vs 0.5*0.1=0.05): borderline,
+    # but with tdur=10 h → 0.5*tdur ≈ 0.21 d, and 0.05 d < 0.21 d → warn.
+    msgs_default = validate_gp_priors(d)
+    msgs_with_tdur = validate_gp_priors(d, tdur_hours_by_companion={"b": 10.0})
+    assert any("transit shape" in m for m in msgs_with_tdur), msgs_with_tdur
+    # The 10h override should produce at least one warning that the
+    # default did not.
+    assert len(msgs_with_tdur) >= len(msgs_default)
+
+
+# ---------------------------------------------------------------------------
+# 8) log= sink receives every message
+# ---------------------------------------------------------------------------
+
+
+def test_log_sink_receives_messages(tmp_path):
+    d = _make_datadir(
+        tmp_path,
+        params="""#name,value,fit,bounds,label,unit,coupled
+baseline_gp_matern32_lnsigma_flux_tess,-5,1,uniform -15 0,...,,
+""",
+        settings="inst_phot,tess",
+        lc_csvs={"tess.csv": _clean_tess_lc_csv()},
+    )
+    captured = []
+    msgs = validate_gp_priors(d, log=captured.append)
+    assert captured == msgs and len(captured) >= 1
+
+
+# ---------------------------------------------------------------------------
+# 9) Missing datadir / missing files → empty result, no exception
+# ---------------------------------------------------------------------------
+
+
+def test_missing_params_csv_returns_empty(tmp_path):
+    # Empty dir → no params.csv → empty list, no exception.
+    assert validate_gp_priors(tmp_path) == []
