@@ -126,6 +126,270 @@ def _segment_word(mission, plural=False):
     return base + ("s" if plural else "")
 
 
+def _write_spoc_contamination(lc_or_collection, outpath, mission):
+    """Extract CROWDSAP from SPOC headers and convert to allesfitter dilution.
+
+    SPOC light curves carry two crowding keywords in each FITS extension:
+
+    - ``CROWDSAP``: ratio of target flux to total flux in the optimal
+      aperture (in [0, 1]). A value of 1 means no contamination; 0.8 means
+      80% of measured flux is from the target and 20% is contaminants.
+    - ``FLFRCSAP``: fraction of the target's PSF flux captured by the
+      aperture (recorded for completeness, not used in the dilution).
+
+    The contamination ratio commonly reported in TESS literature is the
+    contaminant-to-target flux ratio:
+
+        contratio = (1 - CROWDSAP) / CROWDSAP
+
+    allesfitter's ``dil_<inst>`` parameter is the fraction of the *measured*
+    flux that does NOT come from the target — i.e. the contaminant fraction
+    of the total. Converting:
+
+        dilution = contratio / (1 + contratio)
+                 = (1 - CROWDSAP) / CROWDSAP / ((1 - CROWDSAP)/CROWDSAP + 1)
+                 = 1 - CROWDSAP
+
+    Per-segment values are extracted from the un-stitched LightCurveCollection
+    (``.stitch()`` keeps only the first segment's metadata). For a single
+    LightCurve the value comes straight from ``.meta``.
+
+    Writes ``outpath`` with a header explaining the math, one row per
+    segment, and the median across segments — suitable for pasting into
+    ``params.csv`` as the ``dil_<inst>`` value.
+
+    Returns a summary dict ``{'median_dilution', 'std_dilution', 'n_segments',
+    'median_crowdsap'}`` when the file was written, or ``False`` when no
+    CROWDSAP keyword was found (or lightkurve is unavailable).
+    """
+    try:
+        import lightkurve as _lk
+    except Exception:
+        return False
+
+    if isinstance(lc_or_collection, _lk.LightCurveCollection):
+        items = list(lc_or_collection)
+    else:
+        items = [lc_or_collection]
+
+    rows = []
+    for one in items:
+        meta = getattr(one, 'meta', None) or {}
+        crowdsap = meta.get('CROWDSAP')
+        if crowdsap is None:
+            continue
+        try:
+            crowdsap = float(crowdsap)
+        except (TypeError, ValueError):
+            continue
+        flfrcsap_raw = meta.get('FLFRCSAP')
+        try:
+            flfrcsap = float(flfrcsap_raw) if flfrcsap_raw is not None else None
+        except (TypeError, ValueError):
+            flfrcsap = None
+        seg = (
+            getattr(one, 'sector', None)
+            or getattr(one, 'campaign', None)
+            or getattr(one, 'quarter', None)
+            or '?'
+        )
+        if crowdsap > 0:
+            contratio = (1.0 - crowdsap) / crowdsap
+        else:
+            contratio = float('inf')
+        # dilution == 1 - CROWDSAP (algebraically equivalent to contratio/(1+contratio))
+        dilution = 1.0 - crowdsap
+        rows.append((seg, crowdsap, flfrcsap, contratio, dilution))
+
+    if not rows:
+        return False
+
+    seg_word = _segment_word(mission)
+    lines = [
+        "# SPOC photometric contamination -> allesfitter dilution",
+        "#",
+        "# Header keywords (per FITS extension):",
+        "#   CROWDSAP : target_flux / total_flux in the optimal aperture, in [0, 1]",
+        "#   FLFRCSAP : fraction of target PSF flux captured by the aperture",
+        "#",
+        "# allesfitter's dil_<inst> is the contaminant fraction of the measured flux:",
+        "#",
+        "#   contratio = (1 - CROWDSAP) / CROWDSAP     # contaminant / target",
+        "#   dilution  = contratio / (1 + contratio)   # contaminant / (contaminant + target)",
+        "#             = 1 - CROWDSAP                  # algebraically identical",
+        "#",
+        "# Suggested use: paste the median dilution below into params.csv as",
+        "#   dil_<inst>,<median_dilution>,0,uniform 0 1,...",
+        "# or use a tighter prior centred on the median if you trust SPOC's crowding model.",
+        "#",
+        "# {}\tCROWDSAP\tFLFRCSAP\tcontratio\tdilution".format(seg_word),
+    ]
+    crowds, dils = [], []
+    for seg, crowdsap, flfrcsap, contratio, dilution in rows:
+        flf = "{:.6f}".format(flfrcsap) if flfrcsap is not None else "NA"
+        lines.append(
+            "{}\t{:.6f}\t{}\t{:.6f}\t{:.6f}".format(seg, crowdsap, flf, contratio, dilution)
+        )
+        crowds.append(crowdsap)
+        dils.append(dilution)
+    lines.append("")
+    lines.append("# Median across {} segment(s):".format(len(rows)))
+    lines.append("median_CROWDSAP\t{:.6f}".format(float(np.median(crowds))))
+    lines.append("median_dilution\t{:.6f}".format(float(np.median(dils))))
+
+    Path(outpath).write_text("\n".join(lines) + "\n")
+    return {
+        'median_dilution': float(np.median(dils)),
+        'std_dilution': float(np.std(dils)),
+        'median_crowdsap': float(np.median(crowds)),
+        'n_segments': len(rows),
+    }
+
+
+def _safe_stitch(collection, logger=None):
+    """Normalise + stitch a LightCurveCollection without astropy's buggy
+    ``nanmedian`` path.
+
+    Background
+    ----------
+    The pinned astropy 5.1 + lightkurve 2.4 stack hits a known issue inside
+    ``LightCurveCollection.stitch()``: the default corrector is
+    ``lambda x: x.normalize()``, which calls ``np.nanmedian(self.flux)`` on
+    a ``MaskedQuantity``. If the segment's flux is all-NaN or fully masked
+    (frequent for short 20-s slots wiped by ``quality_bitmask``), the
+    median collapses to a scalar ``MaskedQuantity`` and astropy refuses to
+    iterate it (``'MaskedQuantity' object with a scalar value is not
+    iterable``). Even non-empty segments can hit this when the chosen
+    flux column is all-NaN.
+
+    Strategy
+    --------
+    1. Walk the collection; for each segment compute the median ourselves
+       on a plain ``np.ndarray`` (we strip units/mask first).
+    2. Drop any segment with fewer than 2 finite samples or a non-finite/
+       zero median (these are the ones lightkurve cannot normalise either).
+    3. Hand-roll the normalisation (``flux /= median``; same for
+       ``flux_err``) so we never invoke lightkurve's normalize and thus
+       never hit astropy's nanmedian.
+    4. Stitch the pre-normalised segments with an identity corrector.
+
+    Returns the stitched LightCurve, or ``None`` when every segment was
+    unusable (caller should treat that as a hard failure).
+    """
+    import lightkurve as _lk
+    if not isinstance(collection, _lk.LightCurveCollection):
+        return collection  # already a single LightCurve
+
+    def _to_plain_array(arr):
+        # Strip astropy units and any Masked wrapper down to a numpy ndarray.
+        if arr is None:
+            return None
+        try:
+            arr = arr.value  # astropy Quantity / MaskedQuantity -> ndarray-like
+        except AttributeError:
+            pass
+        try:
+            arr = arr.filled(np.nan)  # numpy MaskedArray -> ndarray with NaN
+        except AttributeError:
+            pass
+        return np.asarray(arr, dtype=float)
+
+    good = []
+    for one in collection:
+        seg = (
+            getattr(one, 'sector', None)
+            or getattr(one, 'campaign', None)
+            or getattr(one, 'quarter', None)
+            or '?'
+        )
+        try:
+            flux_arr = _to_plain_array(one.flux)
+        except Exception as exc:
+            if logger is not None:
+                logger.warning(f"Dropping segment {seg}: cannot read flux ({exc})")
+            continue
+        if flux_arr is None or flux_arr.size == 0:
+            if logger is not None:
+                logger.warning(f"Dropping empty segment {seg}")
+            continue
+        finite = np.isfinite(flux_arr)
+        n_finite = int(finite.sum())
+        if n_finite < 2:
+            if logger is not None:
+                logger.warning(
+                    f"Dropping segment {seg} (n_finite={n_finite})"
+                )
+            continue
+        med = float(np.median(flux_arr[finite]))
+        if not np.isfinite(med) or med == 0.0:
+            if logger is not None:
+                logger.warning(
+                    f"Dropping segment {seg} (median flux = {med})"
+                )
+            continue
+        # Hand-roll normalize: divide flux and flux_err by their (finite)
+        # median. Doing it through the LightCurve's __truediv__ preserves
+        # units and metadata without ever calling astropy's nanmedian.
+        try:
+            norm = one.copy()
+            norm.flux = one.flux / med
+            if getattr(one, 'flux_err', None) is not None:
+                norm.flux_err = one.flux_err / med
+        except Exception as exc:
+            if logger is not None:
+                logger.warning(f"Dropping segment {seg}: normalize failed ({exc})")
+            continue
+        good.append(norm)
+
+    if not good:
+        if logger is not None:
+            logger.error("All segments dropped — nothing to stitch.")
+        return None
+    # Identity corrector — already normalised above.
+    return _lk.LightCurveCollection(good).stitch(corrector_func=lambda x: x)
+
+
+def _inject_dilution_normal_prior(params_csv_path, inst, median, std, sigma_floor=0.01):
+    """Inject a commented normal-prior dilution row above the uniform one.
+
+    Looks for the existing ``dil_<inst>,...,uniform ...`` line in
+    ``params_csv_path`` and prepends a commented-out twin using a Gaussian
+    prior centred on the SPOC-derived ``median`` dilution with width
+    ``max(std, sigma_floor)``. CROWDSAP carries no formal uncertainty, so a
+    1% absolute floor keeps the prior physically reasonable even when only
+    one segment is available.
+
+    The row is commented out so the original uniform row remains the active
+    default — users who trust the SPOC crowding model uncomment the new
+    row (and comment the uniform one) to fit dilution under the tight
+    Gaussian prior.
+
+    Returns True when a row was inserted, False otherwise.
+    """
+    path = Path(params_csv_path)
+    if not path.exists():
+        return False
+    text = path.read_text()
+    needle = "dil_{},".format(inst)
+    sigma = max(float(std), float(sigma_floor))
+    new_row = (
+        "#dil_{},{:.6f},1,normal {:.6f} {:.6f},"
+        "$D_\\mathrm{{0; {}}}$ (SPOC),,"
+    ).format(inst, median, median, sigma, inst)
+    new_lines = []
+    inserted = False
+    for line in text.splitlines():
+        if (not inserted) and line.startswith(needle) and 'uniform' in line:
+            new_lines.append(new_row)
+            inserted = True
+        new_lines.append(line)
+    if not inserted:
+        return False
+    suffix = "\n" if text.endswith("\n") else ""
+    path.write_text("\n".join(new_lines) + suffix)
+    return True
+
+
 Nsamples = 10_000
 planets = "b c d e f g h i j k".split()
 quartiles_1sig = [16.0, 50.0, 84.0]  # 1-sigma
@@ -569,10 +833,15 @@ def main():
             logger.error(msg)
             sys.exit()
         
-        lc = filtered_result.download_all(
-            flux_column=lc_type, quality_bitmask=quality_bitmask
-        ).stitch()
-        
+        lc = _safe_stitch(
+            filtered_result.download_all(
+                flux_column=lc_type, quality_bitmask=quality_bitmask
+            ),
+            logger=logger,
+        )
+        if lc is None:
+            logger.error("No usable segments downloaded."); sys.exit()
+
         df = lc.to_pandas()
         if len(df) == 0:
             logger.error("Lightcurve data is empty.")
@@ -1012,12 +1281,20 @@ def main():
         )
         # ===== Write files =====#
         outdir = Path(basedir, target_name)
-        try:
-            outdir.mkdir(parents=True, exist_ok=overwrite)
-        except FileExistsError:
-            raise FileExistsError(
-                f"{outdir} already exists. Use --overwrite to overwrite files."
-            )
+        # An existing directory is only a real conflict when it already holds
+        # the canonical outputs of a successful prepare_allesfit run. An empty
+        # dir (or one containing only stray artefacts from an aborted attempt)
+        # should not block re-running without --overwrite.
+        _CANONICAL_OUTPUTS = ("params.csv", "settings.csv", "run.py")
+        if outdir.exists():
+            existing = {p.name for p in outdir.iterdir()} if outdir.is_dir() else set()
+            collisions = existing & set(_CANONICAL_OUTPUTS)
+            if collisions and not overwrite:
+                raise FileExistsError(
+                    f"{outdir} already contains {sorted(collisions)}. "
+                    "Use --overwrite to overwrite files."
+                )
+        outdir.mkdir(parents=True, exist_ok=True)
 
         # ===== Create params.csv =====#
         text = """#name,value,fit,bounds,label,unit,coupled_with\n"""
@@ -1188,7 +1465,7 @@ def main():
             text += f"{pl}_f_s,0,0,uniform -1 1,$\sqrt{{e_{pl}}} \sin{{\omega_{pl}}}$,,\n"
         text += "#dilution per instrument,,,,,,\n"
         for inst in fns:
-            text += f"dil_{inst},0,0,uniform -1 1,$D_\mathrm{{0; {inst}}}$,,\n"
+            text += f"dil_{inst},0,0,uniform 0 1,$D_\mathrm{{0; {inst}}}$,,\n"
         # Limb-darkening coefficients are keyed by bandpass in chromatic mode
         # and by instrument otherwise — `ldc_suffixes` already encodes this
         # decision (unique bandpasses when --bandpass was given, fns otherwise).
@@ -1343,9 +1620,14 @@ fig = allesfitter.show_initial_guess('.')
                     msg += f"Try using -exp={unique_exptimes}"
                     logger.error(msg); sys.exit()
                 exptime = unique_exptimes[0] if exptime is None else exptime
-                lc = result.download_all(
-                    flux_column=lc_type, quality_bitmask=quality_bitmask
-                ).stitch()
+                lc = _safe_stitch(
+                    result.download_all(
+                        flux_column=lc_type, quality_bitmask=quality_bitmask
+                    ),
+                    logger=logger,
+                )
+                if lc is None:
+                    logger.error("No usable segments downloaded."); sys.exit()
                 logger.info(
                     "The lightcurves were not flattened/de-trended to avoid removing transits."
                 )
@@ -1358,12 +1640,16 @@ fig = allesfitter.show_initial_guess('.')
                 if _seg is not None and len(unique_sectors) == 1:
                     assert _segments_match(_seg, unique_sectors[-1])
                 if pipeline == "spoc":
-                    lc1 = result.download_all(
+                    _lc1_for_meta = result.download_all(
                         quality_bitmask=quality_bitmask, flux_column="pdcsap_flux"
-                    ).stitch()
-                    lc2 = result.download_all(
-                        quality_bitmask=quality_bitmask, flux_column="sap_flux"
-                    ).stitch()
+                    )
+                    lc1 = _safe_stitch(_lc1_for_meta, logger=logger)
+                    lc2 = _safe_stitch(
+                        result.download_all(
+                            quality_bitmask=quality_bitmask, flux_column="sap_flux"
+                        ),
+                        logger=logger,
+                    )
             elif sector_flag == "multi_sector":
                 # case: sector int or list
                 _w = _segment_word(mission)
@@ -1388,9 +1674,14 @@ fig = allesfitter.show_initial_guess('.')
                     logger.error(msg); sys.exit()
                 assert len(sector) == len(filtered_result)
                 exptime = unique_exptimes[0] if exptime is None else exptime
-                lc = filtered_result.download_all(
-                    quality_bitmask=quality_bitmask, flux_column=lc_type
-                ).stitch()
+                lc = _safe_stitch(
+                    filtered_result.download_all(
+                        quality_bitmask=quality_bitmask, flux_column=lc_type
+                    ),
+                    logger=logger,
+                )
+                if lc is None:
+                    logger.error("No usable segments downloaded."); sys.exit()
                 logger.info(
                     "The lightcurves were not flattened/de-trended to avoid removing transits."
                 )
@@ -1402,12 +1693,16 @@ fig = allesfitter.show_initial_guess('.')
                 if _seg is not None and len(sector) == 1:
                     assert any(_segments_match(_seg, s) for s in sector), logger.error(msg)
                 if pipeline == "spoc":
-                    lc1 = filtered_result.download_all(
+                    _lc1_for_meta = filtered_result.download_all(
                         quality_bitmask=quality_bitmask, flux_column="pdcsap_flux"
-                    ).stitch()
-                    lc2 = filtered_result.download_all(
-                        quality_bitmask=quality_bitmask, flux_column="sap_flux"
-                    ).stitch()
+                    )
+                    lc1 = _safe_stitch(_lc1_for_meta, logger=logger)
+                    lc2 = _safe_stitch(
+                        filtered_result.download_all(
+                            quality_bitmask=quality_bitmask, flux_column="sap_flux"
+                        ),
+                        logger=logger,
+                    )
             else:
                 if sector_flag == "first":
                     idx = 0
@@ -1431,6 +1726,7 @@ fig = allesfitter.show_initial_guess('.')
                     lc1 = filtered_result.download(
                         quality_bitmask=quality_bitmask, flux_column="pdcsap_flux"
                     ).normalize()
+                    _lc1_for_meta = lc1   # single LightCurve carries its own .meta
                     lc2 = filtered_result.download(
                         quality_bitmask=quality_bitmask, flux_column="sap_flux"
                     ).normalize()
@@ -1461,6 +1757,31 @@ fig = allesfitter.show_initial_guess('.')
                     f"{target_name}_{mission}_{lc_type.split('_')[0]}_s{secs}_exp{int(exptime)}s"
                 )
                 fig.savefig(fp.with_suffix('.png'))
+                # Record SPOC CROWDSAP -> allesfitter dilution next to the lightcurve
+                # so users can fill in dil_<inst> in params.csv without guessing.
+                contam_fp = outdir.joinpath("spoc_contamination.txt")
+                try:
+                    summary = _write_spoc_contamination(_lc1_for_meta, contam_fp, mission)
+                    if summary:
+                        logger.info(f"Saved: {contam_fp}")
+                        # Prepend a commented normal-prior dilution row above the
+                        # existing uniform row so users can opt into the
+                        # SPOC-informed prior without recomputing the value.
+                        params_fp = outdir.joinpath("params.csv")
+                        if _inject_dilution_normal_prior(
+                            params_fp, fn,
+                            median=summary['median_dilution'],
+                            std=summary['std_dilution'],
+                        ):
+                            logger.info(
+                                f"params.csv: added commented SPOC normal-prior row for dil_{fn} "
+                                f"(median={summary['median_dilution']:.4f}, "
+                                f"n_segments={summary['n_segments']})"
+                            )
+                    else:
+                        logger.info("CROWDSAP not present in SPOC header — skipping spoc_contamination.txt.")
+                except Exception as _e:
+                    logger.warning(f"Could not write spoc_contamination.txt: {_e}")
             else:
                 ax = lc.scatter(label=pipeline)
                 ax.set_title(f"{_segment_word(mission).capitalize()}={secs}\nexptime={int(exptime)}s")
@@ -1553,7 +1874,7 @@ mcmc_thin_by,2
 ###############################################################################,
 ns_modus,dynamic
 ns_nlive,1000
-ns_bound,single
+ns_bound,multi
 ns_sample,auto
 ns_tol,100
 ###############################################################################,
