@@ -1197,6 +1197,12 @@ def main():
         logger.info(f"Saved: {fp}")
 
         # =====Create run.py===== #
+        # Every ns_fit / ns_output / mcmc_fit / mcmc_output call is wrapped
+        # in allesfitter.log_run so the centralized log at
+        # ~/.allesfitter/runs.jsonl (override via $ALLESFITTER_RUN_LOG)
+        # records a start/end row with absolute datadir, pid, hostname,
+        # duration, and status. Inspect with: jq . ~/.allesfitter/runs.jsonl
+        # or python -c 'import allesfitter; print(allesfitter.run_log_tail(20))'.
         text4 = """#!/usr/bin/env python
 import allesfitter
 import os
@@ -1206,12 +1212,16 @@ fig = allesfitter.show_initial_guess('.')
 #allesfitter.prepare_ttv_fit('.', style='tessplot')
 
 # nested sampling
-#allesfitter.ns_fit('.')
-#allesfitter.ns_output('.')
+#with allesfitter.log_run('ns_fit', '.'):
+#    allesfitter.ns_fit('.')
+#with allesfitter.log_run('ns_output', '.'):
+#    allesfitter.ns_output('.')
 
 # mcmc (if needed)
-#allesfitter.mcmc_fit('.')
-#allesfitter.mcmc_output('.')"""
+#with allesfitter.log_run('mcmc_fit', '.'):
+#    allesfitter.mcmc_fit('.')
+#with allesfitter.log_run('mcmc_output', '.'):
+#    allesfitter.mcmc_output('.')"""
 
         if debug:
             logger.info(text4)
