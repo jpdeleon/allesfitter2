@@ -26,20 +26,16 @@ from __future__ import print_function, division, absolute_import
 #::: modules
 import numpy as np
 import os
-import dynesty
 from scipy.special import ndtri
 from scipy.stats import truncnorm
 import multiprocessing
 multiprocessing.set_start_method('fork', force=True)
 #solves python>=3.8 issues, see https://stackoverflow.com/questions/60518386/error-with-module-multiprocessing-under-python3-8
-from multiprocessing import Pool
-from contextlib import closing
 import gzip
 try:
    import cPickle as pickle
 except:
    import pickle
-from time import time as timer
 
 #::: warnings
 import warnings
@@ -105,73 +101,61 @@ def my_truncnorm_isf(q,a,b,mean,std):
 ###############################################################################
 #::: Nested Sampling fitter class
 ###############################################################################
-def ns_fit(datadir):
-    
+def ns_fit(datadir, backend=None):
+    """Run nested sampling and persist the result.
+
+    Parameters
+    ----------
+    datadir : str
+        Working directory containing ``settings.csv`` / ``params.csv``.
+    backend : {'dynesty', 'ultranest', None}, optional
+        Which sampler to use. Resolution order:
+        1. ``settings.csv`` ``ns_backend`` row (if set);
+        2. this kwarg (if provided);
+        3. ``'dynesty'`` (default).
+
+    Notes
+    -----
+    Saves an ``NSResults`` (unified schema) to
+    ``<outdir>/save_ns.pickle.gz``. ``ns_output`` auto-detects the backend
+    from the saved object.
+    """
     #::: init
     config.init(datadir)
-        
-        
-    #::: settings
-    nlive  = config.BASEMENT.settings['ns_nlive']    # (default 500) number of live points
-    bound  = config.BASEMENT.settings['ns_bound']    # (default 'single') use MutliNest algorithm for bounds
-    ndim   = config.BASEMENT.ndim                    # number of parameters
-    sample = config.BASEMENT.settings['ns_sample']   # (default 'auto') random walk sampling
-    tol    = config.BASEMENT.settings['ns_tol']      # (defualt 0.01) the stopping criterion
-        
-     
-    #::: run
-    if config.BASEMENT.settings['ns_modus']=='static':
-        logprint('\nRunning Static Nested Sampler...')
-        logprint('--------------------------')
-        t0 = timer()
-        
-        if config.BASEMENT.settings['multiprocess']:
-             with closing(Pool(processes=(config.BASEMENT.settings['multiprocess_cores']))) as pool:
-                logprint('\nRunning on', config.BASEMENT.settings['multiprocess_cores'], 'CPUs.')
-                sampler = dynesty.NestedSampler(ns_lnlike, ns_prior_transform, ndim, 
-                                                pool=pool, queue_size=config.BASEMENT.settings['multiprocess_cores'], 
-                                                bound=bound, sample=sample, nlive=nlive)
-                sampler.run_nested(dlogz=tol, print_progress=config.BASEMENT.settings['print_progress'])
-            
-        else:
-            sampler = dynesty.NestedSampler(ns_lnlike, ns_prior_transform, ndim,
-                                            bound=bound, sample=sample, nlive=nlive)
-            sampler.run_nested(dlogz=tol, print_progress=config.BASEMENT.settings['print_progress'])
-            
-        t1 = timer()
-        timedynesty = (t1-t0)
-        logprint("\nTime taken to run 'dynesty' (in static mode) is {:.2f} hours".format(timedynesty/60./60.))
 
+    #::: resolve backend (settings.csv wins, then kwarg, then default)
+    resolved = (
+        config.BASEMENT.settings.get('ns_backend')
+        or backend
+        or 'dynesty'
+    )
+    resolved = str(resolved).lower()
 
-    elif config.BASEMENT.settings['ns_modus']=='dynamic':
-        logprint('\nRunning Dynamic Nested Sampler...')
-        logprint('--------------------------')
-        t0 = timer()
-        
-        if config.BASEMENT.settings['multiprocess']:
-             with closing(Pool(processes=config.BASEMENT.settings['multiprocess_cores'])) as pool:
-                logprint('\nRunning on', config.BASEMENT.settings['multiprocess_cores'], 'CPUs.')
-                sampler = dynesty.DynamicNestedSampler(ns_lnlike, ns_prior_transform, ndim, 
-                                                       pool=pool, queue_size=config.BASEMENT.settings['multiprocess_cores'], 
-                                                       bound=bound, sample=sample)
-                sampler.run_nested(nlive_init=nlive, dlogz_init=tol, print_progress=config.BASEMENT.settings['print_progress'])
-            
-        else:
-            sampler = dynesty.DynamicNestedSampler(ns_lnlike, ns_prior_transform, ndim,
-                                                   bound=bound, sample=sample)
-            sampler.run_nested(nlive_init=nlive, print_progress=config.BASEMENT.settings['print_progress'])
-            
-        t1 = timer()
-        timedynestydynamic = (t1-t0)
-        logprint("\nTime taken to run 'dynesty' (in dynamic mode) is {:.2f} hours".format(timedynestydynamic/60./60.))
+    #::: dispatch (imports happen lazily, so ultranest stays optional)
+    from .utils.ns_backends import get_backend, validate_settings_for_backend
+    be = get_backend(resolved)
 
+    #::: tell the user which settings.csv keys are unused / implicit for this backend
+    raw_keys = getattr(config.BASEMENT, '_settings_raw_keys', set())
+    # Also surface ns_backend itself when defaulted
+    if 'ns_backend' not in raw_keys:
+        logprint("\n! settings.csv: 'ns_backend' not set; defaulting to '{}'. "
+                 "Add a row to settings.csv for reproducibility.".format(resolved))
+    validate_settings_for_backend(resolved, raw_keys, logprint=logprint)
 
-    #::: pickle-save the 'results' class
-    results = sampler.results
-    f = gzip.GzipFile(os.path.join(config.BASEMENT.outdir,'save_ns.pickle.gz'), 'wb')
-    pickle.dump(results, f)
-    f.close()
+    results = be.run(
+        ns_lnlike,
+        ns_prior_transform,
+        config.BASEMENT.ndim,
+        config.BASEMENT.settings,
+        list(config.BASEMENT.fitkeys),
+        config.BASEMENT.outdir,
+        logprint=logprint,
+    )
 
+    #::: pickle-save the unified-schema results
+    with gzip.GzipFile(os.path.join(config.BASEMENT.outdir, 'save_ns.pickle.gz'), 'wb') as f:
+        pickle.dump(results, f)
 
     #::: return a German saying
     try:

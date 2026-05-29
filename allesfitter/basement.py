@@ -334,7 +334,13 @@ class Basement:
                 
 #        self.settings = {r[0]:r[1] for r in rows}
         self.settings = collections.OrderedDict( [('user-given:','')]+[ (r[0],r[1] ) for r in rows ]+[('automatically set:','')] )
-        
+
+        # Snapshot the set of keys that came from the user's settings.csv,
+        # BEFORE any defaults are filled in below. Used by the nested-sampling
+        # dispatcher to tell the user when a backend-relevant knob was left
+        # implicit (defaulted) vs. explicitly set in the CSV.
+        self._settings_raw_keys = {r[0] for r in rows}
+
         #::: check for unrecognized settings keys
         valid_settings_keys = {
             'companions_phot', 'companions_rv', 'companions_all', 'inst_phot', 'inst_rv', 'inst_rv2', 'inst_all',
@@ -342,7 +348,8 @@ class Basement:
             'secondary_eclipse', 'phase_curve', 'phase_curve_style', 'shift_epoch',
             'inst_for_b_epoch', 'inst_for_c_epoch', 'inst_for_d_epoch', 'inst_for_e_epoch', 'inst_for_f_epoch', 'inst_for_g_epoch',
             'mcmc_nwalkers', 'mcmc_total_steps', 'mcmc_burn_steps', 'mcmc_thin_by', 'mcmc_pre_run_loops', 'mcmc_pre_run_steps', 'mcmc_moves',
-            'ns_modus', 'ns_nlive', 'ns_bound', 'ns_sample', 'ns_tol',
+            'ns_modus', 'ns_nlive', 'ns_bound', 'ns_sample', 'ns_tol', 'ns_backend',
+            'un_min_ess', 'un_max_iters',
             'bandpass', 'chromatic',
             'fit_ttvs', 'exact_grav', 'use_host_density_prior', 'use_tidal_eccentricity_prior',
             'N_flares', 'N_spots',
@@ -713,11 +720,24 @@ class Basement:
             self.settings['ns_bound'] = 'single'
         if 'ns_sample' not in self.settings: 
             self.settings['ns_sample'] = 'rwalk'
-        if 'ns_tol' not in self.settings: 
+        if 'ns_tol' not in self.settings:
             self.settings['ns_tol'] = 0.01
-                
+        if 'ns_backend' not in self.settings:
+            self.settings['ns_backend'] = 'dynesty'
+        # UltraNest-specific knobs (ignored when ns_backend != 'ultranest')
+        if 'un_min_ess' not in self.settings:
+            self.settings['un_min_ess'] = 400
+        if 'un_max_iters' not in self.settings:
+            self.settings['un_max_iters'] = None
+
         self.settings['ns_nlive'] = int(self.settings['ns_nlive'])
         self.settings['ns_tol'] = float(self.settings['ns_tol'])
+        self.settings['ns_backend'] = str(self.settings['ns_backend']).strip().lower()
+        self.settings['un_min_ess'] = int(self.settings['un_min_ess'])
+        if self.settings['un_max_iters'] in (None, '', 'None', 'none'):
+            self.settings['un_max_iters'] = None
+        else:
+            self.settings['un_max_iters'] = int(self.settings['un_max_iters'])
         
 #        if self.settings['ns_sample'] == 'auto':
 #            if self.ndim < 10:

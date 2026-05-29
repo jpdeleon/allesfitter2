@@ -44,6 +44,10 @@ test = [
     "pytest>=7.0.0",
     "mypy>=1.0.0",
 ]
+ultranest = [
+    "ultranest>=4.0",
+    "h5py",  # required by ultranest for its log_dir/resume backend
+]
 
 [project.urls]
 Homepage = "https://github.com/MNGuenther/allesfitter"
@@ -54,6 +58,12 @@ prepare_allesfit = "allesfitter.scripts:prepare_allesfit"
 
 [tool.setuptools.packages.find]
 where = ["."]
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: marks tests that run real samplers (deselect with '-m \"not slow\"')",
+    "unit: fast unit tests (default)",
+]
 
 #[tool.setuptools.include-package-data]
 #true

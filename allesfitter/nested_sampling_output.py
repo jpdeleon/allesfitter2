@@ -36,6 +36,10 @@ from copy import deepcopy
 from dynesty import utils as dyutils
 from dynesty import plotting as dyplot
 import warnings
+try:
+    import corner as _corner  # used as backend-agnostic cornerplot fallback
+except ImportError:           # corner is a transitive dynesty dep, but guard anyway
+    _corner = None
 
 #::: allesfitter modules
 from . import config
@@ -74,6 +78,71 @@ def draw_ns_posterior_samples(results, Nsamples=None, as_type='2d_array'):
             posterior_samples_dic[key] = posterior_samples[:,ind].flatten()
         return posterior_samples_dic
 
+
+
+###############################################################################
+#::: backend-agnostic plotting helpers (used when backend != 'dynesty')
+###############################################################################
+def _simple_traceplot(results, labels, truths):
+    '''Lightweight traceplot when dynesty's runplot/traceplot is unavailable.
+
+    Mirrors the (ndim, 2) layout dyplot.traceplot returns so the downstream
+    title-setting code (``taxes[i,1].set_title(...)`` etc.) keeps working.
+    Left column: index vs. parameter value (raw samples).
+    Right column: weighted-posterior histogram.
+    '''
+    samples = np.asarray(results['samples'])
+    logwt = np.asarray(results['logwt'])
+    logz_final = float(np.asarray(results['logz'])[-1])
+    weights = np.exp(logwt - logz_final)
+    weights = weights / weights.sum()
+    ndim = samples.shape[1]
+    fig, axes = plt.subplots(ndim, 2, figsize=(12, 2.5 * ndim))
+    if ndim == 1:
+        axes = np.array([axes])
+    for i in range(ndim):
+        axes[i, 0].plot(samples[:, i], lw=0.5, color='grey', rasterized=True)
+        axes[i, 0].set_ylabel(labels[i] if i < len(labels) else '')
+        axes[i, 1].hist(samples[:, i], bins=60, weights=weights,
+                        color='grey', histtype='stepfilled', alpha=0.6)
+        if truths is not None and i < len(truths) and truths[i] is not None:
+            axes[i, 0].axhline(truths[i], color='C3', lw=0.8)
+            axes[i, 1].axvline(truths[i], color='C3', lw=0.8)
+    axes[-1, 0].set_xlabel('sample index')
+    axes[-1, 1].set_xlabel('value')
+    return fig, axes
+
+
+def _corner_from_results(results, labels, truths, fontsize, ndim):
+    '''Backend-agnostic cornerplot via ``corner.corner``.
+
+    Resamples to equal weight using the same ``logwt``/``logz`` contract
+    as :func:`draw_ns_posterior_samples`, then hands off to ``corner``.
+    Returns ``(fig, axes_2d)`` where ``axes_2d`` matches dyplot.cornerplot's
+    shape so existing title-setting code is unchanged.
+    '''
+    samples = np.asarray(results['samples'])
+    logwt = np.asarray(results['logwt'])
+    logz_final = float(np.asarray(results['logz'])[-1])
+    weights = np.exp(logwt - logz_final)
+    weights = weights / weights.sum()
+    eq = dyutils.resample_equal(samples, weights)
+    if _corner is None:
+        # graceful empty grid if corner.py is somehow missing
+        cfig, caxes = plt.subplots(ndim, ndim, figsize=(2 * ndim, 2 * ndim))
+        return cfig, caxes
+    cfig = _corner.corner(
+        eq,
+        labels=labels,
+        truths=truths,
+        quantiles=[0.16, 0.5, 0.84],
+        show_titles=False,
+        label_kwargs={"fontsize": fontsize, "rotation": 45,
+                      "horizontalalignment": "right"},
+        hist_kwargs={"alpha": 0.25, "linewidth": 0, "histtype": "stepfilled"},
+    )
+    caxes = np.array(cfig.axes).reshape((ndim, ndim))
+    return cfig, caxes
 
 
 ###############################################################################
@@ -240,7 +309,7 @@ def plot_chromatic_rr_histogram(posterior_samples):
 ###############################################################################
 #::: analyse the output from save_ns.pickle file
 ###############################################################################
-def ns_output(datadir):
+def ns_output(datadir, backend=None):
     '''
     Inputs:
     -------
@@ -248,11 +317,18 @@ def ns_output(datadir):
         the working directory for allesfitter
         must contain all the data files
         output directories and files will also be created inside datadir
-            
+    backend : {'dynesty', 'ultranest', None}, optional
+        Which sampler produced the saved results. If ``None`` (default),
+        auto-detect from the ``backend`` key on the unified-schema results
+        dict; legacy dynesty pickles (no ``backend`` key) are treated as
+        ``'dynesty'``. Affects only the trace plot (which uses
+        ``dynesty.plotting.traceplot`` when available); the corner plot
+        and downstream analysis are backend-agnostic.
+
     Outputs:
     --------
-    This will output information into the console, and create a output files 
-    into datadir/results/ (or datadir/QL/ if QL==True)    
+    This will output information into the console, and create a output files
+    into datadir/results/ (or datadir/QL/ if QL==True)
     '''
     config.init(datadir)
     
@@ -279,6 +355,15 @@ def ns_output(datadir):
     f = gzip.GzipFile(os.path.join(config.BASEMENT.outdir,'save_ns.pickle.gz'), 'rb')
     results = pickle.load(f)
     f.close()
+
+    #::: resolve which sampler produced this file
+    #    - new unified-schema files carry results['backend']
+    #    - legacy dynesty pickles do not; default to 'dynesty'
+    try:
+        detected = results.get('backend') if isinstance(results, dict) else None
+    except Exception:
+        detected = None
+    resolved_backend = (detected or backend or 'dynesty').lower()
            
     
     #::: plot the fit
@@ -324,9 +409,10 @@ def ns_output(datadir):
     logprint('\nResults:')
     logprint('----------')
 #    print(results.summary())
-    logZdynesty = results.logz[-1]                                                       # value of logZ
-    logZerrdynesty = results.logzerr[-1]                                                 # estimate of the statistcal uncertainty on logZ
-    logprint('log(Z) = {} +- {}'.format(logZdynesty, logZerrdynesty))
+    logZ = float(np.asarray(results['logz'])[-1])                                        # value of logZ
+    logZerr = float(np.asarray(results['logzerr'])[-1])                                  # uncertainty on logZ
+    logprint('Backend: {}'.format(resolved_backend))
+    logprint('log(Z) = {} +- {}'.format(logZ, logZerr))
     logprint('Nr. of posterior samples: {}'.format(len(posterior_samples)))
     
     
@@ -354,22 +440,43 @@ def ns_output(datadir):
             labels[i] = str(labels[i]+' ('+units[i]+')')
         
         
-    #::: traceplot    
+    #::: traceplot
+    # dyplot.traceplot needs the dynesty-native fields ('logvol', 'niter', ...).
+    # New unified-schema saves carry them through; legacy saves and non-dynesty
+    # backends do not — fall back to the minimal in-house traceplot.
     cmap = truncate_colormap( 'Greys', minval=0.2, maxval=0.8, n=256 )
-    tfig, taxes = dyplot.traceplot(results2, labels=labels, quantiles=[0.16, 0.5, 0.84], truths=fittruths2, post_color='grey', trace_cmap=[cmap]*config.BASEMENT.ndim, trace_kwargs={'rasterized':True})
+    _dyplot_keys = ('logvol', 'niter', 'logl', 'nlive')
+    _can_dyplot = (
+        resolved_backend == 'dynesty'
+        and all(k in results2 for k in _dyplot_keys)
+    )
+    if _can_dyplot:
+        try:
+            tfig, taxes = dyplot.traceplot(results2, labels=labels, quantiles=[0.16, 0.5, 0.84], truths=fittruths2, post_color='grey', trace_cmap=[cmap]*config.BASEMENT.ndim, trace_kwargs={'rasterized':True})
+        except (KeyError, ValueError) as _exc:
+            logprint('! dyplot.traceplot failed ({}); using fallback.'.format(_exc))
+            tfig, taxes = _simple_traceplot(results2, labels=labels, truths=fittruths2)
+    else:
+        if resolved_backend == 'dynesty':
+            logprint('! Legacy save_ns.pickle.gz missing dynesty fields {} — '
+                     'using fallback traceplot. Re-run ns_fit to restore '
+                     'native dynesty trace plots.'.format(list(_dyplot_keys)))
+        tfig, taxes = _simple_traceplot(results2, labels=labels, truths=fittruths2)
     plt.tight_layout()
-    
-    
+
+
     #::: cornerplot
     # ndim = results2['samples'].shape[1]
     fontsize = np.min(( 24. + 0.5*config.BASEMENT.ndim, 40 ))
-    try:
-        cfig, caxes = dyplot.cornerplot(results2, labels=labels, span=[0.997 for i in range(config.BASEMENT.ndim)], quantiles=[0.16, 0.5, 0.84], truths=fittruths2, hist_kwargs={'alpha':0.25,'linewidth':0,'histtype':'stepfilled'}, 
-                                        label_kwargs={"fontsize":fontsize, "rotation":45, "horizontalalignment":'right'})
-    except:
-        logprint('! WARNING')
-        logprint('Dynesty corner plot could not be created. Please contact maxgue@mit.edu.')
-        cfig, caxes = plt.subplots(config.BASEMENT.ndim,config.BASEMENT.ndim,figsize=(2*config.BASEMENT.ndim,2*config.BASEMENT.ndim))
+    if _can_dyplot:
+        try:
+            cfig, caxes = dyplot.cornerplot(results2, labels=labels, span=[0.997 for i in range(config.BASEMENT.ndim)], quantiles=[0.16, 0.5, 0.84], truths=fittruths2, hist_kwargs={'alpha':0.25,'linewidth':0,'histtype':'stepfilled'},
+                                            label_kwargs={"fontsize":fontsize, "rotation":45, "horizontalalignment":'right'})
+        except Exception as _exc:
+            logprint('! dyplot.cornerplot failed ({}); using corner.corner fallback.'.format(_exc))
+            cfig, caxes = _corner_from_results(results2, labels=labels, truths=fittruths2, fontsize=fontsize, ndim=config.BASEMENT.ndim)
+    else:
+        cfig, caxes = _corner_from_results(results2, labels=labels, truths=fittruths2, fontsize=fontsize, ndim=config.BASEMENT.ndim)
         
         
     #::: runplot
