@@ -1188,7 +1188,7 @@ def main():
             text += f"{pl}_f_s,0,0,uniform -1 1,$\sqrt{{e_{pl}}} \sin{{\omega_{pl}}}$,,\n"
         text += "#dilution per instrument,,,,,,\n"
         for inst in fns:
-            text += f"dil_{inst},0,0,uniform -1 1,$D_\mathrm{{0; {inst}}}$,,\n"
+            text += f"dil_{inst},0,0,uniform 0 1,$D_\mathrm{{0; {inst}}}$,,\n"
         # Limb-darkening coefficients are keyed by bandpass in chromatic mode
         # and by instrument otherwise — `ldc_suffixes` already encodes this
         # decision (unique bandpasses when --bandpass was given, fns otherwise).
