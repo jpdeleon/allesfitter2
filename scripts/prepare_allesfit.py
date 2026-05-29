@@ -353,8 +353,8 @@ def _safe_stitch(collection, logger=None):
 def _dataset_aware_gp_bounds(time, flux, tdur_days):
     """Derive sensible GP / noise prior bounds from a loaded lightcurve.
 
-    The current hardcoded defaults (``uniform -15 0`` for ``ln σ_GP`` and
-    ``uniform -5 5`` for ``ln ρ_GP``) routinely allow the GP to absorb the
+    The current hardcoded defaults (``uniform -10 -3`` for ``ln σ_GP`` and
+    ``uniform -1 5`` for ``ln ρ_GP``) routinely allow the GP to absorb the
     transit signal or fit the transit shape itself. This helper grounds
     those bounds in the actual data:
 
@@ -1672,8 +1672,8 @@ def main():
         text += "#baseline per instrument,,,,,,\n"
         for inst in fns:
             text += f"#baseline_gp_offset_flux_{inst},0,1,uniform -0.1 0.1,$\mathrm{{offset ({inst})}}$,,\n"
-            text += f"baseline_gp_matern32_lnsigma_flux_{inst},-5,1,uniform -15 0,$\mathrm{{gp ln \sigma ({inst})}}$,,\n"
-            text += f"baseline_gp_matern32_lnrho_flux_{inst},0,1,uniform -5 5,$\mathrm{{gp ln \\rho ({inst})}}$,,\n"
+            text += f"baseline_gp_matern32_lnsigma_flux_{inst},-5,1,uniform -10 -3,$\mathrm{{gp ln \sigma ({inst})}}$,,\n"
+            text += f"baseline_gp_matern32_lnrho_flux_{inst},0,1,uniform -1 5,$\mathrm{{gp ln \\rho ({inst})}}$,,\n"
         # TTV rows: when --ttv is NOT set, keep the commented-out stub for
         # reference. When --ttv IS set, the real per-transit rows are
         # appended after the lightcurve download (below) because we need
