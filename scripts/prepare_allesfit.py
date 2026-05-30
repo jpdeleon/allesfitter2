@@ -1713,23 +1713,21 @@ def main():
         # or python -c 'import allesfitter; print(allesfitter.run_log_tail(20))'.
         text4 = """#!/usr/bin/env python
 import allesfitter
-import os
-os.nice(19)
+#import os; os.nice(19)
 
-fig = allesfitter.show_initial_guess('.')
-#allesfitter.prepare_ttv_fit('.', style='tessplot')
+dir_path = '.'
+fig = allesfitter.show_initial_guess(dir_path)
+#allesfitter.prepare_ttv_fit(dir_path, style='tessplot')
 
-# nested sampling
-#with allesfitter.log_run('ns_fit', '.'):
-#    allesfitter.ns_fit('.')
-#with allesfitter.log_run('ns_output', '.'):
-#    allesfitter.ns_output('.')
+# mcmc sampling
+#with allesfitter.log_run('mcmc_fit', dir_path):
+#    allesfitter.mcmc_fit(dir_path)
+#allesfitter.mcmc_output(dir_path)
 
-# mcmc (if needed)
-#with allesfitter.log_run('mcmc_fit', '.'):
-#    allesfitter.mcmc_fit('.')
-#with allesfitter.log_run('mcmc_output', '.'):
-#    allesfitter.mcmc_output('.')"""
+# nested sampling for evidence / model comparison
+#with allesfitter.log_run('ns_fit', dir_path):
+#    allesfitter.ns_fit(dir_path)
+#allesfitter.ns_output(dir_path)"""
 
         if debug:
             logger.info(text4)
