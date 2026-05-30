@@ -140,34 +140,81 @@ def _simple_traceplot(results, labels, truths):
     return fig, axes
 
 
-def _corner_from_results(results, labels, truths, fontsize, ndim):
-    '''Backend-agnostic cornerplot via ``corner.corner``.
+# ---------------------------------------------------------------------------
+# Nuisance-parameter filtering for the corner plot.
+#
+# When ndim is large, the corner plot becomes unreadable AND its matplotlib
+# canvas approaches OOM territory. The baseline-model rows (GP hypers,
+# offsets/slopes, per-band white-noise jitters, stellar-variability GP
+# hypers) are almost always nuisance for inspection — the science is in
+# the orbital + planet-radius + LDC parameters. When ndim exceeds the
+# threshold below, drop the nuisance rows from the corner-plot only; the
+# full posterior is still saved to disk and used everywhere else.
+# ---------------------------------------------------------------------------
+_NUISANCE_CORNER_PREFIXES = (
+    'baseline_',          # offsets/slopes + every baseline_gp_* hyper
+    'ln_err_flux_',
+    'ln_jitter_rv_',
+    'stellar_var_gp_',
+)
+_CORNER_HIDE_NUISANCE_NDIM_THRESHOLD = 25
 
-    Resamples to equal weight using the same ``logwt``/``logz`` contract
-    as :func:`draw_ns_posterior_samples`, then hands off to ``corner``.
-    Returns ``(fig, axes_2d)`` where ``axes_2d`` matches dyplot.cornerplot's
-    shape so existing title-setting code is unchanged.
 
-    Memory-bounded: the resampled posterior is subsampled to
-    ``_MAX_CORNER_SAMPLES`` rows and the figure size is capped at
-    ``_MAX_CORNER_INCHES`` per side. When ndim exceeds
-    ``_HARD_NDIM_CAP`` the corner plot is skipped entirely (an empty
-    grid is returned so caller code can still index ``caxes[i,i]``).
-    '''
-    samples = np.asarray(results['samples'])
-    logwt = np.asarray(results['logwt'])
-    logz_final = float(np.asarray(results['logz'])[-1])
-    weights = np.exp(logwt - logz_final)
-    weights = weights / weights.sum()
-    eq = dyutils.resample_equal(samples, weights)
-    # Subsample the posterior — corner cost scales with Nsamples × ndim^2
+def _corner_nuisance_mask(fitkeys):
+    """Return a boolean keep-mask over ``fitkeys``: True for science
+    parameters, False for nuisance baseline / error / stellar-var-GP rows.
+    """
+    keys = np.atleast_1d(np.asarray(fitkeys, dtype=object))
+    keep = np.ones(len(keys), dtype=bool)
+    for i, k in enumerate(keys):
+        ks = str(k)
+        if any(ks.startswith(p) for p in _NUISANCE_CORNER_PREFIXES):
+            keep[i] = False
+    return keep
+
+
+def _filter_nuisance_for_corner(
+    fitkeys, samples, labels, truths,
+    threshold=_CORNER_HIDE_NUISANCE_NDIM_THRESHOLD,
+):
+    """Drop nuisance rows iff ``len(fitkeys) > threshold``.
+
+    Returns ``(fitkeys_kept, samples_kept, labels_kept, truths_kept,
+    dropped_names)`` — when no filtering happens (ndim small, or no
+    nuisance rows found) the inputs are returned unchanged and
+    ``dropped_names`` is an empty list.
+    """
+    n = len(fitkeys)
+    if n <= threshold:
+        return fitkeys, samples, labels, truths, []
+    keep = _corner_nuisance_mask(fitkeys)
+    if keep.all():
+        return fitkeys, samples, labels, truths, []
+    dropped = [str(k) for k, kk in zip(np.atleast_1d(fitkeys), keep) if not kk]
+    s = np.asarray(samples)
+    s_kept = s[:, keep] if s.ndim == 2 else s
+    keys_kept = np.asarray(fitkeys)[keep]
+    labels_kept = [labels[i] for i in range(len(labels)) if keep[i]]
+    if truths is not None:
+        truths_kept = np.asarray(truths)[keep]
+    else:
+        truths_kept = None
+    return keys_kept, s_kept, labels_kept, truths_kept, dropped
+
+
+def _corner_from_samples(eq_samples, labels, truths, fontsize, ndim):
+    """Draw a corner plot from an already equal-weight posterior.
+
+    Memory-bounded: subsamples to ``_MAX_CORNER_SAMPLES`` rows, caps
+    figsize at ``_MAX_CORNER_INCHES`` per side, and short-circuits to an
+    empty grid when ``ndim > _HARD_NDIM_CAP``.
+    """
+    eq = np.asarray(eq_samples)
     if eq.shape[0] > _MAX_CORNER_SAMPLES:
         rng = np.random.default_rng(42)
         idx = rng.choice(eq.shape[0], size=_MAX_CORNER_SAMPLES, replace=False)
         eq = eq[idx]
     side_inches = min(2.0 * ndim, _MAX_CORNER_INCHES)
-    # Skip outright for absurdly high ndim — the plot is unreadable AND
-    # corner's matplotlib canvas at this size will OOM-kill the process.
     if ndim > _HARD_NDIM_CAP or _corner is None:
         cfig, caxes = plt.subplots(ndim, ndim, figsize=(side_inches, side_inches))
         return cfig, caxes
@@ -184,12 +231,28 @@ def _corner_from_results(results, labels, truths, fontsize, ndim):
             hist_kwargs={"alpha": 0.25, "linewidth": 0, "histtype": "stepfilled"},
         )
         caxes = np.array(cfig.axes).reshape((ndim, ndim))
-    except (MemoryError, ValueError, RuntimeError) as exc:
-        # Render failure (memory pressure, axis-count blow-up, etc.) —
-        # emit an empty grid rather than crashing the whole ns_output run.
+    except (MemoryError, ValueError, RuntimeError):
         plt.close('all')
         cfig, caxes = plt.subplots(ndim, ndim, figsize=(side_inches, side_inches))
     return cfig, caxes
+
+
+def _corner_from_results(results, labels, truths, fontsize, ndim):
+    '''Backend-agnostic cornerplot via ``corner.corner``.
+
+    Resamples to equal weight using the same ``logwt``/``logz`` contract
+    as :func:`draw_ns_posterior_samples`, then hands off to
+    :func:`_corner_from_samples`. Returns ``(fig, axes_2d)`` where
+    ``axes_2d`` matches dyplot.cornerplot's shape so existing title-
+    setting code is unchanged.
+    '''
+    samples = np.asarray(results['samples'])
+    logwt = np.asarray(results['logwt'])
+    logz_final = float(np.asarray(results['logz'])[-1])
+    weights = np.exp(logwt - logz_final)
+    weights = weights / weights.sum()
+    eq = dyutils.resample_equal(samples, weights)
+    return _corner_from_samples(eq, labels, truths, fontsize, ndim)
 
 
 ###############################################################################
@@ -223,14 +286,16 @@ def _load_R_star_samples(n_samples, seed=42):
     return samples, R_star
 
 
-def plot_chromatic_rr_histogram(posterior_samples):
+def plot_chromatic_rr_histogram(posterior_samples, prefix='ns'):
     '''
     Overlay posterior histograms of per-bandpass Rp/Rs for chromatic fits.
 
     Only runs when settings.csv defines ``bandpass`` with >=2 unique labels
     (``config.BASEMENT.settings['chromatic'] is True``). One PDF is written
     per photometric companion at
-    ``<outdir>/ns_chromatic_rr_<companion>.pdf``.
+    ``<outdir>/<prefix>_chromatic_rr_<companion>.pdf`` (``prefix`` defaults
+    to ``'ns'`` to preserve the legacy NS filename; ``mcmc_output`` passes
+    ``prefix='mcmc'``).
 
     When ``params_star.csv`` is present in the datadir, a second panel is
     added below showing the implied planet radius posterior with twin
@@ -243,6 +308,8 @@ def plot_chromatic_rr_histogram(posterior_samples):
     posterior_samples : 2d ndarray
         Weighted posterior samples with shape (Nsamples, ndim) matching
         ``config.BASEMENT.fitkeys`` ordering.
+    prefix : str
+        Output filename prefix (``'ns'`` or ``'mcmc'``).
     '''
     if not config.BASEMENT.settings.get('chromatic', False):
         return
@@ -348,7 +415,7 @@ def plot_chromatic_rr_histogram(posterior_samples):
 
         fig.tight_layout()
         fig.savefig(os.path.join(config.BASEMENT.outdir,
-                                 'ns_chromatic_rr_' + companion + '.pdf'),
+                                 prefix + '_chromatic_rr_' + companion + '.pdf'),
                     bbox_inches='tight')
         plt.close(fig)
 
@@ -640,9 +707,51 @@ def ns_output(datadir, backend=None):
 
 
     #::: cornerplot
-    # ndim = results2['samples'].shape[1]
-    fontsize = np.min(( 24. + 0.5*config.BASEMENT.ndim, 40 ))
-    if _can_dyplot:
+    # When ndim is large, drop nuisance baseline / error / stellar-var-GP
+    # rows from the corner plot only — they make the plot unreadable AND
+    # are almost never inspected. The full posterior is still in
+    # results2 / posterior_samples for tables, deriver, etc.
+    (corner_fitkeys, corner_samples, corner_labels,
+     corner_truths, _dropped) = _filter_nuisance_for_corner(
+        config.BASEMENT.fitkeys, results2['samples'], labels, fittruths2,
+    )
+    fontsize = np.min(( 24. + 0.5*len(corner_fitkeys), 40 ))
+    if _dropped:
+        logprint(
+            '! corner: hiding {n} nuisance params for readability '
+            '(ndim {full} > {th}). Example: {ex}{more}'.format(
+                n=len(_dropped), full=config.BASEMENT.ndim,
+                th=_CORNER_HIDE_NUISANCE_NDIM_THRESHOLD,
+                ex=', '.join(_dropped[:3]),
+                more=', ...' if len(_dropped) > 3 else ''))
+        # Filtered samples are equal-weight already (results2['samples']
+        # are weighted, but the cost of resampling here is small and
+        # corner.corner expects equal-weight rows). Use the post-filter
+        # samples directly with _corner_from_samples.
+        try:
+            # Reweight if results2 has logwt (NS path); otherwise treat
+            # as equal-weight (MCMC path is never here).
+            try:
+                logwt = np.asarray(results2['logwt'])
+                logz_final = float(np.asarray(results2['logz'])[-1])
+                w = np.exp(logwt - logz_final)
+                w = w / w.sum()
+                eq_samples = dyutils.resample_equal(corner_samples, w)
+            except (KeyError, ValueError):
+                eq_samples = corner_samples
+            cfig, caxes = _corner_from_samples(
+                eq_samples, corner_labels, corner_truths,
+                fontsize=fontsize, ndim=len(corner_fitkeys),
+            )
+        except (MemoryError, Exception) as _exc:
+            logprint('! filtered corner failed ({}); skipping.'.format(_exc))
+            plt.close('all')
+            cfig, caxes = plt.subplots(
+                len(corner_fitkeys), len(corner_fitkeys),
+                figsize=(min(2 * len(corner_fitkeys), _MAX_CORNER_INCHES),
+                         min(2 * len(corner_fitkeys), _MAX_CORNER_INCHES)),
+            )
+    elif _can_dyplot:
         try:
             cfig, caxes = dyplot.cornerplot(results2, labels=labels, span=[0.997 for i in range(config.BASEMENT.ndim)], quantiles=[0.16, 0.5, 0.84], truths=fittruths2, hist_kwargs={'alpha':0.25,'linewidth':0,'histtype':'stepfilled'},
                                             label_kwargs={"fontsize":fontsize, "rotation":45, "horizontalalignment":'right'})
@@ -659,37 +768,45 @@ def ns_output(datadir, backend=None):
 #    plt.close(rfig)
     
     
-    #::: set allesfitter titles and labels
-    for i, key in enumerate(config.BASEMENT.fitkeys): 
-        
+    #::: set allesfitter titles and labels — trace iterates the FULL
+    #::: fitkeys, corner iterates only the filtered subset (may be the
+    #::: same when ndim is small enough that no nuisance was dropped).
+    if len(config.BASEMENT.fitkeys) > 1:
+        # trace titles — always one per full fitkey
+        for i, key in enumerate(config.BASEMENT.fitkeys):
+            value = round_tex(params_median2[key], params_ll2[key], params_ul2[key])
+            ttitle = r'' + labels[i] + r'$=' + value + '$'
+            taxes[i, 1].set_title(ttitle)
+        # corner titles — only the kept (corner_fitkeys) rows
+        for ci, key in enumerate(corner_fitkeys):
+            value = round_tex(params_median2[str(key)],
+                              params_ll2[str(key)], params_ul2[str(key)])
+            ctitle = r'' + corner_labels[ci] + '\n' + r'$=' + value + '$'
+            caxes[ci, ci].set_title(
+                ctitle, fontsize=fontsize, rotation=45, horizontalalignment='left')
+        # corner axis label / tick formatting
+        for i in range(caxes.shape[0]):
+            for j in range(caxes.shape[1]):
+                caxes[i, j].xaxis.set_label_coords(0.5, -0.5)
+                caxes[i, j].yaxis.set_label_coords(-0.5, 0.5)
+                if i == (caxes.shape[0] - 1):
+                    fmt = ScalarFormatter(useOffset=False)
+                    caxes[i, j].xaxis.set_major_locator(MaxNLocator(nbins=3))
+                    caxes[i, j].xaxis.set_major_formatter(fmt)
+                if (i > 0) and (j == 0):
+                    fmt = ScalarFormatter(useOffset=False)
+                    caxes[i, j].yaxis.set_major_locator(MaxNLocator(nbins=3))
+                    caxes[i, j].yaxis.set_major_formatter(fmt)
+    else:
+        # single-parameter fits: full == filtered, trace + corner both 1-D
+        key = config.BASEMENT.fitkeys[0]
         value = round_tex(params_median2[key], params_ll2[key], params_ul2[key])
-        ctitle = r'' + labels[i] + '\n' + r'$=' + value + '$'
-        ttitle = r'' + labels[i] + r'$=' + value + '$'
-        if len(config.BASEMENT.fitkeys)>1:
-            # caxes[i,i].set_title(ctitle)
-            caxes[i,i].set_title(ctitle, fontsize=fontsize, rotation=45, horizontalalignment='left')
-            taxes[i,1].set_title(ttitle)
-            for i in range(caxes.shape[0]):
-                for j in range(caxes.shape[1]):
-                    caxes[i,j].xaxis.set_label_coords(0.5, -0.5)
-                    caxes[i,j].yaxis.set_label_coords(-0.5, 0.5)
-        
-                    if i==(caxes.shape[0]-1): 
-                        fmt = ScalarFormatter(useOffset=False)
-                        caxes[i,j].xaxis.set_major_locator(MaxNLocator(nbins=3))
-                        caxes[i,j].xaxis.set_major_formatter(fmt)
-                    if (i>0) and (j==0):
-                        fmt = ScalarFormatter(useOffset=False)
-                        caxes[i,j].yaxis.set_major_locator(MaxNLocator(nbins=3))
-                        caxes[i,j].yaxis.set_major_formatter(fmt)
-                        
-                    #for tick in caxes[i,j].xaxis.get_major_ticks(): tick.label.set_fontsize(24) 
-                    #for tick in caxes[i,j].yaxis.get_major_ticks(): tick.label.set_fontsize(24)    
-        else:
-            caxes[i,i].set_title(ctitle)
-            taxes[1].set_title(ttitle)
-            caxes[i,i].xaxis.set_label_coords(0.5, -0.5)
-            caxes[i,i].yaxis.set_label_coords(-0.5, 0.5)
+        ctitle = r'' + labels[0] + '\n' + r'$=' + value + '$'
+        ttitle = r'' + labels[0] + r'$=' + value + '$'
+        caxes[0, 0].set_title(ctitle)
+        taxes[1].set_title(ttitle)
+        caxes[0, 0].xaxis.set_label_coords(0.5, -0.5)
+        caxes[0, 0].yaxis.set_label_coords(-0.5, 0.5)
                
             
     #::: save and close the trace- and cornerplot

@@ -63,6 +63,7 @@ from . import config
 
 from .mcmc import mcmc_fit
 from .nested_sampling import ns_fit
+from .optimize import optimize, OptimizeResult
 
 from . import general_output
 from . import nested_sampling_output

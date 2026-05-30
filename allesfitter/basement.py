@@ -45,6 +45,51 @@ sns.set_context(rc={'lines.markeredgewidth': 1})
     
     
     
+# Per-hyperparameter prefixes for all celerite baseline kernels supported by
+# baseline_get_gp() in computer.py. Used to enumerate which params.csv rows are
+# GP hyperparameters when aliasing share-group followers to their leader.
+BASELINE_GP_HYPER_PREFIXES = (
+    'baseline_gp_matern32_lnsigma_',
+    'baseline_gp_matern32_lnrho_',
+    'baseline_gp_sho_lnS0_',
+    'baseline_gp_sho_lnQ_',
+    'baseline_gp_sho_lnomega0_',
+    'baseline_gp_real_lna_',
+    'baseline_gp_real_lnc_',
+    'baseline_gp_complex_lna_',
+    'baseline_gp_complex_lnb_',
+    'baseline_gp_complex_lnc_',
+    'baseline_gp_complex_lnd_',
+    'baseline_gp_offset_',
+)
+
+# REQUIRED hyperparameter row prefixes per supported baseline GP kernel.
+# Used by load_params() to verify the share-group leader actually has the
+# rows celerite will need before sampling starts. (baseline_gp_offset_ is
+# optional and intentionally not listed here.)
+BASELINE_GP_REQUIRED_HYPERS = {
+    'sample_GP_Matern32': (
+        'baseline_gp_matern32_lnsigma_',
+        'baseline_gp_matern32_lnrho_',
+    ),
+    'sample_GP_SHO': (
+        'baseline_gp_sho_lnS0_',
+        'baseline_gp_sho_lnQ_',
+        'baseline_gp_sho_lnomega0_',
+    ),
+    'sample_GP_real': (
+        'baseline_gp_real_lna_',
+        'baseline_gp_real_lnc_',
+    ),
+    'sample_GP_complex': (
+        'baseline_gp_complex_lna_',
+        'baseline_gp_complex_lnb_',
+        'baseline_gp_complex_lnc_',
+        'baseline_gp_complex_lnd_',
+    ),
+}
+
+
 ###############################################################################
 #::: 'Basement' class, which contains all the data, settings, etc.
 ###############################################################################
@@ -357,6 +402,7 @@ class Basement:
             'print_progress', 'quiet',
             'flux_min_raw', 'flux_max_raw',
             'flux_min_flat', 'flux_max_flat',
+            'baseline_share_flux', 'baseline_share_rv', 'baseline_share_rv2',
         }
         for key in self.settings:
             if key in ['user-given:', 'automatically set:']:
@@ -860,8 +906,146 @@ class Basement:
                 self.settings['baseline_'+key+'_'+inst+'_against'] = 'time'
             if self.settings['baseline_'+key+'_'+inst+'_against'] not in ['time','custom_series']:
                 raise ValueError("The setting 'baseline_'+key+'_'+inst+'_against' must be one of ['time', custom_series'], but was '" + self.settings['baseline_'+key+'_'+inst+'_against'] + "'.")
-                     
-                
+
+
+        #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+        #::: Baseline share groups (joint celerite GP across instruments)
+        #::: settings.csv format:
+        #:::   baseline_share_flux,muscat_g:muscat_r:muscat_i:muscat_z
+        #::: or multiple groups separated by spaces:
+        #:::   baseline_share_flux,g1lead:g1f1 g2lead:g2f1:g2f2
+        #::: All members of a group must be in inst_<key2>, must use the same
+        #::: sample_GP_* baseline type as the leader (first member), and may
+        #::: appear in at most one group. Followers inherit the leader's GP
+        #::: hyperparameters via the existing coupled_with mechanism (see
+        #::: load_params), so plotting/output paths see consistent draws.
+        #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+        _supported_share_gps = {
+            'sample_GP_Matern32',
+            'sample_GP_SHO',
+            'sample_GP_real',
+            'sample_GP_complex',
+        }
+        for key, key2 in zip(['flux', 'rv', 'rv2'],
+                             ['inst_phot', 'inst_rv', 'inst_rv2']):
+            skey = 'baseline_share_' + key
+            raw = self.settings.get(skey, None)
+            groups = []
+            if raw is not None and str(raw).strip() not in ('', 'none', 'None'):
+                for group_str in str(raw).split():
+                    members = [m for m in group_str.split(':') if m]
+                    if len(members) >= 1:
+                        groups.append(members)
+            leader_of = {}
+            followers_of = {}
+            for members in groups:
+                # Duplicate members within a single group are a typo, not a
+                # legal aliasing — refuse before they shadow real instruments.
+                if len(set(members)) != len(members):
+                    raise ValueError(
+                        "baseline_share_{k}: group '{g}' contains duplicate "
+                        "members.".format(k=key, g=':'.join(members))
+                    )
+                # A singleton group shares nothing (joint-GP path collapses to
+                # the legacy per-inst path). Almost always a user typo where
+                # the colon-separated follower list got dropped — warn so they
+                # notice instead of silently getting independent-GP behaviour.
+                if len(members) == 1:
+                    warnings.warn(
+                        "baseline_share_{k}: group '{g}' has only one member "
+                        "and shares nothing. Did you forget the colon-"
+                        "separated follower list?".format(
+                            k=key, g=members[0])
+                    )
+
+                leader = members[0]
+                followers = members[1:]
+
+                # The leader of group A cannot also appear (as leader OR
+                # follower) in group B — that would make the alias graph
+                # ambiguous. The follower-check below covers leader-as-
+                # follower; this check covers leader-as-duplicate-leader.
+                if leader in leader_of:
+                    raise ValueError(
+                        "baseline_share_{k}: '{l}' appears as a leader in "
+                        "more than one group (or as a follower in an earlier "
+                        "group).".format(k=key, l=leader)
+                    )
+
+                if leader not in self.settings[key2]:
+                    raise ValueError(
+                        "baseline_share_{k}: leader '{l}' is not in {k2}. "
+                        "Every member of a share group must be listed in {k2}.".format(
+                            k=key, l=leader, k2=key2,
+                        )
+                    )
+                leader_base = self.settings.get('baseline_'+key+'_'+leader, 'none')
+                if leader_base not in _supported_share_gps:
+                    raise ValueError(
+                        "baseline_share_{k}: leader '{l}' has baseline "
+                        "'{b}' which is not a supported GP kernel for sharing "
+                        "(must be one of {gps}).".format(
+                            k=key, l=leader, b=leader_base,
+                            gps=sorted(_supported_share_gps),
+                        )
+                    )
+                if self.settings.get(
+                        'baseline_'+key+'_'+leader+'_against', 'time') != 'time':
+                    raise ValueError(
+                        "baseline_share_{k}: leader '{l}' must use "
+                        "baseline_{k}_{l}_against=time for a joint GP to be "
+                        "well-defined across instruments.".format(k=key, l=leader)
+                    )
+                for f in followers:
+                    if f not in self.settings[key2]:
+                        raise ValueError(
+                            "baseline_share_{k}: follower '{f}' is not in "
+                            "{k2}.".format(k=key, f=f, k2=key2)
+                        )
+                    if f in leader_of:
+                        raise ValueError(
+                            "baseline_share_{k}: '{f}' appears in more than "
+                            "one share group.".format(k=key, f=f)
+                        )
+                    f_base = self.settings.get('baseline_'+key+'_'+f, 'none')
+                    if f_base not in ('none', leader_base):
+                        raise ValueError(
+                            "baseline_share_{k}: follower '{f}' has "
+                            "baseline_{k}_{f}={fb} but leader '{l}' has "
+                            "{lb}. Followers must inherit the leader's GP "
+                            "type (leave blank or matching).".format(
+                                k=key, f=f, fb=f_base, l=leader, lb=leader_base,
+                            )
+                        )
+                    # If the follower's `_against` is explicitly set in the
+                    # user's settings.csv (not just the default), it must
+                    # match the leader's. Silently overriding the user would
+                    # hide a real configuration mistake.
+                    f_against_key = 'baseline_'+key+'_'+f+'_against'
+                    if f_against_key in self._settings_raw_keys:
+                        f_against = self.settings.get(f_against_key, 'time')
+                        if f_against != 'time':
+                            raise ValueError(
+                                "baseline_share_{k}: follower '{f}' has "
+                                "{ak}={av} but the share group requires "
+                                "'time'. Remove the explicit setting.".format(
+                                    k=key, f=f, ak=f_against_key, av=f_against,
+                                )
+                            )
+                    # propagate leader's baseline settings to follower
+                    self.settings['baseline_'+key+'_'+f] = leader_base
+                    self.settings['baseline_'+key+'_'+f+'_against'] = 'time'
+                    args_key = 'baseline_'+key+'_'+leader+'_args'
+                    if args_key in self.settings:
+                        self.settings['baseline_'+key+'_'+f+'_args'] = self.settings[args_key]
+                    leader_of[f] = leader
+                    followers_of.setdefault(leader, []).append(f)
+                leader_of.setdefault(leader, leader)
+            self.settings[skey + '_groups'] = groups
+            self.settings[skey + '_leader_of'] = leader_of
+            self.settings[skey + '_followers_of'] = followers_of
+
+
         #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
         #::: Errors
         #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
@@ -1498,8 +1682,91 @@ class Basement:
             if isinstance(self.coupled_with[i], str) and (len(self.coupled_with[i])>0):
                 self.params[key] = self.params[self.coupled_with[i]]           #luser proof: automatically set the values of the params coupled to another param
                 buf['fit'][i] = 0                                              #luser proof: automatically set fit=0 for the params coupled to another param
-        
-        
+
+
+        #==========================================================================
+        #::: baseline share groups: alias follower GP hyperparameters to leader
+        #::: Each follower GP hyperparameter (baseline_gp_*_{key}_{follower})
+        #::: gets the leader's value here so self.params is self-consistent at
+        #::: load time. Per-iteration re-aliasing happens in computer.update_params
+        #::: so that follower entries track the leader as theta changes. Together
+        #::: this means the NS fit vector contains only the leader's hypers,
+        #::: while computer.py's joint-GP code path assembles all group members'
+        #::: residuals into a single celerite GP under the leader's name.
+        #==========================================================================
+        _allkeys_set = set(self.allkeys)
+        for k_share in ('flux', 'rv', 'rv2'):
+            followers_of = self.settings.get(
+                'baseline_share_'+k_share+'_followers_of', {})
+            if not followers_of:
+                continue
+            for leader, followers in followers_of.items():
+                # Cross-file sanity: settings.csv says the leader uses a
+                # specific GP kernel — every required hyperparameter row for
+                # that kernel must exist in params.csv. Without this check,
+                # the user would only see a KeyError deep inside
+                # baseline_get_gp at the first likelihood call.
+                leader_base = self.settings.get(
+                    'baseline_'+k_share+'_'+leader, 'none')
+                required_prefixes = BASELINE_GP_REQUIRED_HYPERS.get(
+                    leader_base, ())
+                missing = []
+                for rp in required_prefixes:
+                    if rp + k_share + '_' + leader not in self.params:
+                        missing.append(rp + k_share + '_' + leader)
+                if missing:
+                    raise ValueError(
+                        "baseline_share_{k}: leader '{l}' declares "
+                        "baseline_{k}_{l}={b} but params.csv is missing "
+                        "the required row(s) {m}. Every share-group leader "
+                        "must own all GP hyperparameter rows for its "
+                        "declared kernel.".format(
+                            k=k_share, l=leader, b=leader_base, m=missing,
+                        )
+                    )
+
+                for prefix in BASELINE_GP_HYPER_PREFIXES:
+                    leader_key = prefix + k_share + '_' + leader
+                    if leader_key not in self.params:
+                        continue
+                    for f in followers:
+                        follower_key = prefix + k_share + '_' + f
+                        if follower_key in _allkeys_set:
+                            idx = list(self.allkeys).index(follower_key)
+                            coupled = self.coupled_with[idx]
+                            is_coupled = (
+                                isinstance(coupled, str) and len(coupled) > 0
+                            )
+                            if is_coupled and coupled != leader_key:
+                                # Coupled to something other than the leader's
+                                # corresponding row — fundamentally
+                                # inconsistent with the share-group alias.
+                                raise ValueError(
+                                    "baseline_share_{k}: '{fk}' is "
+                                    "coupled_with='{cw}' but instrument "
+                                    "'{f}' is in a share group led by '{l}', "
+                                    "which expects coupled_with='{lk}'. "
+                                    "Remove the explicit coupling or point "
+                                    "it at the leader's key.".format(
+                                        k=k_share, fk=follower_key, cw=coupled,
+                                        f=f, l=leader, lk=leader_key,
+                                    )
+                                )
+                            if int(np.atleast_1d(buf['fit'])[idx]) == 1 and not is_coupled:
+                                raise ValueError(
+                                    "baseline_share_{k}: '{fk}' has fit=1 in "
+                                    "params.csv but instrument '{f}' is in a "
+                                    "share group led by '{l}'. Either remove "
+                                    "the follower row, set fit=0, or use "
+                                    "coupled_with={lk}.".format(
+                                        k=k_share, fk=follower_key, f=f,
+                                        l=leader, lk=leader_key,
+                                    )
+                                )
+                            buf['fit'][idx] = 0
+                        self.params[follower_key] = self.params[leader_key]
+
+
         #==========================================================================
         #::: mark to be fitted params
         #==========================================================================

@@ -9,6 +9,9 @@ An extension of the original allesfitter package that streamlines the process of
 - **Parameter derivation** from multiple astronomical databases (NExSci, TOI, CTOI, TIC)
 - **Flexible time-window selection** — TESS sectors, K2 campaigns (including split campaigns 11a/11b), and Kepler quarters (single, multiple, or all)
 - **Chromatic transit modeling** — fit a separate `Rp/Rs` per bandpass while keeping orbital parameters globally shared
+- **Shared baseline GP across instruments** — declare `baseline_share_flux,muscat_g:muscat_r:muscat_i:muscat_z` in `settings.csv` to fit a *single* celerite GP realization jointly across all members of a share group (ideal for simultaneous multi-band photometry like MuSCAT, where airmass/seeing systematics are common-mode). Backward compatible: omit the key for legacy per-instrument GPs.
+- **Warm-start sampler with `allesfitter.optimize()`** — global optimization (CMA-ES default, plus `dual_annealing` / `differential_evolution` / `L-BFGS-B` / `Powell`) finds a MAP point that is then pushed into `BASEMENT.theta_0`, so the next `mcmc_fit` / `ns_fit` starts from a well-converged ball. Safe acceptance gates (improvement, prior-bound, multistart consistency) prevent the optimizer from poisoning the sampler start when it doesn't actually improve. CMA-ES supports warm-resume across calls via a pickled strategy state.
+- **OOM-safe post-processing** — `ns_output` and `mcmc_output` cap figure sizes, subsample posterior draws for the corner plot, and wrap every save site in a `MemoryError`-tolerant try/except. When the fit has more than 25 free parameters, the corner plot automatically hides nuisance rows (`baseline_*`, `ln_err_*`, `ln_jitter_*`, `stellar_var_gp_*`) so the science-relevant parameters stay readable; above 60 dims the corner is skipped entirely with a placeholder. The full posterior still goes into `*_table.csv`, the LaTeX table, and `derive`.
 - **Per-bandpass Rp/Rs posterior plot** — `ns_output()` automatically emits `ns_chromatic_rr_<companion>.pdf` overlaying per-bandpass posteriors with a canonical color map (`tess=k`, `g=C0`, `r=C2`, `i=C8`, `z=C3`; viridis fallback for unknown labels)
 - **Strict configuration validation** — clear errors for bandpass/instrument count mismatch, duplicate params, unknown bandpass suffixes, chromatic/achromatic shape inconsistencies, or per-instrument settings keys with orphan suffixes (catches `host_ld_law_<bandpass>` typos)
 - **Sensible LD default** — `host_ld_law_<inst>` now defaults to `quad` (was `None`, which silently disabled limb darkening); explicit `host_ld_law_<inst>,none` still opts out
@@ -212,6 +215,128 @@ This stays `chromatic=False` (single unique band) but ties both instruments to o
 If `-bp` is **omitted** with multiple distinct `-f` instruments, the script warns and falls back to an achromatic `params.csv` for backward compatibility.
 
 After `ns_fit` + `ns_output`, the per-bandpass `Rp/Rs` posteriors are overlaid in `ns_chromatic_rr_<companion>.pdf` — useful for spotting wavelength-dependent depth differences (atmospheric features, spot contamination, dilution mismatch) at a glance. When `params_star.csv` is present, a second panel below the histograms shows the implied planet radius posterior with twin x-axes (`R⊕` bottom, `R_Jup` top) — R★ uncertainty is propagated from the asymmetric normal in `params_star.csv`.
+
+### Sharing a baseline GP across instruments (joint celerite realization)
+
+For simultaneous multi-band photometry (MuSCAT g/r/i/z, MuSCAT2/3/4, LCO MuSCAT clones, …) the dominant noise — airmass, seeing, atmospheric transparency — is *common-mode* across bands. The natural model is **one** celerite GP whose realization modulates every band at the shared timestamps, not N independent GPs.
+
+`coupled_with` in `params.csv` can only alias scalar parameters; it cannot tie together a stochastic GP realization. The `baseline_share_<key>` setting solves that at the instrument-group level:
+
+```csv
+# settings.csv
+inst_phot,muscat_g muscat_r muscat_i muscat_z
+baseline_flux_muscat_g,sample_GP_Matern32
+baseline_share_flux,muscat_g:muscat_r:muscat_i:muscat_z
+```
+
+- Space-separated **groups**, colon-separated **members**. The first member is the **leader** and owns the sampled GP hyperparameters.
+- Followers inherit the leader's `baseline_<key>_<inst>` type and `_against` setting automatically — leave their entries blank.
+- Only the leader needs the GP hyperparameter rows in `params.csv`:
+
+  ```csv
+  baseline_gp_matern32_lnsigma_flux_muscat_g,-5,1,uniform -10 -3,...,,
+  baseline_gp_matern32_lnrho_flux_muscat_g, 0,1,uniform  -1  3,...,,
+  ```
+
+  Follower rows for `muscat_r/i/z` are not required (and if present with `fit=1` and no `coupled_with`, the loader refuses to start).
+- At likelihood time, residuals from all group members are concatenated, sorted, and fed to a **single** celerite GP under the leader's name (`calculate_lnlike_total` Case 2b in `computer.py`). Predictive plotting (`baseline_sample_GP`) returns per-band slices of the same joint draw.
+- Deterministic baseline components (`sample_offset`, `sample_linear`, `hybrid_*`) remain per-band — only the GP is shared.
+
+Multiple groups in one file are supported:
+
+```csv
+baseline_share_flux,m1_g:m1_r:m1_i:m1_z m2_g:m2_r:m2_i:m2_z
+```
+
+Symmetric keys `baseline_share_rv` / `baseline_share_rv2` exist for RV parity. Backward compatibility: omitting `baseline_share_<key>` produces identical per-instrument-GP behaviour to earlier releases (regression-tested in `tests/test_share_baseline.py::test_single_member_group_matches_legacy_lnlike`).
+
+The loader enforces the following consistency checks at startup so cross-file mistakes surface immediately, not deep inside the first likelihood evaluation:
+
+| Trigger | Outcome |
+|---|---|
+| Leader or follower not listed in `inst_<key2>` | `ValueError` |
+| Inst appears in more than one share group, or as both leader and follower | `ValueError` |
+| Duplicate members within a single group (e.g. `a:a:b`) | `ValueError` |
+| Leader's `baseline_<key>_<leader>` is not one of `sample_GP_Matern32 / _SHO / _real / _complex` | `ValueError` |
+| Follower's `baseline_<key>_<follower>` is set and differs from the leader's kernel | `ValueError` |
+| Leader's `baseline_<key>_<leader>_against` is not `time` | `ValueError` |
+| Follower explicitly sets `baseline_<key>_<follower>_against` to something other than `time` | `ValueError` |
+| `params.csv` is missing a required hyperparameter row for the leader's declared kernel (e.g. `baseline_gp_matern32_lnsigma_flux_<leader>`) | `ValueError` |
+| Follower has its own `fit=1` GP hyper row without a `coupled_with` | `ValueError` |
+| Follower has `coupled_with=X` where `X` is not the corresponding leader row | `ValueError` |
+| Singleton share group (single member, nothing shared) | `UserWarning` |
+
+### Warm-starting MCMC / NS with `allesfitter.optimize()`
+
+The user's `params.csv` initial values + a stochastic emcee pre-run only get you so far. For 20+ dimensional fits with GP baselines (often multi-modal in `lnsigma`/`lnrho`) it is usually worth running a proper global optimizer **before** `mcmc_fit` / `ns_fit` to land the walker ball in a high-probability basin.
+
+```python
+import allesfitter
+
+allesfitter.show_initial_guess('.')
+res = allesfitter.optimize('.', method='cmaes', polish=True, n_restarts=4)
+if res.accepted:
+    print(f"optimize OK: lnprob {res.lnprob_initial:+.1f} -> {res.lnprob_opt:+.1f} "
+          f"(Δ={res.delta_lnprob:+.1f}) in {res.nfev} evals, {res.wallclock_s:.1f}s")
+else:
+    print(f"optimize rejected ({res.reject_reason}); using original theta_0")
+allesfitter.mcmc_fit('.')      # warm-started iff res.accepted
+allesfitter.mcmc_output('.')
+```
+
+The optimum is pushed into `config.BASEMENT.theta_0` (so subsequent samplers pick it up automatically) only when **all** acceptance gates pass — otherwise `theta_0` is left untouched and the next sampler call sees the original initial values. This makes `optimize()` safe to call unconditionally in `run.py`.
+
+#### Methods
+
+| `method=` | When to prefer | Notes |
+|---|---|---|
+| `'cmaes'` *(default)* | Almost everything in 10–50 dims | Requires `pip install cma`. Derivative-free, self-tuning step size, handles multimodal GP marginal likelihoods. Best general choice. |
+| `'dual_annealing'` | scipy-only environments | Single chain; slower than CMA-ES wall-clock but no extra dep. |
+| `'differential_evolution'` | Highly multimodal or `ndim > 40` | Population-based, parallel via `workers=N`. Needs more tuning. |
+| `'L-BFGS-B'` | Already near the MAP / want a fast local polish | Finite-diff gradient; gets stuck on local maxima. |
+| `'Powell'` | Derivative-free local | Drop-in for L-BFGS-B when finite-diff is too noisy. |
+
+`polish=True` (default) appends a short L-BFGS-B refine to any global method.
+
+#### Acceptance gates
+
+The result is pushed into `BASEMENT.theta_0` only when **all** of these pass:
+
+1. **Improvement**: `lnprob_opt − lnprob_initial ≥ improvement_threshold` (default `0.5·ndim`, a loose AIC-style margin).
+2. **Bounds**: no component of `theta_opt` sits within 0.01 % of a prior edge. Override with `skip_bounds_check=True` when a parameter is genuinely meant to live near its physical limit.
+3. **Multistart consistency** (only when `n_restarts > 1`): spread of restart lnprobs is `< consistency_threshold` (default `1.0`). Larger spreads indicate genuine multimodality the user should investigate.
+
+On reject, `OptimizeResult.reject_reason` records which gate fired; `BASEMENT.theta_0` is **not** mutated; the next `mcmc_fit` runs unchanged. The full result (theta, lnprobs, restart spread, nfev, wallclock, reject reason) is also persisted to `<datadir>/results/optimize_save.json`.
+
+#### CMA-ES warm-resume across calls
+
+Every CMA-ES call pickles the final strategy (adapted covariance `C`, step size σ, generation counter, internal state) to `<datadir>/results/optimize_cma_state.pkl`. A subsequent call with `resume=True` reloads that state and **continues** evolution from where it left off — preserving the adapted covariance instead of restarting with the full prior-scale isotropic σ₀.
+
+```python
+# Day 1: 5-min budget, see how it converges
+allesfitter.optimize('.', method='cmaes', maxfevals=500)
+# Day 2: extend the same search for another 5 min
+allesfitter.optimize('.', method='cmaes', maxfevals=500, resume=True)
+```
+
+`resume=True` requires `n_restarts=1` (a single trajectory cannot be split into multiple restarts) and `method='cmaes'`. If the pickled state is missing the call falls back to a fresh start with a warning; if it's incompatible (different `ndim`/`bounds` after a `params.csv` edit) the call raises `ValueError` so you delete the stale pickle deliberately. `OptimizeResult.resumed_from_pickle` reports whether the resume actually happened.
+
+### OOM-safe diagnostic plots for high-dim fits
+
+Chromatic multi-band fits with per-instrument baseline GPs routinely produce 25–60 free parameters. The default `ns_output` / `mcmc_output` diagnostic plots scale **poorly** at that dimensionality: a 60×60 corner is ~3 600 subplots, the matplotlib canvas at the implicit `figsize=(2·ndim, 2·ndim)` runs to hundreds of megapixels at 100 dpi, and the OOM killer terminates the post-processing run before any tables are written.
+
+Both `ns_output` and `mcmc_output` now apply three coordinated protections:
+
+1. **Hard figure-size caps** — the chains-vs-step figure and corner figure are clamped to `_MAX_CHAINS_INCHES` and `_MAX_CORNER_INCHES`, with chain-step subsampling above `_MAX_CHAIN_PLOT_STEPS` and posterior subsampling above `_MAX_CORNER_SAMPLES`.
+2. **Nuisance filter for the corner plot** — when `ndim > 25`, the corner drops every row whose fitkey starts with `baseline_`, `ln_err_flux_`, `ln_jitter_rv_`, or `stellar_var_gp_`. These are GP hypers, per-band white-noise floors, and other nuisance parameters that almost never repay the visual cost of being in a giant pairs plot. The dropped names are logged so the user knows what's hidden:
+   ```
+   ! corner: hiding 12 nuisance params for readability (ndim 28 > 25).
+     Example: baseline_gp_matern32_lnsigma_flux_m4g, baseline_gp_matern32_lnrho_flux_m4g, ln_err_flux_m4g, ...
+   ```
+   The full posterior, including every nuisance parameter, still goes into `mcmc_table.csv` / `ns_table.csv`, the LaTeX summary table, and `deriver.derive`.
+3. **`MemoryError`-tolerant save sites** — if any single plot still OOMs (extreme cases: hundreds of dims, very long chains, tiny memory budget), the failure is caught, logged as `! plot_* failed (...)`, and **the rest of the pipeline continues** — tables, derived parameters, residual statistics, and per-companion fit PDFs all still get written. The user keeps the numerical outputs even when one diagnostic figure can't be rendered.
+
+Thresholds live as module-level constants in `allesfitter/nested_sampling_output.py` and `allesfitter/mcmc_output.py` (`_HARD_NDIM_CAP`, `_CORNER_HIDE_NUISANCE_NDIM_THRESHOLD`, `_MAX_CORNER_SAMPLES`, etc.) — edit those if your hardware or use case wants different cut-offs. The hard skip kicks in above `ndim > 60`, where corner.corner becomes effectively unusable regardless of memory.
 
 ### Fitting dilution (`dil_<inst>`) in a chromatic model
 

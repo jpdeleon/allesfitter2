@@ -37,6 +37,11 @@ from . import config
 from . import deriver
 from .computer import calculate_model, calculate_baseline, calculate_stellar_var
 from .general_output import afplot, afplot_per_transit, save_table, save_latex_table, logprint, get_params_from_samples, plot_ttv_results
+from .nested_sampling_output import (
+    plot_chromatic_rr_histogram,
+    _filter_nuisance_for_corner,
+    _CORNER_HIDE_NUISANCE_NDIM_THRESHOLD,
+)
 from .plot_top_down_view import plot_top_down_view
 from .utils.latex_printer import round_tex
 from .statistics import residual_stats
@@ -91,15 +96,38 @@ def draw_mcmc_posterior_samples_at_maximum_likelihood(sampler, as_type='1d_array
 
 
 ###############################################################################
+#::: memory caps for MCMC diagnostic plots
+#::: For very-high-dim fits (chromatic + many baseline GPs + per-band LDCs
+#::: + per-inst err) the default matplotlib canvas balloons past the OOM
+#::: killer's ceiling. These caps mirror the ones in
+#::: nested_sampling_output.py and keep the figures both legible AND
+#::: small enough to render on a workstation.
+###############################################################################
+_MAX_CHAINS_INCHES = 240.0       # cap plot_MCMC_chains total height
+_MAX_CORNER_INCHES = 40.0        # cap corner figsize per side
+_MAX_CHAIN_PLOT_STEPS = 5000     # subsample raw chain per panel
+_MAX_CORNER_SAMPLES = 10000      # subsample posterior for corner
+_HARD_NDIM_CAP = 60              # above this, skip the corner plot entirely
+
+
+###############################################################################
 #::: plot the MCMC chains
 ###############################################################################
 def plot_MCMC_chains(sampler):
-    
+
     chain = sampler.get_chain()
     log_prob = sampler.get_log_prob()
-    
+
     #plot chains; emcee_3.0.0 format = (nsteps, nwalkers, nparameters)
-    fig, axes = plt.subplots(config.BASEMENT.ndim+1, 1, figsize=(6,3*config.BASEMENT.ndim) )
+    fig_height = min(3 * config.BASEMENT.ndim, _MAX_CHAINS_INCHES)
+    fig, axes = plt.subplots(config.BASEMENT.ndim+1, 1, figsize=(6, fig_height))
+
+    # Subsample step axis when too long; rendering thousands of polyline
+    # segments per panel × hundreds of walkers explodes matplotlib's mem.
+    if chain.shape[0] > _MAX_CHAIN_PLOT_STEPS:
+        stride = max(1, chain.shape[0] // _MAX_CHAIN_PLOT_STEPS)
+        chain = chain[::stride]
+        log_prob = log_prob[::stride]
     
     #::: plot the lnprob_values; emcee_3.0.0 format = (nsteps, nwalkers)
     axes[0].plot(log_prob, '-', rasterized=True)
@@ -141,8 +169,31 @@ def plot_MCMC_chains(sampler):
 #    return fig
 
 def plot_MCMC_corner(sampler):
+    # Hard skip for very-high-dim fits: a 60×60 corner is 240k tiny
+    # subplots, almost guaranteed OOM. Return a tiny placeholder fig so
+    # mcmc_output() can still save *something* and continue.
+    if config.BASEMENT.ndim > _HARD_NDIM_CAP:
+        logprint(
+            '! ndim={} exceeds _HARD_NDIM_CAP={}; skipping corner plot to '
+            'avoid OOM. Use the per-parameter chains for diagnostics.'.format(
+                config.BASEMENT.ndim, _HARD_NDIM_CAP))
+        fig, ax = plt.subplots(1, 1, figsize=(4, 4))
+        ax.text(0.5, 0.5, 'corner skipped\n(ndim={} > {})'.format(
+            config.BASEMENT.ndim, _HARD_NDIM_CAP),
+            ha='center', va='center')
+        ax.set_axis_off()
+        return fig
+
     samples = sampler.get_chain(flat=True, discard=int(1.*config.BASEMENT.settings['mcmc_burn_steps']/config.BASEMENT.settings['mcmc_thin_by']))
-    
+
+    # Subsample posterior down to _MAX_CORNER_SAMPLES: corner.corner runs
+    # O(N) per pair and per histogram, so 100k+ samples on a 22-dim fit
+    # is already several GB of intermediate state.
+    if len(samples) > _MAX_CORNER_SAMPLES:
+        rng = np.random.default_rng(0)
+        idx = rng.choice(len(samples), size=_MAX_CORNER_SAMPLES, replace=False)
+        samples = samples[idx]
+
     params_median, params_ll, params_ul = get_params_from_samples(samples)
     params_median2, params_ll2, params_ul2 = params_median.copy(), params_ll.copy(), params_ul.copy()
     fittruths2 = config.BASEMENT.fittruths.copy()
@@ -166,46 +217,63 @@ def plot_MCMC_corner(sampler):
             labels[i] = str(labels[i]+' ('+units[i]+')')
         
     #::: corner plot
-    fontsize = np.min(( 24. + 0.5*config.BASEMENT.ndim, 40 ))
-    fig = corner(samples, 
-                 labels = labels,
-                 range = [0.999]*config.BASEMENT.ndim,
+    # When ndim is large, hide nuisance baseline / error / stellar-var-GP
+    # rows from the corner only — the full posterior is still saved in
+    # the tables and used everywhere else.
+    (corner_fitkeys, corner_samples, corner_labels,
+     corner_truths, _dropped) = _filter_nuisance_for_corner(
+        config.BASEMENT.fitkeys, samples, labels, fittruths2,
+    )
+    if _dropped:
+        logprint(
+            '! mcmc corner: hiding {n} nuisance params for readability '
+            '(ndim {full} > {th}). Example: {ex}{more}'.format(
+                n=len(_dropped), full=config.BASEMENT.ndim,
+                th=_CORNER_HIDE_NUISANCE_NDIM_THRESHOLD,
+                ex=', '.join(_dropped[:3]),
+                more=', ...' if len(_dropped) > 3 else ''))
+    n_corner = len(corner_fitkeys)
+    fontsize = np.min((24. + 0.5 * n_corner, 40))
+    fig = corner(corner_samples,
+                 labels=corner_labels,
+                 range=[0.999] * n_corner,
                  quantiles=[0.15865, 0.5, 0.84135],
-                 show_titles=False, 
-                 #title_kwargs={"fontsize": 14},
-                 label_kwargs={"fontsize":fontsize, "rotation":45, "horizontalalignment":'right'},
+                 show_titles=False,
+                 label_kwargs={"fontsize": fontsize, "rotation": 45, "horizontalalignment": 'right'},
                  max_n_ticks=3,
-                 truths=fittruths2, truth_color="r")
-    caxes = np.reshape(np.array(fig.axes), (config.BASEMENT.ndim,config.BASEMENT.ndim))
+                 truths=corner_truths, truth_color="r")
+    caxes = np.reshape(np.array(fig.axes), (n_corner, n_corner))
 
-    #::: set allesfitter titles
-    for i, key in enumerate(config.BASEMENT.fitkeys): 
-        
+    #::: set allesfitter titles (iterate over the *filtered* fitkeys)
+    if n_corner > 1:
+        for i, key in enumerate(corner_fitkeys):
+            value = round_tex(params_median2[str(key)],
+                              params_ll2[str(key)], params_ul2[str(key)])
+            ctitle = r'' + corner_labels[i] + '\n' + r'$=' + value + '$'
+            caxes[i, i].set_title(ctitle, fontsize=fontsize, rotation=45,
+                                  horizontalalignment='left')
+        for i in range(caxes.shape[0]):
+            for j in range(caxes.shape[1]):
+                caxes[i, j].xaxis.set_label_coords(0.5, -0.5)
+                caxes[i, j].yaxis.set_label_coords(-0.5, 0.5)
+                if i == (caxes.shape[0] - 1):
+                    fmt = ScalarFormatter(useOffset=False)
+                    caxes[i, j].xaxis.set_major_formatter(fmt)
+                if (i > 0) and (j == 0):
+                    fmt = ScalarFormatter(useOffset=False)
+                    caxes[i, j].yaxis.set_major_formatter(fmt)
+                for tick in caxes[i, j].xaxis.get_major_ticks():
+                    tick.label.set_fontsize(24)
+                for tick in caxes[i, j].yaxis.get_major_ticks():
+                    tick.label.set_fontsize(24)
+    else:
+        key = str(corner_fitkeys[0])
         value = round_tex(params_median2[key], params_ll2[key], params_ul2[key])
-        ctitle = r'' + labels[i] + '\n' + r'$=' + value + '$'
-        if len(config.BASEMENT.fitkeys)>1:
-            # caxes[i,i].set_title(ctitle)
-            caxes[i,i].set_title(ctitle, fontsize=fontsize, rotation=45, horizontalalignment='left')
-            for i in range(caxes.shape[0]):
-                for j in range(caxes.shape[1]):
-                    caxes[i,j].xaxis.set_label_coords(0.5, -0.5)
-                    caxes[i,j].yaxis.set_label_coords(-0.5, 0.5)
-        
-                    if i==(caxes.shape[0]-1): 
-                        fmt = ScalarFormatter(useOffset=False)
-                        caxes[i,j].xaxis.set_major_formatter(fmt)
-                    if (i>0) and (j==0):
-                        fmt = ScalarFormatter(useOffset=False)
-                        caxes[i,j].yaxis.set_major_formatter(fmt)
-                        
-                    for tick in caxes[i,j].xaxis.get_major_ticks(): tick.label.set_fontsize(24) 
-                    for tick in caxes[i,j].yaxis.get_major_ticks(): tick.label.set_fontsize(24)    
-        else:
-            caxes[i,i].set_title(ctitle)
-            caxes[i,i].xaxis.set_label_coords(0.5, -0.5)
-            caxes[i,i].yaxis.set_label_coords(-0.5, 0.5)
-            
-            
+        ctitle = r'' + corner_labels[0] + '\n' + r'$=' + value + '$'
+        caxes[0, 0].set_title(ctitle)
+        caxes[0, 0].xaxis.set_label_coords(0.5, -0.5)
+        caxes[0, 0].yaxis.set_label_coords(-0.5, 0.5)
+
     return fig
 
 
@@ -314,10 +382,17 @@ def mcmc_output(datadir, quiet=False):
     posterior_samples = draw_mcmc_posterior_samples(reader, Nsamples=20) #only 20 samples for plotting
     
     for companion in config.BASEMENT.settings['companions_all']:
-        fig, axes = afplot(posterior_samples, companion)
-        if fig is not None:
-            fig.savefig( os.path.join(config.BASEMENT.outdir,'mcmc_fit_'+companion+'.pdf'), bbox_inches='tight' )
-            plt.close(fig)
+        try:
+            fig, axes = afplot(posterior_samples, companion)
+            if fig is not None:
+                fig.savefig(os.path.join(config.BASEMENT.outdir,
+                                         'mcmc_fit_'+companion+'.pdf'),
+                            bbox_inches='tight')
+                plt.close(fig)
+        except (MemoryError, Exception) as _exc:
+            logprint('! afplot({}) failed ({}); skipping companion fit plot.'.format(
+                companion, _exc))
+            plt.close('all')
             
     for companion in config.BASEMENT.settings['companions_phot']:
         for inst in config.BASEMENT.settings['inst_phot']:
@@ -335,25 +410,46 @@ def mcmc_output(datadir, quiet=False):
                     first_transit = -1
                     pass
     
-    #::: plot the chains
-    fig, axes = plot_MCMC_chains(reader)
-    try: #some matplotlib versions cannot handle jpg
-        fig.savefig( os.path.join(config.BASEMENT.outdir,'mcmc_chains.jpg'), bbox_inches='tight' )
-    except:
-        fig.savefig( os.path.join(config.BASEMENT.outdir,'mcmc_chains.png'), bbox_inches='tight' )
-    plt.close(fig)
+    #::: plot the chains (wrapped: OOM or matplotlib error must not kill
+    #::: the rest of mcmc_output — tables, residual stats, derived params)
+    try:
+        fig, axes = plot_MCMC_chains(reader)
+        try:  # some matplotlib versions cannot handle jpg
+            fig.savefig(os.path.join(config.BASEMENT.outdir, 'mcmc_chains.jpg'),
+                        bbox_inches='tight')
+        except Exception:
+            fig.savefig(os.path.join(config.BASEMENT.outdir, 'mcmc_chains.png'),
+                        bbox_inches='tight')
+        plt.close(fig)
+    except (MemoryError, Exception) as _exc:
+        logprint('! plot_MCMC_chains failed ({}); skipping chains plot.'.format(_exc))
+        plt.close('all')
 
 
-    #::: plot the corner
-    fig = plot_MCMC_corner(reader)
-    fig.savefig( os.path.join(config.BASEMENT.outdir,'mcmc_corner.pdf'), bbox_inches='tight' )
-    plt.close(fig)
+    #::: plot the corner (same wrapper: a bad corner must not abort
+    #::: tables/derived/residual-stats below)
+    try:
+        fig = plot_MCMC_corner(reader)
+        fig.savefig(os.path.join(config.BASEMENT.outdir, 'mcmc_corner.pdf'),
+                    bbox_inches='tight')
+        plt.close(fig)
+    except (MemoryError, Exception) as _exc:
+        logprint('! plot_MCMC_corner failed ({}); skipping corner plot.'.format(_exc))
+        plt.close('all')
 
 
     #::: save the tables
     posterior_samples = draw_mcmc_posterior_samples(reader) #all samples
     save_table(posterior_samples, 'mcmc')
     save_latex_table(posterior_samples, 'mcmc')
+
+    #::: per-bandpass Rp/Rs posterior overlay (chromatic mode only — the
+    #::: helper is a no-op when settings['chromatic'] is False).
+    try:
+        plot_chromatic_rr_histogram(posterior_samples, prefix='mcmc')
+    except (MemoryError, Exception) as _exc:
+        logprint('! plot_chromatic_rr_histogram failed ({}); skipping.'.format(_exc))
+        plt.close('all')
     
     
     #::: derive values (using stellar parameters from params_star.csv)

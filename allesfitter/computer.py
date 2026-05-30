@@ -65,6 +65,7 @@ except ImportError:
 
 #allesfitter modules
 from . import config
+from .basement import BASELINE_GP_HYPER_PREFIXES
 # from .limb_darkening import LDC3
 from .flares.aflare import aflare1
 # from .exoworlds_rdx.lightcurves.lightcurve_tools import calc_phase
@@ -136,8 +137,29 @@ def update_params(theta):
     for i, key in enumerate(config.BASEMENT.allkeys):
         if isinstance(config.BASEMENT.coupled_with[i], str) and (len(config.BASEMENT.coupled_with[i])>0):
             params[key] = params[config.BASEMENT.coupled_with[i]]
-    
-    
+
+
+    #=========================================================================
+    #::: baseline share groups: alias follower GP hypers to leader
+    #::: Run AFTER coupled_with so any user-declared follower row that was
+    #::: explicitly coupled to the leader is overwritten with the same value
+    #::: (no-op), and any synthesized follower key (not in allkeys) gets the
+    #::: leader's *current* value for this theta draw.
+    #=========================================================================
+    for _k_share in ('flux', 'rv', 'rv2'):
+        _followers_of = config.BASEMENT.settings.get(
+            'baseline_share_'+_k_share+'_followers_of', {})
+        if not _followers_of:
+            continue
+        for _leader, _followers in _followers_of.items():
+            for _prefix in BASELINE_GP_HYPER_PREFIXES:
+                _lk = _prefix + _k_share + '_' + _leader
+                if _lk not in params:
+                    continue
+                for _f in _followers:
+                    params[_prefix + _k_share + '_' + _f] = params[_lk]
+
+
     #=========================================================================
     #::: inclination, per companion
     #=========================================================================
@@ -1355,27 +1377,33 @@ def calculate_lnlike_total(params):
         #--------------------------------------------------------------------------  
         elif ( config.BASEMENT.settings['stellar_var_'+key] in FCTs ) and any( [config.BASEMENT.settings['baseline_'+key+'_'+inst] in GPs for inst in config.BASEMENT.settings[key2]] ):
 #            print('CASE 2')
+            # Accumulate per-share-group (leader -> list of (x, y, yerr_w))
+            # so members of a baseline_share_<key> group contribute one
+            # joint GP log-likelihood instead of N independent ones.
+            # Instruments not in any group form singleton "groups" which
+            # collapse to today's per-inst path inside _stack_and_sort.
+            _gp_groups = {}  # dict preserves insertion order on Python 3.7+
             for inst in config.BASEMENT.settings[key2]:
-                
+
                 #::: calculate the model; if there are any NaN, return -np.inf
                 model = calculate_model(params, inst, key)
                 if any(np.isnan(model)) or any(np.isinf(model)): return -np.inf
-                
-                
+
+
                 #::: if that baseline is in FCTs
                 if ( config.BASEMENT.settings['baseline_'+key+'_'+inst] in FCTs ):
 #                    print('CASE 2a')
-                    
+
                     #::: calculate errors, baseline and stellar variability
                     yerr_w = calculate_yerr_w(params, inst, key)
                     baseline = calculate_baseline(params, inst, key, model=model, yerr_w=yerr_w)
                     stellar_var = calculate_stellar_var(params, inst, key, model=model, baseline=baseline, yerr_w=yerr_w)
-                    
+
                     #::: calculate residuals and inv_simga2
                     residuals = config.BASEMENT.data[inst][key] - model - baseline - stellar_var
                     if any(np.isnan(residuals)): raise ValueError('There are NaN in the residuals. Something horrible happened.')
                     inv_sigma2_w = 1./yerr_w**2
-                    
+
                     #::: calculate lnlike
                     lnlike_total += -0.5*(np.sum((residuals)**2 * inv_sigma2_w - np.log(inv_sigma2_w/2./np.pi))) #use np.sum to catch any nan and then set lnlike to nan
 
@@ -1383,24 +1411,31 @@ def calculate_lnlike_total(params):
                 #::: if that baseline is in GPs
                 elif ( config.BASEMENT.settings['baseline_'+key+'_'+inst] in GPs ):
 #                    print('CASE 2b')
-                
+
                     #::: calculate the errors and stellar variability (assuming baseline=0.)
                     yerr_w = calculate_yerr_w(params, inst, key)
                     stellar_var = calculate_stellar_var(params, inst, key, model=model, baseline=0., yerr_w=yerr_w)
-                
-                    #::: calculate the baseline's gp.log_likelihood (instead of evaluating the gp)
-                    x = config.BASEMENT.data[inst]['time'] #pointer!
+
+                    #::: collect this inst's residuals under its share leader
+                    #::: (leader == inst for non-shared instruments)
+                    x = config.BASEMENT.data[inst]['time']  # pointer!
                     y = config.BASEMENT.data[inst][key] - model - stellar_var
-                    gp = baseline_get_gp(params, inst, key)
-                    try:
-                        gp.compute(x, yerr=yerr_w)
-                        lnlike_total += gp.log_likelihood(y)
-                    except:
-                        return -np.inf
-                    
-                    
+                    _leader = _share_leader_of(inst, key)
+                    _gp_groups.setdefault(_leader, []).append((x, y, yerr_w))
+
+
                 else:
                     raise ValueError('Kaput.')
+
+            #::: one joint GP per share group (or per inst when no sharing)
+            for _leader, _parts in _gp_groups.items():
+                x_j, y_j, yerr_j = _stack_and_sort(_parts)
+                gp = baseline_get_gp(params, _leader, key)
+                try:
+                    gp.compute(x_j, yerr=yerr_j)
+                    lnlike_total += gp.log_likelihood(y_j)
+                except:
+                    return -np.inf
                     
                     
                 
@@ -1818,13 +1853,89 @@ def baseline_sample_linear(*args):
     
     
 #==============================================================================
+#::: baseline share group helpers
+#::: A share group is a list of instruments (members) that fit a *single*
+#::: celerite GP jointly across all their residuals (e.g. MuSCAT g/r/i/z).
+#::: The first member of each group is the leader and owns the sampled GP
+#::: hyperparameters; followers' GP-hyper rows are aliased to the leader's
+#::: in update_params() above. These helpers return (leader, [members])
+#::: with sensible defaults so non-shared instruments collapse to single-
+#::: element groups, leaving legacy behaviour bit-for-bit unchanged.
+#==============================================================================
+def _share_leader_of(inst, key):
+    return config.BASEMENT.settings.get(
+        'baseline_share_'+key+'_leader_of', {}).get(inst, inst)
+
+
+def _share_members_of(leader, key):
+    followers = config.BASEMENT.settings.get(
+        'baseline_share_'+key+'_followers_of', {}).get(leader, [])
+    return [leader] + list(followers)
+
+
+def _stack_and_sort(parts):
+    '''Concatenate per-instrument (x, y, yerr) triples and return a single
+    strictly-sorted (x_cat, y_cat, yerr_cat) suitable for celerite.
+
+    For a single-element input the original arrays are returned untouched,
+    preserving bit-for-bit legacy behaviour for non-shared instruments.
+    For multi-element inputs, exact-timestamp ties (common in simultaneous
+    multi-band photometry) are broken by nudging duplicates one ULP forward
+    via np.nextafter so the sampler still sees strictly increasing x.
+    '''
+    if len(parts) == 1:
+        return parts[0]
+    x_cat = np.concatenate([np.asarray(p[0], dtype=float) for p in parts])
+    y_cat = np.concatenate([np.asarray(p[1], dtype=float) for p in parts])
+    yerr_cat = np.concatenate([np.asarray(p[2], dtype=float) for p in parts])
+    ind = np.argsort(x_cat, kind='stable')
+    x_sorted = x_cat[ind].copy()
+    y_sorted = y_cat[ind]
+    yerr_sorted = yerr_cat[ind]
+    for i in range(1, len(x_sorted)):
+        if x_sorted[i] <= x_sorted[i-1]:
+            x_sorted[i] = np.nextafter(x_sorted[i-1], np.inf)
+    return x_sorted, y_sorted, yerr_sorted
+
+
+def _collect_joint_residuals(params, members, key):
+    '''Build per-group (x, y, yerr) triples for the GP baseline path.
+
+    For each member, y = data - model - stellar_var (the residual the
+    baseline GP is fit to), matching exactly what calculate_lnlike_total
+    Case 2b builds per inst today.
+    '''
+    parts = []
+    for m in members:
+        x_m = config.BASEMENT.data[m]['time']
+        model_m = calculate_model(params, m, key)
+        yerr_m = calculate_yerr_w(params, m, key)
+        stellar_var_m = calculate_stellar_var(
+            params, m, key, model=model_m, baseline=0., yerr_w=yerr_m)
+        y_m = config.BASEMENT.data[m][key] - model_m - stellar_var_m
+        parts.append((x_m, y_m, yerr_m))
+    return _stack_and_sort(parts)
+
+
+#==============================================================================
 #::: calculate baseline: sample_GP
-#============================================================================== 
+#==============================================================================
 def baseline_sample_GP(*args):
     x, y, yerr_w, xx, params, inst, key = args
-    gp = baseline_get_gp(params, inst, key)
-    gp.compute(x, yerr=yerr_w)
-    baseline = gp_predict_in_chunks(gp, y, xx)[0]
+    leader = _share_leader_of(inst, key)
+    members = _share_members_of(leader, key)
+    if len(members) <= 1:
+        # Legacy path: single-instrument GP, unchanged.
+        gp = baseline_get_gp(params, leader, key)
+        gp.compute(x, yerr=yerr_w)
+        baseline = gp_predict_in_chunks(gp, y, xx)[0]
+        return baseline
+    # Shared-realization path: build the joint GP under the leader's
+    # hyperparameters and predict at this inst's grid (xx).
+    x_j, y_j, yerr_j = _collect_joint_residuals(params, members, key)
+    gp = baseline_get_gp(params, leader, key)
+    gp.compute(x_j, yerr=yerr_j)
+    baseline = gp_predict_in_chunks(gp, y_j, xx)[0]
 #    baseline = gp.predict(y, xx)[0]
     
 #    baseline2 = gp.predict(y, x)[0]
