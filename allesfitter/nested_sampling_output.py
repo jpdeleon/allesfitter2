@@ -83,6 +83,18 @@ def draw_ns_posterior_samples(results, Nsamples=None, as_type='2d_array'):
 ###############################################################################
 #::: backend-agnostic plotting helpers (used when backend != 'dynesty')
 ###############################################################################
+# Memory caps for the fallback plotting helpers. For very high-dim fits
+# (chromatic + many baseline GPs + per-band err_flux + LDCs) the default
+# matplotlib canvas balloons to ~1500 megapixels at 100 dpi and the OOM
+# killer terminates the post-processing run. These caps keep the plots
+# legible *and* small enough to render on a workstation.
+_MAX_TRACE_INCHES = 60.0          # cap _simple_traceplot height
+_MAX_CORNER_INCHES = 40.0         # cap corner.corner figsize per side
+_MAX_TRACE_PLOT_SAMPLES = 5000    # subsample raw trace per panel
+_MAX_CORNER_SAMPLES = 10000       # subsample posterior for corner
+_HARD_NDIM_CAP = 60               # above this, skip the corner plot entirely
+
+
 def _simple_traceplot(results, labels, truths):
     '''Lightweight traceplot when dynesty's runplot/traceplot is unavailable.
 
@@ -90,6 +102,11 @@ def _simple_traceplot(results, labels, truths):
     title-setting code (``taxes[i,1].set_title(...)`` etc.) keeps working.
     Left column: index vs. parameter value (raw samples).
     Right column: weighted-posterior histogram.
+
+    Memory-bounded: the figure height is capped at ``_MAX_TRACE_INCHES``
+    inches regardless of ndim, and the raw-sample trace is subsampled to
+    ``_MAX_TRACE_PLOT_SAMPLES`` points per panel (the weighted histogram
+    uses all samples).
     '''
     samples = np.asarray(results['samples'])
     logwt = np.asarray(results['logwt'])
@@ -97,11 +114,21 @@ def _simple_traceplot(results, labels, truths):
     weights = np.exp(logwt - logz_final)
     weights = weights / weights.sum()
     ndim = samples.shape[1]
-    fig, axes = plt.subplots(ndim, 2, figsize=(12, 2.5 * ndim))
+    # Cap the figure height so it stays renderable for ndim >> 20.
+    height = min(2.5 * ndim, _MAX_TRACE_INCHES)
+    fig, axes = plt.subplots(ndim, 2, figsize=(12, height))
     if ndim == 1:
         axes = np.array([axes])
+    # Subsample the trace for plotting only — the histogram still uses
+    # the full posterior.
+    n = samples.shape[0]
+    if n > _MAX_TRACE_PLOT_SAMPLES:
+        step = max(1, n // _MAX_TRACE_PLOT_SAMPLES)
+        trace_idx = np.arange(0, n, step)
+    else:
+        trace_idx = slice(None)
     for i in range(ndim):
-        axes[i, 0].plot(samples[:, i], lw=0.5, color='grey', rasterized=True)
+        axes[i, 0].plot(samples[trace_idx, i], lw=0.5, color='grey', rasterized=True)
         axes[i, 0].set_ylabel(labels[i] if i < len(labels) else '')
         axes[i, 1].hist(samples[:, i], bins=60, weights=weights,
                         color='grey', histtype='stepfilled', alpha=0.6)
@@ -120,6 +147,12 @@ def _corner_from_results(results, labels, truths, fontsize, ndim):
     as :func:`draw_ns_posterior_samples`, then hands off to ``corner``.
     Returns ``(fig, axes_2d)`` where ``axes_2d`` matches dyplot.cornerplot's
     shape so existing title-setting code is unchanged.
+
+    Memory-bounded: the resampled posterior is subsampled to
+    ``_MAX_CORNER_SAMPLES`` rows and the figure size is capped at
+    ``_MAX_CORNER_INCHES`` per side. When ndim exceeds
+    ``_HARD_NDIM_CAP`` the corner plot is skipped entirely (an empty
+    grid is returned so caller code can still index ``caxes[i,i]``).
     '''
     samples = np.asarray(results['samples'])
     logwt = np.asarray(results['logwt'])
@@ -127,21 +160,35 @@ def _corner_from_results(results, labels, truths, fontsize, ndim):
     weights = np.exp(logwt - logz_final)
     weights = weights / weights.sum()
     eq = dyutils.resample_equal(samples, weights)
-    if _corner is None:
-        # graceful empty grid if corner.py is somehow missing
-        cfig, caxes = plt.subplots(ndim, ndim, figsize=(2 * ndim, 2 * ndim))
+    # Subsample the posterior — corner cost scales with Nsamples × ndim^2
+    if eq.shape[0] > _MAX_CORNER_SAMPLES:
+        rng = np.random.default_rng(42)
+        idx = rng.choice(eq.shape[0], size=_MAX_CORNER_SAMPLES, replace=False)
+        eq = eq[idx]
+    side_inches = min(2.0 * ndim, _MAX_CORNER_INCHES)
+    # Skip outright for absurdly high ndim — the plot is unreadable AND
+    # corner's matplotlib canvas at this size will OOM-kill the process.
+    if ndim > _HARD_NDIM_CAP or _corner is None:
+        cfig, caxes = plt.subplots(ndim, ndim, figsize=(side_inches, side_inches))
         return cfig, caxes
-    cfig = _corner.corner(
-        eq,
-        labels=labels,
-        truths=truths,
-        quantiles=[0.16, 0.5, 0.84],
-        show_titles=False,
-        label_kwargs={"fontsize": fontsize, "rotation": 45,
-                      "horizontalalignment": "right"},
-        hist_kwargs={"alpha": 0.25, "linewidth": 0, "histtype": "stepfilled"},
-    )
-    caxes = np.array(cfig.axes).reshape((ndim, ndim))
+    try:
+        cfig = _corner.corner(
+            eq,
+            labels=labels,
+            truths=truths,
+            quantiles=[0.16, 0.5, 0.84],
+            show_titles=False,
+            fig=plt.figure(figsize=(side_inches, side_inches)),
+            label_kwargs={"fontsize": fontsize, "rotation": 45,
+                          "horizontalalignment": "right"},
+            hist_kwargs={"alpha": 0.25, "linewidth": 0, "histtype": "stepfilled"},
+        )
+        caxes = np.array(cfig.axes).reshape((ndim, ndim))
+    except (MemoryError, ValueError, RuntimeError) as exc:
+        # Render failure (memory pressure, axis-count blow-up, etc.) —
+        # emit an empty grid rather than crashing the whole ns_output run.
+        plt.close('all')
+        cfig, caxes = plt.subplots(ndim, ndim, figsize=(side_inches, side_inches))
     return cfig, caxes
 
 
@@ -554,18 +601,41 @@ def ns_output(datadir, backend=None):
         resolved_backend == 'dynesty'
         and all(k in results2 for k in _dyplot_keys)
     )
+    def _safe_simple_trace():
+        try:
+            return _simple_traceplot(results2, labels=labels, truths=fittruths2)
+        except (MemoryError, Exception) as _exc:
+            logprint('! Fallback traceplot failed ({}); skipping.'.format(_exc))
+            plt.close('all')
+            return plt.subplots(1, 2, figsize=(6, 3))
+
+    def _safe_simple_corner():
+        try:
+            return _corner_from_results(
+                results2, labels=labels, truths=fittruths2,
+                fontsize=fontsize, ndim=config.BASEMENT.ndim,
+            )
+        except (MemoryError, Exception) as _exc:
+            logprint('! Fallback cornerplot failed ({}); skipping.'.format(_exc))
+            plt.close('all')
+            return plt.subplots(
+                config.BASEMENT.ndim, config.BASEMENT.ndim,
+                figsize=(min(2 * config.BASEMENT.ndim, 40),
+                         min(2 * config.BASEMENT.ndim, 40)),
+            )
+
     if _can_dyplot:
         try:
             tfig, taxes = dyplot.traceplot(results2, labels=labels, quantiles=[0.16, 0.5, 0.84], truths=fittruths2, post_color='grey', trace_cmap=[cmap]*config.BASEMENT.ndim, trace_kwargs={'rasterized':True})
         except (KeyError, ValueError) as _exc:
             logprint('! dyplot.traceplot failed ({}); using fallback.'.format(_exc))
-            tfig, taxes = _simple_traceplot(results2, labels=labels, truths=fittruths2)
+            tfig, taxes = _safe_simple_trace()
     else:
         if resolved_backend == 'dynesty':
             logprint('! Legacy save_ns.pickle.gz missing dynesty fields {} — '
                      'using fallback traceplot. Re-run ns_fit to restore '
                      'native dynesty trace plots.'.format(list(_dyplot_keys)))
-        tfig, taxes = _simple_traceplot(results2, labels=labels, truths=fittruths2)
+        tfig, taxes = _safe_simple_trace()
     plt.tight_layout()
 
 
@@ -578,9 +648,9 @@ def ns_output(datadir, backend=None):
                                             label_kwargs={"fontsize":fontsize, "rotation":45, "horizontalalignment":'right'})
         except Exception as _exc:
             logprint('! dyplot.cornerplot failed ({}); using corner.corner fallback.'.format(_exc))
-            cfig, caxes = _corner_from_results(results2, labels=labels, truths=fittruths2, fontsize=fontsize, ndim=config.BASEMENT.ndim)
+            cfig, caxes = _safe_simple_corner()
     else:
-        cfig, caxes = _corner_from_results(results2, labels=labels, truths=fittruths2, fontsize=fontsize, ndim=config.BASEMENT.ndim)
+        cfig, caxes = _safe_simple_corner()
         
         
     #::: runplot
