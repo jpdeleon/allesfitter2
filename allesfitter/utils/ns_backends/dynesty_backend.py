@@ -42,10 +42,15 @@ def run(
     cores = int(settings.get("multiprocess_cores", 1)) if use_mp else 1
     print_progress = bool(settings.get("print_progress", True))
 
+    # `outdir` is <datadir>/results; print its parent so log lines from
+    # multiple concurrent fits are unambiguous when grepped or tailed.
+    _datadir = os.path.abspath(os.path.dirname(outdir))
+
     t0 = timer()
     if modus == "static":
         logprint("\nRunning Static Nested Sampler (dynesty)...")
         logprint("--------------------------")
+        logprint("datadir: {}".format(_datadir))
         if use_mp:
             with closing(Pool(processes=cores)) as pool:
                 logprint("\nRunning on {} CPUs.".format(cores))
@@ -65,6 +70,7 @@ def run(
     elif modus == "dynamic":
         logprint("\nRunning Dynamic Nested Sampler (dynesty)...")
         logprint("--------------------------")
+        logprint("datadir: {}".format(_datadir))
         if use_mp:
             with closing(Pool(processes=cores)) as pool:
                 logprint("\nRunning on {} CPUs.".format(cores))

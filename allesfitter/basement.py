@@ -1792,6 +1792,9 @@ class Basement:
         
         self.logprint('\nShifting epochs into the data center')
         self.logprint('------------------------------------')
+        # Echo the datadir so logs from multiple concurrent fits are
+        # easy to attribute when grepped or tailed.
+        self.logprint('datadir: ' + os.path.abspath(self.datadir))
         
         #::: for all companions
         for companion in self.settings['companions_all']:

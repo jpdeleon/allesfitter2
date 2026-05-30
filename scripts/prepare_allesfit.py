@@ -2142,11 +2142,11 @@ fit_ttvs,False
 # Stellar grid per object and instrument,
 ###############################################################################,\n"""
         for inst in fns:
-            text2 += f"host_grid_{inst},very_sparse\n"
+            text2 += f"host_grid_{inst},sparse\n"
         for i, row in target_df.iterrows():
             pl = planets[i]
             for inst in fns:
-                text2 += f"#{pl}_grid_{inst},very_sparse\n"
+                text2 += f"#{pl}_grid_{inst},sparse\n"
                 text2 += f"#{pl}_shape_{inst},sphere\n"
                 text2 += f"#{pl}_flux_weighted_{inst},False\n"
 
