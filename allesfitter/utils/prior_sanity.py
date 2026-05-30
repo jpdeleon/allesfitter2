@@ -130,6 +130,81 @@ def _w(msg):
     return "prior_sanity: " + msg
 
 
+def _tdur_days_from_orbit(per, rsuma, cosi, k):
+    """Transit duration from per, R/a sum, cos i, and Rp/Rs.
+
+    Uses the standard chord-length formula:
+
+        t_dur = (P / pi) * arcsin( rsuma * sqrt((1+k)^2 - b^2) / sin i )
+
+    with ``b = cos(i) * (1 + k) / rsuma`` (impact parameter from R/a sum).
+    Returns NaN when inputs are non-positive, when sin(i) collapses to 0,
+    or when the chord is imaginary (grazing / non-transiting geometries).
+    """
+    per = float(per); rsuma = float(rsuma); cosi = float(cosi); k = float(k)
+    if not (per > 0 and rsuma > 0 and 0.0 <= abs(cosi) <= 1.0 and k > 0):
+        return float("nan")
+    sini = math.sqrt(max(1.0 - cosi * cosi, 0.0))
+    if sini == 0.0:
+        return float("nan")
+    b = cosi * (1.0 + k) / rsuma
+    chord_sq = (1.0 + k) ** 2 - b * b
+    if chord_sq <= 0.0:
+        return float("nan")
+    arg = rsuma * math.sqrt(chord_sq) / sini
+    if arg <= 0.0 or arg > 1.0:
+        return float("nan")
+    return per / math.pi * math.asin(arg)
+
+
+def _compute_tdur_hours_by_companion(datadir):
+    """Build ``{companion: tdur_hours}`` from initial-guess values in params.csv.
+
+    For each companion ``<c>`` (single-letter, e.g. ``b``, ``c``, ...),
+    looks up ``<c>_period``, ``<c>_rsuma``, ``<c>_cosi`` and a radius-ratio
+    row (``<c>_rr`` or the first ``<c>_rr_<bandpass>`` match for chromatic
+    fits). When all four are present and yield a finite duration, the
+    companion is included in the returned dict. Returns ``None`` when no
+    companion could be resolved (caller falls back to the legacy default).
+    """
+    rows = _read_csv_rows(Path(datadir) / "params.csv")
+    if not rows:
+        return None
+    # name -> initial value (skip rows that don't parse as float)
+    values = {}
+    for row in rows:
+        if len(row) < 2:
+            continue
+        try:
+            values[row[0]] = float(row[1])
+        except (TypeError, ValueError):
+            continue
+
+    by_companion: dict[str, float] = {}
+    for name in values:
+        # cheap heuristic: <c>_period uniquely identifies a companion
+        if not name.endswith("_period"):
+            continue
+        companion = name[: -len("_period")]
+        per = values[name]
+        rsuma = values.get(f"{companion}_rsuma")
+        cosi = values.get(f"{companion}_cosi")
+        # Radius-ratio key: prefer <c>_rr; fall back to the first <c>_rr_*
+        # (chromatic mode uses per-bandpass rr columns).
+        k = values.get(f"{companion}_rr")
+        if k is None:
+            for key in values:
+                if key.startswith(f"{companion}_rr_"):
+                    k = values[key]
+                    break
+        if None in (per, rsuma, cosi, k):
+            continue
+        tdur_days = _tdur_days_from_orbit(per, rsuma, cosi, k)
+        if math.isfinite(tdur_days) and tdur_days > 0:
+            by_companion[companion] = tdur_days * 24.0
+    return by_companion or None
+
+
 def validate_gp_priors(
     datadir,
     *,
@@ -145,8 +220,13 @@ def validate_gp_priors(
         and the per-instrument CSV files already written.
     tdur_hours_by_companion : dict, optional
         Mapping companion → transit duration in hours. Used to flag GP
-        timescale lower bounds shorter than the transit. When omitted,
-        falls back to a permissive 0.1 d (~2.4 h) default.
+        timescale lower bounds shorter than the transit. When ``None``
+        (default), the validator computes a duration for each companion
+        from its initial-guess orbital row in ``params.csv``
+        (``<c>_period``, ``<c>_rsuma``, ``<c>_cosi``, ``<c>_rr`` or
+        ``<c>_rr_<bandpass>``) via the chord-length formula in
+        :func:`_tdur_days_from_orbit`. Falls back to a permissive
+        0.1 d (~2.4 h) only when no companion can be resolved.
     log : callable, optional
         Sink for warnings; receives one fully-formatted message per call.
         When ``None`` (default) warnings are returned but not emitted —
@@ -166,12 +246,15 @@ def validate_gp_priors(
     insts = _settings_inst_phot(datadir)
     data_cache = {inst: _load_inst_data(datadir, inst) for inst in insts}
 
+    # Resolve transit-duration source (caller > derived from params.csv > fallback).
+    if tdur_hours_by_companion is None:
+        tdur_hours_by_companion = _compute_tdur_hours_by_companion(datadir)
     if tdur_hours_by_companion:
         tdur_days = float(np.median(
             [t / 24.0 for t in tdur_hours_by_companion.values() if t]
         ))
     else:
-        tdur_days = 0.1   # ~2.4 h fallback
+        tdur_days = 0.1   # ~2.4 h fallback when no orbital row could be parsed
 
     for row in params_rows:
         if len(row) < 4:
