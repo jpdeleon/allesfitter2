@@ -86,6 +86,24 @@ def _final(arr):
 # ---------------------------------------------------------------------------
 
 
+def test_ultranest_safe_loglike_floors_nonfinite():
+    """UltraNest aborts on -inf / NaN log-likelihoods; the safe wrapper
+    must replace them with a large negative finite floor while passing
+    finite values through untouched."""
+    pytest.importorskip("ultranest")
+    from allesfitter.utils.ns_backends.ultranest_backend import (
+        _safe_loglike, _NONFINITE_LOGL_FLOOR,
+    )
+    raw_neginf = _safe_loglike(lambda t: float("-inf"))
+    raw_posinf = _safe_loglike(lambda t: float("inf"))
+    raw_nan = _safe_loglike(lambda t: float("nan"))
+    raw_finite = _safe_loglike(lambda t: -123.5)
+    assert raw_neginf(None) == _NONFINITE_LOGL_FLOOR
+    assert raw_posinf(None) == _NONFINITE_LOGL_FLOOR
+    assert raw_nan(None) == _NONFINITE_LOGL_FLOOR
+    assert raw_finite(None) == -123.5
+
+
 @pytest.mark.parametrize("name", KNOWN_BACKENDS)
 def test_get_backend_known(name):
     be = get_backend(name)

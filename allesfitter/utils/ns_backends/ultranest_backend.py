@@ -26,15 +26,39 @@ from . import build_results
 name = "ultranest"
 
 
-def _vectorised_loglike(scalar_loglike: Callable):
-    """Return a wrapper UltraNest can call in vectorised mode if it wants.
+_NONFINITE_LOGL_FLOOR = -1e300
 
-    UltraNest's ``ReactiveNestedSampler`` accepts either a scalar or a
-    vectorised loglike. allesfitter's ``ns_lnlike`` is scalar-in /
-    scalar-out, so we keep ``vectorized=False`` and pass the raw callable.
-    This helper exists only to document the contract.
+
+def _safe_loglike(scalar_loglike: Callable):
+    """Wrap allesfitter's scalar ``ns_lnlike`` to satisfy UltraNest.
+
+    UltraNest aborts when the log-likelihood returns ``-inf`` or ``NaN``
+    (its strict check in ``evaluate_likelihood``). allesfitter's
+    ``calculate_lnlike_total`` legitimately produces those values for
+    unphysical configurations (cos i > 1, negative semi-major axes,
+    eccentricities outside [0, 1), etc.) — dynesty tolerates them, but
+    UltraNest does not.
+
+    Replace any non-finite return with ``-1e300`` so:
+      * the sampler treats the point as overwhelmingly improbable
+        (the intended semantics of ``-inf``),
+      * the value remains finite so logaddexp / logsumexp stay defined,
+      * the floor is far enough below any plausible posterior that it
+        has no effect on the inferred distribution.
     """
-    return scalar_loglike
+    floor = _NONFINITE_LOGL_FLOOR
+
+    def wrapped(theta):
+        v = scalar_loglike(theta)
+        if not np.isfinite(v):
+            return floor
+        return float(v)
+    return wrapped
+
+
+def _vectorised_loglike(scalar_loglike: Callable):
+    """Backwards-compatible alias for the previous helper name."""
+    return _safe_loglike(scalar_loglike)
 
 
 def run(
@@ -82,20 +106,69 @@ def run(
     # and uses them for plot labels / output files. numpy strings can confuse it.
     pnames = [str(p) for p in param_names]
 
-    # UltraNest's log_dir backend uses h5py. If h5py is missing we run with
-    # log_dir=None (no on-disk artefacts, no resume) rather than crashing.
+    # Detect MPI rank when running under mpiexec / mpirun / srun.
+    #
+    # Priority: mpi4py (preferred — gives a real communicator) > environment
+    # variables set by the launcher (works even when mpi4py is not
+    # installed). Without env-var fallback, each rank's mpi4py import would
+    # silently fail and every rank would think it was rank 0 — they would
+    # then race to take an exclusive lock on the same HDF5 point store
+    # and all but one would crash with BlockingIOError.
+    _mpi_size, _mpi_rank = 1, 0
     try:
-        import h5py  # noqa: F401
-        log_dir = os.path.join(outdir, "ultranest_logs")
-        os.makedirs(log_dir, exist_ok=True)
-        sampler_kwargs = dict(log_dir=log_dir, resume="resume")
-    except ImportError:
+        from mpi4py import MPI
+        _mpi_size = MPI.COMM_WORLD.Get_size()
+        _mpi_rank = MPI.COMM_WORLD.Get_rank()
+    except Exception:
+        # Common launcher env-vars: OpenMPI, MPICH/Slurm PMI, PMIx.
+        for size_var, rank_var in (
+            ("OMPI_COMM_WORLD_SIZE", "OMPI_COMM_WORLD_RANK"),
+            ("PMI_SIZE", "PMI_RANK"),
+            ("PMIX_SIZE", "PMIX_RANK"),
+            ("SLURM_NTASKS", "SLURM_PROCID"),
+        ):
+            if size_var in os.environ and rank_var in os.environ:
+                try:
+                    _mpi_size = int(os.environ[size_var])
+                    _mpi_rank = int(os.environ[rank_var])
+                    break
+                except ValueError:
+                    pass
+        if _mpi_size > 1:
+            logprint(
+                "\n! Running under mpiexec but mpi4py is NOT installed. "
+                "UltraNest cannot parallelise likelihood evaluations — each "
+                "rank will run an independent copy. Install mpi4py with "
+                "`pip install mpi4py` to get true MPI parallelism, "
+                "or launch without mpiexec for a single-process run."
+            )
+
+    # UltraNest's log_dir backend uses h5py. If h5py is missing — or we are
+    # on a non-zero MPI rank — run with log_dir=None.
+    if _mpi_size > 1 and _mpi_rank > 0:
         log_dir = None
         sampler_kwargs = dict(log_dir=None)
-        logprint("\n! h5py not installed — running ultranest without log_dir/resume.")
+        logprint(
+            "\n! MPI rank {}/{}: log_dir disabled (only rank 0 writes the HDF5 store).".format(
+                _mpi_rank, _mpi_size
+            )
+        )
+    else:
+        try:
+            import h5py  # noqa: F401
+            log_dir = os.path.join(outdir, "ultranest_logs")
+            os.makedirs(log_dir, exist_ok=True)
+            sampler_kwargs = dict(log_dir=log_dir, resume="resume")
+        except ImportError:
+            log_dir = None
+            sampler_kwargs = dict(log_dir=None)
+            logprint("\n! h5py not installed — running ultranest without log_dir/resume.")
 
     logprint("\nRunning Reactive Nested Sampler (ultranest)...")
     logprint("--------------------------")
+    # `outdir` is <datadir>/results; print its parent so log lines from
+    # multiple concurrent fits are unambiguous when grepped or tailed.
+    logprint("datadir: {}".format(os.path.abspath(os.path.dirname(outdir))))
     logprint("  log_dir   = {}".format(log_dir))
     logprint("  min_nlive = {}, dlogz = {}, min_ess = {}".format(nlive, dlogz, min_ess))
 
