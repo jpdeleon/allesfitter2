@@ -12,6 +12,9 @@ An extension of the original allesfitter package that streamlines the process of
 - **Shared baseline GP across instruments** — declare `baseline_share_flux,muscat_g:muscat_r:muscat_i:muscat_z` in `settings.csv` to fit a *single* celerite GP realization jointly across all members of a share group (ideal for simultaneous multi-band photometry like MuSCAT, where airmass/seeing systematics are common-mode). Backward compatible: omit the key for legacy per-instrument GPs.
 - **Warm-start sampler with `allesfitter.optimize()`** — global optimization (CMA-ES default, plus `dual_annealing` / `differential_evolution` / `L-BFGS-B` / `Powell`) finds a MAP point that is then pushed into `BASEMENT.theta_0`, so the next `mcmc_fit` / `ns_fit` starts from a well-converged ball. Safe acceptance gates (improvement, prior-bound, multistart consistency) prevent the optimizer from poisoning the sampler start when it doesn't actually improve. CMA-ES supports warm-resume across calls via a pickled strategy state.
 - **OOM-safe post-processing** — `ns_output` and `mcmc_output` cap figure sizes, subsample posterior draws for the corner plot, and wrap every save site in a `MemoryError`-tolerant try/except. When the fit has more than 25 free parameters, the corner plot automatically hides nuisance rows (`baseline_*`, `ln_err_*`, `ln_jitter_*`, `stellar_var_gp_*`) so the science-relevant parameters stay readable; above 60 dims the corner is skipped entirely with a placeholder. The full posterior still goes into `*_table.csv`, the LaTeX table, and `derive`.
+- **Named ancillary covariates in input CSVs** — per-instrument CSVs may now carry extra columns beyond `time, flux, flux_err` (e.g. `airmass`, `fwhm`, `sky`, `x_centroid`). A `#`-prefixed header line on the first row names them; baselines select a covariate as their regression axis via `baseline_<key>_<inst>_against,<name>`. Works with every existing baseline (`sample_linear`, `hybrid_poly_N`, `hybrid_spline`, `sample_GP_*`). Legacy 3-column and 4-column positional CSVs continue to load unchanged.
+- **N-D linear baseline detrending (`sample_linear_multi` / `hybrid_linear_multi`)** — declare `baseline_flux_<inst>,sample_linear_multi` + `baseline_flux_<inst>_cols,Airmass FWHM(pix) bias` to fit a joint linear model in any number of ancillary covariates (timex-style). The `sample_*` variant samples each weight as a free parameter; the `hybrid_*` variant **analytically marginalises** the Gaussian weights in closed form at every likelihood call, adding zero fit dimensions while still recovering the optimal per-evaluation MAP weights for predictive plotting.
+- **Fast Basement init via cached `simulate_PDF`** — the skewed-normal fit to `R_star` / `M_star` from `params_star.csv` (used by `use_host_density_prior=True`) used to add ~22 s to *every* `config.init` call. Results are now persisted to `~/.allesfitter/simulate_PDF_cache.json` keyed on `(median, lower_err, upper_err)`, so the second and every subsequent invocation skips the scipy solve entirely. Bypass via `ALLESFITTER_SIMULATE_PDF_NO_CACHE=1`; redirect via `ALLESFITTER_SIMULATE_PDF_CACHE=/path/to/cache.json`.
 - **Per-bandpass Rp/Rs posterior plot** — `ns_output()` automatically emits `ns_chromatic_rr_<companion>.pdf` overlaying per-bandpass posteriors with a canonical color map (`tess=k`, `g=C0`, `r=C2`, `i=C8`, `z=C3`; viridis fallback for unknown labels)
 - **Strict configuration validation** — clear errors for bandpass/instrument count mismatch, duplicate params, unknown bandpass suffixes, chromatic/achromatic shape inconsistencies, or per-instrument settings keys with orphan suffixes (catches `host_ld_law_<bandpass>` typos)
 - **Sensible LD default** — `host_ld_law_<inst>` now defaults to `quad` (was `None`, which silently disabled limb darkening); explicit `host_ld_law_<inst>,none` still opts out
@@ -321,6 +324,42 @@ allesfitter.optimize('.', method='cmaes', maxfevals=500, resume=True)
 
 `resume=True` requires `n_restarts=1` (a single trajectory cannot be split into multiple restarts) and `method='cmaes'`. If the pickled state is missing the call falls back to a fresh start with a warning; if it's incompatible (different `ndim`/`bounds` after a `params.csv` edit) the call raises `ValueError` so you delete the stale pickle deliberately. `OptimizeResult.resumed_from_pickle` reports whether the resume actually happened.
 
+### Detrending baselines against ancillary covariates (airmass, FWHM, sky, …)
+
+Per-instrument CSV files can now carry **named ancillary columns** beyond the required `time, flux, flux_err`. Add a `#`-prefixed header on the first non-blank line listing every column:
+
+```csv
+#time,flux,flux_err,airmass,fwhm,sky
+2459123.45123,1.00012,0.00118,1.23,1.45,250.0
+2459123.45289,0.99984,0.00121,1.22,1.46,251.1
+...
+```
+
+Then point a baseline at a named covariate in `settings.csv`:
+
+```
+baseline_flux_lco,hybrid_poly_2
+baseline_flux_lco_against,airmass
+```
+
+This works with every existing baseline kernel — `sample_offset`, `sample_linear`, `hybrid_poly_<N>`, `hybrid_spline`, `sample_GP_Matern32`, `sample_GP_SHO`, `sample_GP_real`, `sample_GP_complex` — because the dispatch goes through a single regression-axis lookup. The GP path automatically sorts the abscissa and breaks tied values (celerite needs strictly-sorted x); the predictive plotting path reuses the same sorted GP draw.
+
+Backward compatibility (no migration required for existing fits):
+
+| CSV layout | Behaviour |
+|---|---|
+| `#time,flux,flux_err,<name1>,<name2>,...` (headered) | `data[inst]['covariates']` keyed by name; first ancillary column is also aliased to the legacy `custom_series` slot |
+| 4 positional columns, no header | Legacy: column 4 → `custom_series`; `covariates` dict empty |
+| 3 positional columns, no header | Legacy: `custom_series` = zeros; `covariates` dict empty |
+
+The loader validates after-the-fact: every `baseline_<key>_<inst>_against=<name>` setting that names something other than `time` / `custom_series` must resolve to a real column in the corresponding CSV, or `Basement(...)` refuses to start with the actionable error `<inst>.csv has no column named '<name>'. Known options: ...`.
+
+Limitations to be aware of:
+
+- **One covariate per baseline (v1)**. True multi-covariate detrending against `airmass + fwhm + sky` simultaneously needs a separate `hybrid_linear_multi` baseline kind that isn't shipped yet. The common workflow today is a `hybrid_poly_N` against the dominant covariate plus a `sample_GP_*` for the residual structure.
+- **GPs are 1-D** (celerite). `sample_GP_*` with `_against=<covariate>` fits a 1-D GP regressing residuals against the covariate value; multi-dimensional GPs would require switching to `george` or `tinygp` — not in scope.
+- **Share-baseline groups must use `_against=time`**. The joint celerite GP across `baseline_share_flux,m4g:m4r:m4i:m4z` is a shared *realization* on the shared time grid; covariate-based regression is only meaningful per inst. The loader enforces this constraint.
+
 ### OOM-safe diagnostic plots for high-dim fits
 
 Chromatic multi-band fits with per-instrument baseline GPs routinely produce 25–60 free parameters. The default `ns_output` / `mcmc_output` diagnostic plots scale **poorly** at that dimensionality: a 60×60 corner is ~3 600 subplots, the matplotlib canvas at the implicit `figsize=(2·ndim, 2·ndim)` runs to hundreds of megapixels at 100 dpi, and the OOM killer terminates the post-processing run before any tables are written.
@@ -627,6 +666,25 @@ Shows:
 - **Memory usage** scales with sector count and cadence
 - **Convergence** varies by parameter complexity and data quality
 - **Parallel processing** significantly reduces fit time
+
+### Cold-start latency: `simulate_PDF` disk cache
+
+When `use_host_density_prior=True` (the default for transit fits) and `params_star.csv` carries asymmetric error bars on `R_star` / `M_star`, `Basement.load_params` invokes `simulate_PDF.calculate_skewed_normal_params` twice. Each call inverts the skewed-normal CDF via `scipy.stats.skewnorm.ppf` inside a `scipy.optimize.minimize` loop — about 11 s per call (~6 000 numerical CDF inversions). Without caching this dominates `config.init` (≈22 s) and pads every `mcmc_fit` / `ns_fit` / `mcmc_output` invocation that re-bootstraps the Basement.
+
+allesfitter persists the `(median, lower_err, upper_err) → (alpha, loc, scale)` mapping to **`~/.allesfitter/simulate_PDF_cache.json`** after the first solve. Subsequent process invocations with identical inputs read the cache (~1 ms) and skip the entire scipy loop.
+
+| Setup | Inputs | `config.init` wall-clock |
+|---|---|---|
+| `use_host_density_prior=False` | n/a (skipped) | <1 s |
+| `True`, **cache miss** | first time you see this star | ~22 s |
+| `True`, **cache hit** | same star ever seen by this user | <100 ms |
+
+| Environment variable | Effect |
+|---|---|
+| `ALLESFITTER_SIMULATE_PDF_CACHE` | Override cache file path (default `~/.allesfitter/simulate_PDF_cache.json`) |
+| `ALLESFITTER_SIMULATE_PDF_NO_CACHE=1` | Disable cache (always recompute, never write) |
+
+The cache is content-addressed by a stable `repr(float)` triplet, so two different projects that fit the same target reuse the same entry. Writes are atomic (`os.replace` on a temp file), so concurrent processes can't corrupt the JSON.
 
 ## Testing
 

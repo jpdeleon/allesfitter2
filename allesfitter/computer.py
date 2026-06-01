@@ -65,6 +65,7 @@ except ImportError:
 
 #allesfitter modules
 from . import config
+import difflib as _difflib
 from .basement import BASELINE_GP_HYPER_PREFIXES
 # from .limb_darkening import LDC3
 from .flares.aflare import aflare1
@@ -101,7 +102,7 @@ for dilution:
 #::: possible functions
 ###############################################################################  
 GPs = ['sample_GP_real', 'sample_GP_complex', 'sample_GP_Matern32', 'sample_GP_SHO']
-FCTs = ['none', 'offset', 'linear', 'hybrid_offset', 'hybrid_poly_0', 'hybrid_poly_1', 'hybrid_poly_2', 'hybrid_poly_3', 'hybrid_poly_4', 'hybrid_poly_5', 'hybrid_poly_6', 'hybrid_spline', 'hybrid_spline_s', 'sample_offset', 'sample_linear']
+FCTs = ['none', 'offset', 'linear', 'hybrid_offset', 'hybrid_poly_0', 'hybrid_poly_1', 'hybrid_poly_2', 'hybrid_poly_3', 'hybrid_poly_4', 'hybrid_poly_5', 'hybrid_poly_6', 'hybrid_spline', 'hybrid_spline_s', 'sample_offset', 'sample_linear', 'sample_linear_multi', 'hybrid_linear_multi']
 
 
 
@@ -1365,10 +1366,20 @@ def calculate_lnlike_total(params):
                 
                 #::: calculate lnlike
                 lnlike_total += -0.5*(np.sum((residuals)**2 * inv_sigma2_w - np.log(inv_sigma2_w/2./np.pi))) #use np.sum to catch any nan and then set lnlike to nan
-            
-                
-                
-        #--------------------------------------------------------------------------  
+                # Tier-2 marginal-lnlike correction: when the baseline is
+                # hybrid_linear_multi the standard chi² above evaluates at
+                # the MAP weights ŵ. Adding -½ŵᵀΛŵ - ½logdet(A) + ½logdet(Λ)
+                # promotes it to the true marginal log-likelihood
+                # (Gaussian-Gaussian closed form).
+                if config.BASEMENT.settings['baseline_'+key+'_'+inst] == 'hybrid_linear_multi':
+                    _y_resid = config.BASEMENT.data[inst][key] - model
+                    _w_hat, _corr = _hybrid_linear_multi_solve(
+                        inst, key, _y_resid, yerr_w)
+                    lnlike_total += _corr
+
+
+
+        #--------------------------------------------------------------------------
         #::: CASES 2a) and 2b)
         #::: stellar variability in FCTs --> can be calculated per inst (only GP needs to know about all other instruments) 
         #::: baseline in FCTs or in GPs
@@ -1406,6 +1417,14 @@ def calculate_lnlike_total(params):
 
                     #::: calculate lnlike
                     lnlike_total += -0.5*(np.sum((residuals)**2 * inv_sigma2_w - np.log(inv_sigma2_w/2./np.pi))) #use np.sum to catch any nan and then set lnlike to nan
+                    # Tier-2 marginal-lnlike correction (same logic as
+                    # Case 1) — promotes the chi² at ŵ into the true
+                    # Gaussian-marginalised log-likelihood.
+                    if config.BASEMENT.settings['baseline_'+key+'_'+inst] == 'hybrid_linear_multi':
+                        _y_resid = config.BASEMENT.data[inst][key] - model
+                        _w_hat, _corr = _hybrid_linear_multi_solve(
+                            inst, key, _y_resid, yerr_w)
+                        lnlike_total += _corr
 
 
                 #::: if that baseline is in GPs
@@ -1417,8 +1436,12 @@ def calculate_lnlike_total(params):
                     stellar_var = calculate_stellar_var(params, inst, key, model=model, baseline=0., yerr_w=yerr_w)
 
                     #::: collect this inst's residuals under its share leader
-                    #::: (leader == inst for non-shared instruments)
-                    x = config.BASEMENT.data[inst]['time']  # pointer!
+                    #::: (leader == inst for non-shared instruments). For
+                    #::: non-shared insts the regression axis honours
+                    #::: `baseline_<key>_<inst>_against` so covariate-vs-
+                    #::: residual GP detrending is consistent with the
+                    #::: predictive path in baseline_sample_GP.
+                    x = _baseline_x_for(inst, key)
                     y = config.BASEMENT.data[inst][key] - model - stellar_var
                     _leader = _share_leader_of(inst, key)
                     _gp_groups.setdefault(_leader, []).append((x, y, yerr_w))
@@ -1430,6 +1453,11 @@ def calculate_lnlike_total(params):
             #::: one joint GP per share group (or per inst when no sharing)
             for _leader, _parts in _gp_groups.items():
                 x_j, y_j, yerr_j = _stack_and_sort(_parts)
+                # cosort_for_gp is a no-op when x_j is already strictly
+                # increasing (the multi-member path inside _stack_and_sort
+                # already handled that). It kicks in for singleton buckets
+                # whose axis is a non-monotone covariate.
+                x_j, y_j, yerr_j = _cosort_for_gp(x_j, y_j, yerr_j)
                 gp = baseline_get_gp(params, _leader, key)
                 try:
                     gp.compute(x_j, yerr=yerr_j)
@@ -1682,12 +1710,24 @@ def calculate_baseline(params, inst, key, model=None, yerr_w=None, xx=None):
     if yerr_w is None: 
         yerr_w = calculate_yerr_w(params, inst, key)
         
-    if config.BASEMENT.settings['baseline_'+key+'_'+inst+'_against'] == 'time':
+    _against = config.BASEMENT.settings['baseline_'+key+'_'+inst+'_against']
+    if _against == 'time':
         x = config.BASEMENT.data[inst]['time']
-    elif config.BASEMENT.settings['baseline_'+key+'_'+inst+'_against'] == 'custom_series':
+    elif _against == 'custom_series':
         x = config.BASEMENT.data[inst]['custom_series']
     else:
-        raise KeyError("The setting 'baseline_'+key+'_'+inst+'_against must be one of ['time','custom_series'].")
+        # Named covariate column from the CSV header.
+        _covs = config.BASEMENT.data[inst].get('covariates', {})
+        if _against in _covs:
+            x = _covs[_against]
+        else:
+            raise KeyError(
+                "baseline_{k}_{i}_against={a!r} but {i}.csv has no column "
+                "of that name. Known options: time, custom_series, {names}".format(
+                    k=key, i=inst, a=_against,
+                    names=sorted(_covs.keys()),
+                )
+            )
         
     y = config.BASEMENT.data[inst][key] - model
     
@@ -1706,7 +1746,18 @@ def calculate_baseline(params, inst, key, model=None, yerr_w=None, xx=None):
     '''
     
     baseline_method = config.BASEMENT.settings['baseline_'+key+'_'+inst]
-    
+
+    if baseline_method not in baseline_switch:
+        _setting = 'baseline_'+key+'_'+inst
+        _valid = sorted(baseline_switch.keys())
+        _close = _difflib.get_close_matches(
+            str(baseline_method), _valid, n=3, cutoff=0.4)
+        _hint = ('Did you mean: '+', '.join(repr(c) for c in _close)+'?  '
+                 ) if _close else ''
+        raise KeyError(
+            "settings.csv has {s}={m!r}, which is not a known baseline kind. "
+            "{hint}Valid options are: {valid}.".format(
+                s=_setting, m=baseline_method, hint=_hint, valid=_valid))
     return baseline_switch[baseline_method](x, y, yerr_w, xx, params, inst, key)
 
 
@@ -1849,9 +1900,130 @@ def baseline_sample_linear(*args):
     x, y, yerr_w, xx, params, inst, key = args
     xx_norm = (xx-x[0]) / (x[-1]-x[0])
     return params['baseline_slope_'+key+'_'+inst] * xx_norm + params['baseline_offset_'+key+'_'+inst]
-        
-    
-    
+
+
+
+#==============================================================================
+#::: calculate baseline: sample_linear_multi (N-D linear regression on a
+#::: pre-built design matrix; one weight per column sampled directly).
+#::: Mirrors timex's `pt.dot(X, weights)` systematics model.
+#==============================================================================
+def _linmulti_interp_to_xx(bl_train, inst, xx):
+    """Project a linear-multi baseline from the training grid onto ``xx``.
+
+    The Tier-1 / Tier-2 linear-multi baselines compute ``X @ w`` on the
+    instrument's training time grid (length ``N_inst``). Callers in the
+    plotting pipeline often pass a denser ``xx`` (e.g. a high-resolution
+    grid for smooth display), so the raw ``X @ w`` shape doesn't match
+    what ``afplot`` expects. We do a 1-D linear interpolation in time;
+    when ``xx`` is identical to (or a sub/superset of) the training grid
+    this is exact, and outside the training span the behaviour is
+    constant-extrapolation (numpy's ``interp`` default).
+    """
+    x_train = config.BASEMENT.data[inst]['time']
+    xx_arr = np.asarray(xx, dtype=float)
+    bl_train = np.asarray(bl_train, dtype=float)
+    # Fast path: same length and same values → return unchanged.
+    if xx_arr.shape == x_train.shape and np.array_equal(xx_arr, x_train):
+        return bl_train
+    return np.interp(xx_arr, x_train, bl_train)
+
+
+def baseline_sample_linear_multi(*args):
+    """Return the N-D linear systematics model ``X @ weights``.
+
+    The design matrix ``X`` and column ordering are built once in
+    :meth:`Basement.load_data` and stored on
+    ``config.BASEMENT.data[inst]['design_matrix']`` /
+    ``['design_matrix_cols']``. Weights are pulled from ``params`` by
+    name in the same order; each weight is a free fit parameter named
+    ``baseline_linmulti_<col>_<key>_<inst>`` (or
+    ``baseline_linmulti_w<i>_<key>_<inst>`` for synthetic columns
+    like `bias`).
+    """
+    x, y, yerr_w, xx, params, inst, key = args
+    X = config.BASEMENT.data[inst].get('design_matrix')
+    cols = config.BASEMENT.data[inst].get('design_matrix_cols', [])
+    if X is None or len(cols) == 0:
+        raise KeyError(
+            "baseline_{k}_{i}=sample_linear_multi but no design matrix is "
+            "stored for {i}. Did you set baseline_{k}_{i}_cols=<names>?".format(
+                k=key, i=inst))
+    w = np.array([
+        params['baseline_linmulti_'+name+'_'+key+'_'+inst]
+        for name in cols
+    ], dtype=float)
+    return _linmulti_interp_to_xx(X @ w, inst, xx)
+
+
+#==============================================================================
+#::: calculate baseline: hybrid_linear_multi (Tier 2 — analytically
+#::: marginalised Gaussian linear regression). The weights are NOT
+#::: sampled; they are solved in closed form at every likelihood call
+#::: from the post-transit-model residuals. ndim stays the same as it
+#::: would without any linear-multi baseline.
+#==============================================================================
+_HYBRID_LINEAR_MULTI_PRIOR_SIGMA = 1e3   # matches timex's pm.Normal(0, 1e3)
+
+
+def _hybrid_linear_multi_solve(inst, key, y_resid, yerr_w):
+    """Solve for the MAP weights ŵ and return the per-instrument
+    correction term for the marginal log-likelihood.
+
+    Math (Gaussian likelihood, Gaussian prior on weights):
+
+        A   = Xᵀ Σ⁻¹ X + Λ                # Σ = diag(yerr²),  Λ = (1/σ_p²) I
+        ŵ   = A⁻¹ Xᵀ Σ⁻¹ y_resid
+        log p(y) - log p_no_baseline(y_after_subtracting_X@ŵ)
+            = -½ ŵᵀ Λ ŵ - ½ log det(A) + ½ log det(Λ)
+
+    The caller computes the *standard* gaussian chi² with the MAP
+    baseline (``y_resid - X @ ŵ``) and then adds this correction; the
+    sum equals the true marginal log-likelihood.
+
+    Returns
+    -------
+    w_hat : ndarray, shape (k,)
+        MAP weights given the current residuals.
+    correction : float
+        Additive contribution to the marginal log-likelihood relative
+        to the chi² at ŵ.
+    """
+    X = config.BASEMENT.data[inst]['design_matrix']
+    k = X.shape[1]
+    inv_sigma2 = 1.0 / np.asarray(yerr_w, dtype=float)**2
+    sigma_p2 = _HYBRID_LINEAR_MULTI_PRIOR_SIGMA**2
+    A = X.T @ (X * inv_sigma2[:, None]) + (1.0 / sigma_p2) * np.eye(k)
+    b = X.T @ (np.asarray(y_resid, dtype=float) * inv_sigma2)
+    try:
+        L = np.linalg.cholesky(A)
+    except np.linalg.LinAlgError:
+        # Ridge nudge for near-singular A (e.g., collinear covariates).
+        A = A + 1e-12 * np.eye(k)
+        L = np.linalg.cholesky(A)
+    w_hat = np.linalg.solve(L.T, np.linalg.solve(L, b))
+    logdet_A = 2.0 * float(np.sum(np.log(np.diag(L))))
+    # log det Λ = log det((1/σ_p²) I) = -k log σ_p²
+    logdet_Lambda = -k * np.log(sigma_p2)
+    prior_quad = float(w_hat @ ((1.0 / sigma_p2) * w_hat))
+    correction = -0.5 * prior_quad - 0.5 * logdet_A + 0.5 * logdet_Lambda
+    return w_hat, correction
+
+
+def baseline_hybrid_linear_multi(*args):
+    """Return ``X @ ŵ`` where ŵ is the analytic MAP weights given the
+    current residuals. No fit-vector parameters are consumed."""
+    x, y, yerr_w, xx, params, inst, key = args
+    if 'design_matrix' not in config.BASEMENT.data[inst]:
+        raise KeyError(
+            "baseline_{k}_{i}=hybrid_linear_multi but no design matrix is "
+            "stored for {i}. Did you set baseline_{k}_{i}_cols=<names>?".format(
+                k=key, i=inst))
+    X = config.BASEMENT.data[inst]['design_matrix']
+    w_hat, _ = _hybrid_linear_multi_solve(inst, key, y, yerr_w)
+    return _linmulti_interp_to_xx(X @ w_hat, inst, xx)
+
+
 #==============================================================================
 #::: baseline share group helpers
 #::: A share group is a list of instruments (members) that fit a *single*
@@ -1898,16 +2070,61 @@ def _stack_and_sort(parts):
     return x_sorted, y_sorted, yerr_sorted
 
 
+def _baseline_x_for(inst, key):
+    """Return the regression axis for the GP baseline of ``inst``.
+
+    Respects ``baseline_<key>_<inst>_against``: ``time`` (default),
+    ``custom_series`` (legacy alias), or a named covariate column from
+    ``<inst>.csv``. Share-group followers are validated to use ``time``
+    in :meth:`Basement.load_settings`, so the joint-GP path always sees
+    a time axis when ``len(members) > 1``.
+    """
+    against = config.BASEMENT.settings.get(
+        'baseline_'+key+'_'+inst+'_against', 'time')
+    if against == 'time':
+        return config.BASEMENT.data[inst]['time']
+    if against == 'custom_series':
+        return config.BASEMENT.data[inst]['custom_series']
+    covs = config.BASEMENT.data[inst].get('covariates', {})
+    if against in covs:
+        return covs[against]
+    raise KeyError(
+        "baseline_{k}_{i}_against={a!r} but no such column in "
+        "{i}.csv covariates ({names}).".format(
+            k=key, i=inst, a=against, names=sorted(covs.keys())))
+
+
+def _cosort_for_gp(x, y, yerr):
+    """Sort ``(x, y, yerr)`` by ``x`` and nudge tied ``x`` values one
+    ULP apart so celerite's strict-sort precondition is satisfied.
+    No-op when ``x`` is already strictly increasing.
+    """
+    x_arr = np.asarray(x, dtype=float)
+    if x_arr.size <= 1 or np.all(np.diff(x_arr) > 0):
+        return x_arr, np.asarray(y, dtype=float), np.asarray(yerr, dtype=float)
+    perm = np.argsort(x_arr, kind='stable')
+    xs = x_arr[perm].copy()
+    ys = np.asarray(y, dtype=float)[perm]
+    es = np.asarray(yerr, dtype=float)[perm]
+    for i in range(1, len(xs)):
+        if xs[i] <= xs[i-1]:
+            xs[i] = np.nextafter(xs[i-1], np.inf)
+    return xs, ys, es
+
+
 def _collect_joint_residuals(params, members, key):
     '''Build per-group (x, y, yerr) triples for the GP baseline path.
 
     For each member, y = data - model - stellar_var (the residual the
     baseline GP is fit to), matching exactly what calculate_lnlike_total
-    Case 2b builds per inst today.
+    Case 2b builds per inst today. The x axis is selected per-inst via
+    `_baseline_x_for`, which defers to `baseline_<key>_<inst>_against`
+    (singleton "groups" can therefore regress against a covariate; true
+    share groups always get time because the loader enforces it).
     '''
     parts = []
     for m in members:
-        x_m = config.BASEMENT.data[m]['time']
+        x_m = _baseline_x_for(m, key)
         model_m = calculate_model(params, m, key)
         yerr_m = calculate_yerr_w(params, m, key)
         stellar_var_m = calculate_stellar_var(
@@ -1925,10 +2142,12 @@ def baseline_sample_GP(*args):
     leader = _share_leader_of(inst, key)
     members = _share_members_of(leader, key)
     if len(members) <= 1:
-        # Legacy path: single-instrument GP, unchanged.
+        # Legacy path: single-instrument GP. Time is already sorted by the
+        # loader; covariate axes may not be — cosort to satisfy celerite.
+        x_s, y_s, e_s = _cosort_for_gp(x, y, yerr_w)
         gp = baseline_get_gp(params, leader, key)
-        gp.compute(x, yerr=yerr_w)
-        baseline = gp_predict_in_chunks(gp, y, xx)[0]
+        gp.compute(x_s, yerr=e_s)
+        baseline = gp_predict_in_chunks(gp, y_s, xx)[0]
         return baseline
     # Shared-realization path: build the joint GP under the leader's
     # hyperparameters and predict at this inst's grid (xx).
@@ -2026,6 +2245,8 @@ baseline_switch = \
     'hybrid_GP'     : baseline_hybrid_GP,
     'sample_offset' : baseline_sample_offset,
     'sample_linear' : baseline_sample_linear,
+    'sample_linear_multi' : baseline_sample_linear_multi,
+    'hybrid_linear_multi' : baseline_hybrid_linear_multi,
     'sample_GP_real'         : baseline_sample_GP, #only for plotting
     'sample_GP_complex'      : baseline_sample_GP, #only for plotting   
     'sample_GP_Matern32'     : baseline_sample_GP, #only for plotting
@@ -2099,6 +2320,17 @@ def calculate_stellar_var(params, inst, key, model=None, baseline=None, yerr_w=N
         yerr_w = np.array(yerr_w_list)[ind_sort]  
         if xx is None: xx = 1.*x
     
+        if stellar_var_method not in stellar_var_switch:
+            _setting = 'stellar_var_'+key
+            _valid = sorted(stellar_var_switch.keys())
+            _close = _difflib.get_close_matches(
+                str(stellar_var_method), _valid, n=3, cutoff=0.4)
+            _hint = ('Did you mean: '+', '.join(repr(c) for c in _close)+'?  '
+                     ) if _close else ''
+            raise KeyError(
+                "settings.csv has {s}={m!r}, which is not a known stellar-"
+                "variability kind. {hint}Valid options are: {valid}.".format(
+                    s=_setting, m=stellar_var_method, hint=_hint, valid=_valid))
         return stellar_var_switch[stellar_var_method](x, y, yerr_w, xx, params, key)
     
     else:

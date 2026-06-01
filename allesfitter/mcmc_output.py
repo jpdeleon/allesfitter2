@@ -39,6 +39,7 @@ from .computer import calculate_model, calculate_baseline, calculate_stellar_var
 from .general_output import afplot, afplot_per_transit, save_table, save_latex_table, logprint, get_params_from_samples, plot_ttv_results
 from .nested_sampling_output import (
     plot_chromatic_rr_histogram,
+    plot_linear_baseline_components,
     _filter_nuisance_for_corner,
     _CORNER_HIDE_NUISANCE_NDIM_THRESHOLD,
 )
@@ -449,6 +450,14 @@ def mcmc_output(datadir, quiet=False):
         plot_chromatic_rr_histogram(posterior_samples, prefix='mcmc')
     except (MemoryError, Exception) as _exc:
         logprint('! plot_chromatic_rr_histogram failed ({}); skipping.'.format(_exc))
+        plt.close('all')
+
+    #::: linear-multi baseline component diagnostic (timex-style; no-op
+    #::: when no inst uses sample_linear_multi / hybrid_linear_multi)
+    try:
+        plot_linear_baseline_components(posterior_samples, prefix='mcmc')
+    except (MemoryError, Exception) as _exc:
+        logprint('! plot_linear_baseline_components failed ({}); skipping.'.format(_exc))
         plt.close('all')
     
     

@@ -90,6 +90,170 @@ BASELINE_GP_REQUIRED_HYPERS = {
 }
 
 
+def _parse_inst_csv_header(path):
+    """Return ``(column_names, is_hash_prefixed)`` from the first non-blank
+    line of an instrument CSV, or ``(None, False)`` when the file has no
+    recognizable header (legacy positional layout).
+
+    Two header styles are accepted:
+
+      1. **`#`-prefixed schema header** — the legacy "documenting"
+         convention; column 0 must start with ``time`` (case-insensitive)
+         and column 2 must end with ``_err``. Guards against ordinary
+         comments like ``# my notes``.
+
+      2. **Plain (pandas-style) header on the first row** — accepted
+         when the line is NOT a `#`-comment AND its first token cannot
+         be parsed as a float. The caller then knows to ``skip_header=1``
+         in ``np.genfromtxt`` because the header isn't a `#`-comment.
+         Column naming is lenient (no time/err token check) since users
+         often name them ``BJD_TDB,Flux,Err,Airmass`` etc.
+
+    Returns
+    -------
+    column_names : list[str] | None
+    is_hash_prefixed : bool
+        True for style (1) — genfromtxt skips it automatically.
+        False for style (2) — caller must skip it explicitly.
+    """
+    try:
+        with open(path, 'r') as f:
+            for line in f:
+                s = line.strip()
+                if not s:
+                    continue
+                if s.startswith('#'):
+                    toks = [t.strip() for t in s.lstrip('#').strip().split(',')]
+                    if (len(toks) >= 3
+                            and toks[0].lower().startswith('time')
+                            and toks[2].lower().endswith('_err')):
+                        return toks, True
+                    return None, False
+                # Non-`#` line — could be a plain header or a data row.
+                toks = [t.strip() for t in s.split(',')]
+                if len(toks) < 3:
+                    return None, False
+                try:
+                    float(toks[0])
+                    return None, False  # data row — no header
+                except ValueError:
+                    return toks, False  # plain string header
+    except OSError:
+        return None, False
+    return None, False
+
+
+def _load_inst_csv(path):
+    """Load an instrument CSV with optional named covariate columns.
+
+    Returns
+    -------
+    time, primary, primary_err : ndarray
+        Required columns 0–2 (time, flux/rv, flux_err/rv_err).
+    custom_series : ndarray
+        Backward-compat alias: positional column-3 in legacy layout, or
+        the first ancillary column in headered layout, or zeros otherwise.
+    covariates : dict[str, ndarray]
+        Named ancillary regressors. Empty in legacy layouts; populated
+        in headered layouts with one entry per column past index 2.
+
+    Supports three layouts:
+
+      A. Headered: first non-blank line is e.g.
+         ``#time,flux,flux_err,airmass,fwhm``. Column 3+ are stored in
+         ``covariates`` keyed by header name. The first ancillary column
+         is also aliased to ``custom_series``.
+      B. Legacy 4-col: no header. ``custom_series`` = column 3;
+         ``covariates`` is empty.
+      C. Legacy 3-col: no header. ``custom_series`` = zeros;
+         ``covariates`` is empty.
+    """
+    header, hash_prefixed = _parse_inst_csv_header(path)
+    skip_header = 0 if (header is None or hash_prefixed) else 1
+    arr = np.genfromtxt(
+        path, delimiter=',', dtype=float, comments='#',
+        skip_header=skip_header,
+    ).T
+    if arr.ndim == 1:
+        arr = arr.reshape(-1, 1)
+    n_cols = arr.shape[0]
+    if n_cols < 3:
+        raise ValueError(
+            "'{p}' has only {n} numeric columns; need at least 3 "
+            "(time, primary, primary_err).".format(p=path, n=n_cols)
+        )
+    time, primary, primary_err = arr[0], arr[1], arr[2]
+    covariates = {}
+    if header is not None and len(header) >= 4 and n_cols >= 4:
+        for i, name in enumerate(header[3:], start=3):
+            if i < n_cols:
+                covariates[name] = arr[i]
+        # Legacy alias for users still selecting `_against,custom_series`.
+        if covariates and 'custom_series' not in covariates:
+            first_name = header[3]
+            if first_name in covariates:
+                covariates['custom_series'] = covariates[first_name]
+    elif header is None and n_cols >= 4:
+        # Legacy positional 4th column.
+        covariates['custom_series'] = arr[3]
+    custom_series = covariates.get('custom_series', np.zeros_like(time))
+    return time, primary, primary_err, custom_series, covariates
+
+
+def _build_linear_design_matrix(data_inst, col_tokens, time_axis):
+    """Build the per-instrument design matrix for ``sample_linear_multi``.
+
+    Parameters
+    ----------
+    data_inst : dict
+        Per-instrument data dict (``self.data[inst]``) — must contain
+        a populated ``'covariates'`` dict.
+    col_tokens : list[str]
+        Column names declared by ``baseline_<key>_<inst>_cols``.
+        Special tokens:
+
+        - ``bias``    -> column of ones (NOT standardized)
+        - any other   -> looked up in ``data_inst['covariates']``;
+                         standardized to zero-mean, unit-variance
+    time_axis : ndarray
+        Used only for the length of the ``bias`` column.
+
+    Returns
+    -------
+    X : ndarray of shape (n_samples, n_cols)
+        Design matrix, columns ordered as in ``col_tokens``.
+    cols_resolved : list[str]
+        The same token list, returned for explicit traceability when
+        the caller stores it on ``data_inst['design_matrix_cols']``.
+    """
+    covs = data_inst.get('covariates', {}) or {}
+    cols = []
+    for tok in col_tokens:
+        t = tok.strip()
+        if not t:
+            continue
+        if t == 'bias':
+            cols.append(np.ones_like(time_axis, dtype=float))
+        elif t in covs:
+            v = np.asarray(covs[t], dtype=float)
+            mu = float(np.nanmean(v))
+            sd = float(np.nanstd(v))
+            if sd == 0.0:
+                # constant column — keep zero-mean form so it contributes
+                # nothing; user gets a polyfit-degenerate weight that
+                # the prior pulls to zero.
+                cols.append(v - mu)
+            else:
+                cols.append((v - mu) / sd)
+        else:
+            raise ValueError(
+                "baseline_<...>_cols: unknown token '{t}'. Known options: "
+                "'bias' or any of {names}.".format(
+                    t=t, names=sorted(covs.keys())))
+    X = np.column_stack(cols) if cols else np.zeros((len(time_axis), 0))
+    return X, [t.strip() for t in col_tokens if t.strip()]
+
+
 ###############################################################################
 #::: 'Basement' class, which contains all the data, settings, etc.
 ###############################################################################
@@ -187,6 +351,8 @@ class Basement:
         self.load_settings()
         self.load_params()
         self.load_data()
+        self.validate_baseline_against_covariates()
+        self.synthesize_linear_multi_params()
         
         if self.settings['shift_epoch']:
             try:
@@ -510,7 +676,16 @@ class Basement:
             for _pref in _per_inst_prefixes:
                 if _key.startswith(_pref):
                     _suffix = _key[len(_pref):]
-                    if _suffix and _suffix not in _known_insts:
+                    # Strip trailing modifier tokens that turn an inst-keyed
+                    # setting into an inst-keyed sub-setting:
+                    #   baseline_flux_<inst>_against → covariate axis name
+                    #   baseline_flux_<inst>_args    → extra args (e.g. spline s)
+                    _stripped = _suffix
+                    for _mod in ('_against', '_args', '_cols'):
+                        if _stripped.endswith(_mod):
+                            _stripped = _stripped[:-len(_mod)]
+                            break
+                    if _stripped and _stripped not in _known_insts:
                         _orphans.append((_key, _pref, _suffix))
                     break
         if _orphans:
@@ -904,8 +1079,16 @@ class Basement:
             #::: allows the user to fit a baseline not vs. time but vs. a chosen custom series
             if 'baseline_'+key+'_'+inst+'_against' not in self.settings:
                 self.settings['baseline_'+key+'_'+inst+'_against'] = 'time'
-            if self.settings['baseline_'+key+'_'+inst+'_against'] not in ['time','custom_series']:
-                raise ValueError("The setting 'baseline_'+key+'_'+inst+'_against' must be one of ['time', custom_series'], but was '" + self.settings['baseline_'+key+'_'+inst+'_against'] + "'.")
+            # Accept 'time', the legacy 'custom_series' alias, or any
+            # named covariate. The named-covariate existence check needs
+            # the data CSV to be loaded first, so it runs after load_data
+            # in validate_baseline_against_covariates().
+            _av = str(self.settings['baseline_'+key+'_'+inst+'_against']).strip()
+            if not _av:
+                raise ValueError(
+                    "The setting 'baseline_{k}_{i}_against' must be 'time', "
+                    "'custom_series', or a named covariate column from "
+                    "{i}.csv. Got an empty string.".format(k=key, i=inst))
 
 
         #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
@@ -1849,11 +2032,8 @@ class Basement:
         #::: photometry
         #======================================================================
         for inst in self.settings['inst_phot']:
-            try:
-                time, flux, flux_err, custom_series = np.genfromtxt(os.path.join(self.datadir,inst+'.csv'), delimiter=',', dtype=float, unpack=True)[0:4]     
-            except:
-                time, flux, flux_err = np.genfromtxt(os.path.join(self.datadir,inst+'.csv'), delimiter=',', dtype=float, unpack=True)[0:3]     
-                custom_series = np.zeros_like(time)
+            time, flux, flux_err, custom_series, covariates = _load_inst_csv(
+                os.path.join(self.datadir, inst+'.csv'))
             if any(np.isnan(time*flux*flux_err*custom_series)):
                 raise ValueError('There are NaN values in "'+inst+'.csv". Please make sure everything is fine with your data, then exclude these rows from the file and restart.')
             if any(flux_err==0):
@@ -1908,23 +2088,32 @@ class Basement:
                 flux = flux[_mask]
                 flux_err = flux_err[_mask]
                 custom_series = custom_series[_mask]
+                # keep named covariates row-aligned with flux
+                covariates = {k: v[_mask] for k, v in covariates.items()}
 
             self.fulldata[inst] = {
                           'time':time,
                           'flux':flux,
                           'err_scales_flux':flux_err/np.nanmean(flux_err),
                           'custom_series':custom_series,
+                          'covariates':dict(covariates),
                           'raw_clipped_time':_clipped_time,
                           'raw_clipped_flux':_clipped_flux,
                           'raw_clipped_flux_err':_clipped_flux_err,
                          }
             if (self.settings['fast_fit']) and (len(self.settings['inst_phot'])>0):
                 time, flux, flux_err, custom_series = self.reduce_phot_data(time, flux, flux_err, custom_series=custom_series, inst=inst)
+                # reduce_phot_data writes the kept indices to fulldata; use
+                # them to keep every covariate aligned with the new time grid.
+                _ind_in = self.fulldata[inst].get('all_ind_in')
+                if _ind_in is not None and len(covariates):
+                    covariates = {k: v[_ind_in] for k, v in covariates.items()}
             self.data[inst] = {
                           'time':time,
                           'flux':flux,
                           'err_scales_flux':flux_err/np.nanmean(flux_err),
                           'custom_series':custom_series,
+                          'covariates':dict(covariates),
                           'raw_clipped_time':_clipped_time,
                           'raw_clipped_flux':_clipped_flux,
                           'raw_clipped_flux_err':_clipped_flux_err,
@@ -1957,11 +2146,8 @@ class Basement:
         #::: RV
         #======================================================================
         for inst in self.settings['inst_rv']:
-            try:
-                time, rv, rv_err, custom_series = np.genfromtxt( os.path.join(self.datadir,inst+'.csv'), delimiter=',', dtype=float, unpack=True)[0:4]       
-            except:
-                time, rv, rv_err = np.genfromtxt( os.path.join(self.datadir,inst+'.csv'), delimiter=',', dtype=float, unpack=True)[0:3]              
-                custom_series = np.zeros_like(time)
+            time, rv, rv_err, custom_series, covariates = _load_inst_csv(
+                os.path.join(self.datadir, inst+'.csv'))
             if any(np.isnan(time*rv*rv_err*custom_series)):
                 raise ValueError('There are NaN values in "'+inst+'.csv". Please make sure everything is fine with your data, then exclude these rows from the file and restart.')
             #aCkTuaLLLyy rv_err=0 is ok, since we add a jitter term here anyway (instead of scaling)
@@ -1975,25 +2161,24 @@ class Basement:
                           'time':time,
                           'rv':rv,
                           'white_noise_rv':rv_err,
-                          'custom_series':custom_series
+                          'custom_series':custom_series,
+                          'covariates':dict(covariates),
                          }
-            
+
         #======================================================================
         #::: RV2 (for detached binaries)
         #======================================================================
         for inst in self.settings['inst_rv2']:
-            try:
-                time, rv, rv_err, custom_series = np.genfromtxt( os.path.join(self.datadir,inst+'.csv'), delimiter=',', dtype=float, unpack=True)[0:4]       
-            except:
-                time, rv, rv_err = np.genfromtxt( os.path.join(self.datadir,inst+'.csv'), delimiter=',', dtype=float, unpack=True)[0:3]              
-                custom_series = np.zeros_like(time)
+            time, rv, rv_err, custom_series, covariates = _load_inst_csv(
+                os.path.join(self.datadir, inst+'.csv'))
             if not all(np.diff(time)>0):
                 raise ValueError('Your time array in "'+inst+'.csv" is not sorted. You will want to check that...')
             self.data[inst] = {
                           'time':time,
                           'rv2':rv,
                           'white_noise_rv2':rv_err,
-                          'custom_series':custom_series
+                          'custom_series':custom_series,
+                          'covariates':dict(covariates),
                          }
         
         #======================================================================
@@ -2211,14 +2396,129 @@ class Basement:
         time = time[ind_in]
         flux = flux[ind_in]
         flux_err = flux_err[ind_in]
-        if custom_series is None: 
+        if custom_series is None:
             return time, flux, flux_err
         else:
             custom_series = custom_series[ind_in]
             return time, flux, flux_err, custom_series
-    
-    
-    
+
+
+    ###############################################################################
+    #::: cross-file validation: baseline_<key>_<inst>_against must name a real column
+    ###############################################################################
+    def validate_baseline_against_covariates(self):
+        """Confirm every ``baseline_<key>_<inst>_against`` value names a
+        loaded column. Run after :meth:`load_data` so per-inst covariate
+        dicts are populated.
+
+        Raises ``ValueError`` with an actionable message if a setting
+        points to a column that isn't in ``self.data[inst]['covariates']``
+        and isn't one of the legacy fixed names (``time``,
+        ``custom_series``).
+        """
+        for key, key2 in zip(['flux', 'rv', 'rv2'],
+                             ['inst_phot', 'inst_rv', 'inst_rv2']):
+            for inst in self.settings.get(key2, []):
+                skey = 'baseline_'+key+'_'+inst+'_against'
+                against = self.settings.get(skey, 'time')
+                if against in ('time', 'custom_series'):
+                    continue
+                covs = self.data.get(inst, {}).get('covariates', {})
+                if against in covs:
+                    continue
+                known = ['time', 'custom_series'] + sorted(covs.keys())
+                raise ValueError(
+                    "{skey}={got!r} but {inst}.csv has no column named "
+                    "'{got}'. Known options for this instrument: {known}. "
+                    "Add a `#time,{key}_err,...,{got},...` header line to "
+                    "{inst}.csv to expose the column.".format(
+                        skey=skey, got=against, inst=inst,
+                        known=known, key=key,
+                    )
+                )
+
+
+
+    ###############################################################################
+    #::: allocate fit-vector entries for every sample_linear_multi baseline
+    ###############################################################################
+    def synthesize_linear_multi_params(self):
+        """Build the per-instrument design matrix and inject one fit
+        parameter per column for every ``sample_linear_multi`` baseline.
+
+        Called after :meth:`load_data` so per-inst covariate arrays are
+        already populated. New weights are appended to ``self.fitkeys``
+        / ``self.theta_0`` / ``self.bounds`` etc. with a default
+        ``normal 0 1e3`` prior (matching timex), unless the user
+        pre-declared the row in ``params.csv`` — in which case the
+        user's prior is honoured and only the column is registered in
+        the design-matrix metadata.
+
+        Mirrors timex's ``pm.Normal('{name}_weights', mu=0, sd=1e3,
+        shape=X.shape[1])`` + ``pt.dot(X, weights)`` pattern.
+        """
+        new_keys, new_labels, new_units, new_truths = [], [], [], []
+        new_theta0, new_bounds, new_init_err = [], [], []
+        for key, key2 in zip(['flux', 'rv', 'rv2'],
+                             ['inst_phot', 'inst_rv', 'inst_rv2']):
+            for inst in self.settings.get(key2, []):
+                btype = self.settings.get('baseline_'+key+'_'+inst, 'none')
+                if btype not in ('sample_linear_multi', 'hybrid_linear_multi'):
+                    continue
+                cols_setting = self.settings.get(
+                    'baseline_'+key+'_'+inst+'_cols', '')
+                tokens = [t for t in str(cols_setting).strip().split() if t]
+                if not tokens:
+                    raise ValueError(
+                        "baseline_{k}_{i}={t} requires baseline_{k}_{i}_cols "
+                        "to list one or more covariate names (and optionally "
+                        "the 'bias' token), space-separated.".format(
+                            k=key, i=inst, t=btype))
+                time_axis = self.data[inst]['time']
+                X, cols_resolved = _build_linear_design_matrix(
+                    self.data[inst], tokens, time_axis)
+                self.data[inst]['design_matrix'] = X
+                self.data[inst]['design_matrix_cols'] = cols_resolved
+                # Tier 2 (hybrid_linear_multi) marginalises the weights
+                # analytically — no fit-vector rows synthesized.
+                if btype == 'hybrid_linear_multi':
+                    continue
+                for col in cols_resolved:
+                    pname = 'baseline_linmulti_'+col+'_'+key+'_'+inst
+                    if pname in self.params:
+                        # User-declared row honoured — register only.
+                        continue
+                    self.params[pname] = 0.0
+                    new_keys.append(pname)
+                    new_labels.append('$w_{'+col+';'+inst+'}$')
+                    new_units.append('')
+                    new_truths.append(np.nan)
+                    new_theta0.append(0.0)
+                    new_bounds.append(['normal', 0.0, 1e3])
+                    new_init_err.append(1e-2)
+        if new_keys:
+            self.allkeys = np.concatenate(
+                [self.allkeys, np.array(new_keys, dtype=object)])
+            self.coupled_with = list(self.coupled_with) + [None] * len(new_keys)
+            self.fitkeys = np.concatenate(
+                [self.fitkeys, np.array(new_keys, dtype=object)])
+            self.fitlabels = np.concatenate(
+                [self.fitlabels, np.array(new_labels, dtype=object)])
+            self.fitunits = np.concatenate(
+                [self.fitunits, np.array(new_units, dtype=object)])
+            self.fittruths = np.concatenate(
+                [self.fittruths, np.array(new_truths, dtype=float)])
+            self.theta_0 = np.concatenate(
+                [self.theta_0, np.array(new_theta0, dtype=float)])
+            if np.isscalar(self.init_err):
+                self.init_err = np.full(self.ndim, float(self.init_err))
+            self.init_err = np.concatenate(
+                [self.init_err, np.array(new_init_err, dtype=float)])
+            self.bounds = list(self.bounds) + new_bounds
+            self.ndim = len(self.theta_0)
+
+
+
     ###############################################################################
     #::: setup TTV fit (if chosen)
     ###############################################################################

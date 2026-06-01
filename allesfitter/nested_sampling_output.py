@@ -426,6 +426,123 @@ def plot_chromatic_rr_histogram(posterior_samples, prefix='ns'):
 ###############################################################################
 #::: convert params.csv into a LaTeX prior table
 ###############################################################################
+def plot_linear_baseline_components(posterior_samples=None, prefix='ns'):
+    """timex-style diagnostic of every linear-multi baseline in the fit.
+
+    For each instrument whose ``baseline_<key>_<inst>`` is
+    ``sample_linear_multi`` or ``hybrid_linear_multi`` this writes
+    ``<outdir>/<prefix>_linear_baseline_<inst>.pdf`` with two stacked
+    panels:
+
+      1. Each column of the (standardized) design matrix overlaid on the
+         same time axis, with the fitted weight in the legend.
+      2. The resulting linear combination ``X @ w`` — the actual
+         systematics curve subtracted from the residuals.
+
+    Weights come from:
+
+      * sample_linear_multi → posterior median of the
+        ``baseline_linmulti_<col>_<key>_<inst>`` fit params.
+      * hybrid_linear_multi → analytic MAP solve at the posterior-
+        median transit/LDC/err params via
+        :func:`computer._hybrid_linear_multi_solve` (the marginalised
+        weights aren't in the posterior table by construction).
+
+    No-op when no inst uses a linear-multi baseline. Wrapped at the
+    caller in ``ns_output`` / ``mcmc_output`` with a MemoryError-safe
+    try/except so a plot failure never aborts the pipeline.
+    """
+    # Local imports to avoid pulling computer at module load.
+    from .computer import (
+        update_params, calculate_model, calculate_yerr_w,
+        calculate_stellar_var, _hybrid_linear_multi_solve,
+    )
+    settings = config.BASEMENT.settings
+    linmulti_kinds = ('sample_linear_multi', 'hybrid_linear_multi')
+
+    # Build a per-inst (key, baseline_type) work list.
+    targets = []
+    for key, key2 in zip(('flux', 'rv', 'rv2'),
+                         ('inst_phot', 'inst_rv', 'inst_rv2')):
+        for inst in settings.get(key2, []):
+            btype = settings.get('baseline_'+key+'_'+inst, 'none')
+            if btype in linmulti_kinds:
+                targets.append((inst, key, btype))
+    if not targets:
+        return
+
+    # Median params from the posterior (used by both Tier 1 weight lookup
+    # and Tier 2 analytic solve).
+    if posterior_samples is None:
+        params_median = config.BASEMENT.params
+        theta_med = np.array(config.BASEMENT.theta_0, dtype=float)
+    else:
+        # Median of the posterior; same shape contract as elsewhere.
+        theta_med = np.median(np.asarray(posterior_samples), axis=0)
+        params_median = update_params(theta_med)
+
+    for inst, key, btype in targets:
+        X = config.BASEMENT.data[inst].get('design_matrix')
+        cols = config.BASEMENT.data[inst].get('design_matrix_cols', [])
+        if X is None or len(cols) == 0:
+            continue
+        t = config.BASEMENT.data[inst]['time']
+
+        if btype == 'sample_linear_multi':
+            w = np.array([
+                params_median['baseline_linmulti_'+c+'_'+key+'_'+inst]
+                for c in cols
+            ], dtype=float)
+            w_provenance = 'posterior median'
+        else:   # hybrid_linear_multi — analytic MAP
+            model = calculate_model(params_median, inst, key)
+            yerr = calculate_yerr_w(params_median, inst, key)
+            try:
+                stellar_var = calculate_stellar_var(
+                    params_median, inst, key,
+                    model=model, baseline=0., yerr_w=yerr)
+            except Exception:
+                stellar_var = 0.0
+            y_resid = config.BASEMENT.data[inst][key] - model - stellar_var
+            w, _corr = _hybrid_linear_multi_solve(inst, key, y_resid, yerr)
+            w_provenance = 'analytic MAP'
+
+        n_cols = X.shape[1]
+        fig_h = max(5.0, 2.0 + 0.8 * n_cols)
+        fig, axes = plt.subplots(
+            2, 1, figsize=(10, fig_h),
+            gridspec_kw={'height_ratios': [n_cols, 2]},
+            sharex=True,
+        )
+
+        # Row 0: each design-matrix column with its weight in the legend.
+        offset = 0.0
+        step = 1.2 * float(np.max(np.abs(X))) if np.any(X) else 1.0
+        for j, name in enumerate(cols):
+            col = X[:, j]
+            axes[0].plot(t, col + offset, lw=0.8,
+                         label='{:s}  w={:+.4f}'.format(name, w[j]))
+            offset += step
+        axes[0].set_ylabel('standardized covariate (offset)')
+        axes[0].legend(loc='upper right', fontsize='small', framealpha=0.85)
+        axes[0].set_title(
+            '{i}  ({t};  weights: {p})'.format(
+                i=inst, t=btype, p=w_provenance))
+
+        # Row 1: the linear combination X @ w (the actual baseline curve).
+        axes[1].plot(t, X @ w, color='k', lw=1.0)
+        axes[1].set_ylabel(r'$X \cdot w$  (rel. flux)')
+        axes[1].set_xlabel('time')
+        axes[1].axhline(0, color='grey', lw=0.5, ls='--')
+
+        fig.tight_layout()
+        out = os.path.join(
+            config.BASEMENT.outdir,
+            prefix + '_linear_baseline_' + inst + '.pdf')
+        fig.savefig(out, bbox_inches='tight')
+        plt.close(fig)
+
+
 def write_priors_latex_table(datadir=None, outpath=None):
     '''Convert ``params.csv`` into a LaTeX prior table.
 
@@ -621,6 +738,13 @@ def ns_output(datadir, backend=None):
         plot_chromatic_rr_histogram(posterior_samples)
     except Exception as _e:
         logprint('\n! WARNING: chromatic Rp/Rs histogram could not be produced: ' + str(_e))
+
+    #::: linear-multi baseline component diagnostic (timex-style; no-op
+    #::: when no inst uses sample_linear_multi / hybrid_linear_multi)
+    try:
+        plot_linear_baseline_components(posterior_samples, prefix='ns')
+    except (MemoryError, Exception) as _e:
+        logprint('\n! WARNING: linear-multi baseline components plot failed: ' + str(_e))
     
     
     #::: output the results
