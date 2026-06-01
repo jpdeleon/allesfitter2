@@ -220,7 +220,13 @@ def update_params(theta):
     for inst in config.BASEMENT.settings['inst_all']:
         for obj in ['host']+config.BASEMENT.settings['companions_all']:
         
-            bandpass = config.BASEMENT.get_bandpass(inst)
+            # LDC keys are bandpass-only when settings.csv carries a
+            # bandpass row, regardless of the chromatic flag — limb
+            # darkening depends on wavelength, not on the rr-naming
+            # convention. Use get_ldc_bandpass (not get_bandpass) so the
+            # chromatic,False override does not collapse LDC keys back
+            # to the inst name.
+            bandpass = config.BASEMENT.get_ldc_bandpass(inst)
             if bandpass:
                 ldc_suffix = '_' + bandpass
             else:

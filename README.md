@@ -217,6 +217,8 @@ This stays `chromatic=False` (single unique band) but ties both instruments to o
 
 If `-bp` is **omitted** with multiple distinct `-f` instruments, the script warns and falls back to an achromatic `params.csv` for backward compatibility.
 
+To force achromatic mode even when `bandpass` lists multiple labels (e.g. to fit a low-S/N target with one shared `b_rr` across MuSCAT g/r/i/z), set `chromatic,False` explicitly in `settings.csv`. The `bandpass` row stays useful for plot labels and per-band LDC priors; the validator then requires `b_rr` in `params.csv` and rejects per-band `b_rr_<bp>` rows with an actionable message. The auto-detection rule (`len(unique_bandpasses) > 1`) only fires when `chromatic` is absent from `settings.csv`, so omitting it preserves the legacy behaviour bit-for-bit.
+
 After `ns_fit` + `ns_output`, the per-bandpass `Rp/Rs` posteriors are overlaid in `ns_chromatic_rr_<companion>.pdf` — useful for spotting wavelength-dependent depth differences (atmospheric features, spot contamination, dilution mismatch) at a glance. When `params_star.csv` is present, a second panel below the histograms shows the implied planet radius posterior with twin x-axes (`R⊕` bottom, `R_Jup` top) — R★ uncertainty is propagated from the asymmetric normal in `params_star.csv`.
 
 ### Sharing a baseline GP across instruments (joint celerite realization)

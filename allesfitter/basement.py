@@ -430,17 +430,26 @@ class Basement:
     def get_bandpass(self, inst):
         """
         Return bandpass for an instrument, or None if achromatic.
-        
+
+        Respects an explicit ``chromatic,False`` override in settings.csv:
+        when the user forces achromatic mode (even with a multi-label
+        bandpass row), this returns ``None`` for every instrument so
+        downstream callers fall through to achromatic parameter naming
+        (``b_rr`` instead of ``b_rr_<bp>``, per-inst LDC keys instead
+        of per-bandpass).
+
         Parameters
         ----------
         inst : str
             Instrument name (e.g., 'tess', 'kepler')
-        
+
         Returns
         -------
         str or None
-            Bandpass name if chromatic, None if achromatic
+            Bandpass name if chromatic, None if achromatic.
         """
+        if not self.settings.get('chromatic', False):
+            return None
         return self.settings.get('bandpass', {}).get(inst)
     
     
@@ -472,14 +481,31 @@ class Basement:
     ###############################################################################
     #::: get_ldc_key: helper to get the correct LDC scalar key for a role/n/inst
     ###############################################################################
+    def get_ldc_bandpass(self, inst):
+        """
+        Return the LDC suffix bandpass for an instrument.
+
+        UNLIKE :meth:`get_bandpass`, this method consults the raw
+        ``settings['bandpass']`` dict directly and **ignores the
+        chromatic flag**. Limb darkening depends only on wavelength, so
+        LDC keys are always keyed by bandpass when a bandpass row is
+        present — even under an explicit ``chromatic,False`` override.
+
+        Returns the bandpass label when known, else ``None``.
+        """
+        return (self.settings.get('bandpass') or {}).get(inst)
+
+
     def get_ldc_key(self, role, n, inst, space='u'):
         """
-        Return the per-coefficient LDC key for a role, coefficient index, and instrument.
+        Return the per-coefficient LDC key for a role, coefficient index,
+        and instrument.
 
-        The suffix is the instrument's bandpass when chromatic (so multiple
-        instruments sharing a bandpass share a single LDC scalar) and the
-        instrument name otherwise — matching the suffix used by the validator
-        in ``load_params`` and the assembler in ``computer.py``.
+        The suffix is the instrument's bandpass when settings.csv carries
+        a bandpass row (so multiple instruments sharing a bandpass share
+        a single LDC scalar) — independent of the ``chromatic`` flag,
+        because limb darkening is a function of wavelength only. Falls
+        back to the instrument name when no bandpass row is provided.
 
         Parameters
         ----------
@@ -495,12 +521,12 @@ class Basement:
         Returns
         -------
         str
-            For example ``host_ldc_u1_tess`` (chromatic with bandpass='tess')
-            or ``host_ldc_u1_tess_pdcsap`` (achromatic, inst='tess_pdcsap').
+            For example ``host_ldc_u1_tess`` (bandpass='tess') or
+            ``host_ldc_u1_tess_pdcsap`` (no bandpass row, fallback).
         """
         if space not in ('u', 'q'):
             raise ValueError(f"space must be 'u' or 'q', got {space!r}")
-        bandpass = self.get_bandpass(inst)
+        bandpass = self.get_ldc_bandpass(inst)
         suffix = bandpass if bandpass else inst
         return f'{role}_ldc_{space}{n}_{suffix}'
 
@@ -639,7 +665,15 @@ class Basement:
 
         # Determine if chromatic (multiple unique bandpasses) or achromatic
         unique_bandpasses = set(self.settings['bandpass'].values())
-        self.settings['chromatic'] = len(unique_bandpasses) > 1
+        # Honour an explicit user-set `chromatic,True/False` in settings.csv;
+        # otherwise auto-detect from the number of unique bandpass labels
+        # (legacy behaviour). The override lets users force a single shared
+        # b_rr across multiple bandpasses (e.g. low-S/N MuSCAT 4-band fits)
+        # while keeping the bandpass row for plot labels / per-band LDCs.
+        if 'chromatic' in self._settings_raw_keys:
+            self.settings['chromatic'] = set_bool(str(self.settings['chromatic']))
+        else:
+            self.settings['chromatic'] = len(unique_bandpasses) > 1
 
 
         #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
@@ -1429,6 +1463,38 @@ class Basement:
                     "params.csv:\n  - " + "\n  - ".join(_problems)
                 )
 
+        #==========================================================================
+        #::: luser-proof: explicit `chromatic,False` override forbids per-band
+        #::: rr rows in params.csv. Without this check those rows would be
+        #::: silently ignored (every `get_bandpass(inst)` returns None under
+        #::: the override), masking the user's mistake.
+        #==========================================================================
+        elif (not _is_chromatic) and _companions and _known_bands \
+                and ('chromatic' in getattr(self, '_settings_raw_keys', set())):
+            _stripped_set = set(_stripped)
+            _problems = []
+            for _c in _companions:
+                _stray = sorted(
+                    n for n in _stripped_set
+                    if n.startswith(_c + '_rr_') and n[len(_c + '_rr_'):] in _known_bands
+                )
+                if _stray:
+                    _achromatic_key = _c + '_rr'
+                    _problems.append(
+                        f"companion '{_c}': settings.csv has 'chromatic,False' "
+                        f"(achromatic override) but params.csv carries per-band "
+                        f"row(s) " + ", ".join(_stray) +
+                        f". Remove them and add a single '{_achromatic_key}' row, "
+                        f"or set 'chromatic,True' / drop the override to fit "
+                        f"per-band radius ratios."
+                    )
+            if _problems:
+                raise ValueError(
+                    "Chromatic-override configuration mismatch between "
+                    "settings.csv ('chromatic,False') and params.csv:\n  - "
+                    + "\n  - ".join(_problems)
+                )
+
 
         #==========================================================================
         #::: function to assure backwards compability
@@ -1680,17 +1746,21 @@ class Basement:
         for companion in self.settings['companions_all']:
             for inst in self.settings['inst_all']:
                 
-                # Get bandpass for this instrument (None if achromatic)
+                # rr-key bandpass: respects the chromatic flag so an
+                # explicit `chromatic,False` override collapses rr keys
+                # back to the achromatic `<companion>_rr`.
                 bandpass = self.get_bandpass(inst)
-                
-                # Determine suffix for parameter keys
-                # For chromatic mode: use bandpass name (e.g., 'tess')
-                # For achromatic mode: use instrument name (e.g., 'tess')
-                # This way, existing parameter naming is preserved for achromatic
                 if bandpass:
                     bp_suffix = '_' + bandpass
                 else:
-                    bp_suffix = ''  # Will use inst as suffix in LDC below
+                    bp_suffix = ''
+
+                # LDC-key bandpass: always reads the raw bandpass dict
+                # (independent of the chromatic flag) because limb
+                # darkening is a function of wavelength, not of the
+                # rr-naming convention. Falls back to the inst name only
+                # when settings.csv has no bandpass row at all.
+                _ldc_bp = self.get_ldc_bandpass(inst)
                 
                 #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
                 #::: ellc defaults
@@ -1714,7 +1784,7 @@ class Basement:
                 validate('dil_'+inst, 0., -np.inf, np.inf)
                 
                 #::: limb darkenings, u-space (per-bandpass in chromatic, per-inst in achromatic)
-                ldc_suffix = bp_suffix if bandpass else '_' + inst
+                ldc_suffix = ('_' + _ldc_bp) if _ldc_bp else ('_' + inst)
                 validate('host_ldc_u1'+ldc_suffix, None, 0, 1)
                 validate('host_ldc_u2'+ldc_suffix, None, 0, 1)
                 validate('host_ldc_u3'+ldc_suffix, None, 0, 1)
