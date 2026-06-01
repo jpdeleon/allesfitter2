@@ -1719,12 +1719,15 @@ dir_path = '.'
 fig = allesfitter.show_initial_guess(dir_path)
 #allesfitter.prepare_ttv_fit(dir_path, style='tessplot')
 
-# mcmc sampling
+### ===optimization===
+#allesfitter.optimize(method='cmaes', polish=True, n_restars=3)
+
+### ===mcmc sampling===
 #with allesfitter.log_run('mcmc_fit', dir_path):
 #    allesfitter.mcmc_fit(dir_path)
 #allesfitter.mcmc_output(dir_path)
 
-# nested sampling for evidence / model comparison
+### ===nested sampling for evidence / model comparison===
 #with allesfitter.log_run('ns_fit', dir_path):
 #    allesfitter.ns_fit(dir_path)
 #allesfitter.ns_output(dir_path)"""

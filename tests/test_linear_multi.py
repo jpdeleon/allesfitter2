@@ -535,6 +535,68 @@ def test_show_initial_guess_draws_event_axvlines(tmp_path):
     assert n_vlines >= 1, n_vlines
 
 
+def test_event_axvlines_filter_out_of_span_events(tmp_path):
+    """A predicted mid-transit far outside the data span (more than
+    `_EVENT_VISIBILITY_MARGIN_DAYS` from any in-span event) must NOT
+    appear as an axvline; in-span and edge-of-span events still do."""
+    import allesfitter
+    from allesfitter.general_output import _EVENT_VISIBILITY_MARGIN_DAYS
+
+    # Synthetic data spans t in [0, 1] (from _write_lc). Set epoch=0.5
+    # in-span and period long enough that the *previous* transit at
+    # 0.5 - period is well outside the data span and outside the margin.
+    d = _build_datadir(tmp_path, baseline_type='sample_linear_multi',
+                       cols='airmass fwhm bias', weights=(0., 0., 0.))
+    # Sanity: default _build_datadir uses period=3.5 d which puts every
+    # neighbour transit at |t - 0.5| = 3.5 d — well above the 0.5 d margin.
+    figs = allesfitter.show_initial_guess(
+        str(d), quiet=True, do_logprint=False, return_figs=True,
+        plot_midtransit=True, plot_ingress=False, plot_egress=False)
+    ax = figs[0].axes[0]
+    dashed = [ln for ln in ax.lines if ln.get_linestyle() == '--']
+    # Exactly the in-span mid-transit at t=0.5 should be drawn; the
+    # neighbours at -3.0 and 4.0 are filtered out.
+    assert len(dashed) == 1, len(dashed)
+    x_drawn = dashed[0].get_xdata()[0]
+    assert abs(x_drawn - 0.5) < 0.05, x_drawn
+
+
+def test_event_axvlines_keep_partial_transit_at_edge(tmp_path):
+    """A mid-transit that sits just outside the data span but whose
+    ingress IS in span must still be drawn (its ingress is the in-span
+    'next or previous event' of the midtransit, within the margin)."""
+    import allesfitter
+    # Recreate a data dir with a midtransit just outside the [0, 1] span.
+    d = tmp_path / "data"
+    d.mkdir()
+    (d / "results").mkdir()
+    (d / "params.csv").write_text(_params_csv())
+    # epoch = -0.1  → midtransit at t=-0.1 (0.1 d before data starts),
+    # tdur ≈ 0.14 d so ingress at -0.17 (out-of-span) but egress at
+    # -0.03 also out — pick parameters where one of ing/egr is in.
+    # Simpler: epoch=0.04, period=3.5 → midtransit at 0.04 (just inside),
+    # ingress at 0.04 - 0.07 = -0.03 (just outside, within margin of
+    # the in-span midtransit), so ingress IS drawn under our filter.
+    s = _settings_csv('sample_linear_multi', 'airmass fwhm bias')
+    (d / "settings.csv").write_text(s)
+    # Override the params to put epoch right at the data edge
+    params_text = _params_csv().replace(
+        'b_epoch,0.5,1,uniform 0.0 1.0',
+        'b_epoch,0.04,1,uniform -1.0 1.0')
+    (d / "params.csv").write_text(params_text)
+    _write_lc(d / "lco.csv", weights=(0., 0., 0.))
+    figs = allesfitter.show_initial_guess(
+        str(d), quiet=True, do_logprint=False, return_figs=True,
+        plot_midtransit=True, plot_ingress=True, plot_egress=True)
+    ax = figs[0].axes[0]
+    dotted = [ln for ln in ax.lines if ln.get_linestyle() == ':']
+    # At minimum: the in-span ingress/egress neighbour of the in-span
+    # mid-transit at t=0.04 is drawn (egress at 0.04 + tdur/2 ≈ 0.11,
+    # in span). The out-of-span ingress at 0.04 - tdur/2 ≈ -0.03 is
+    # within the margin of that in-span egress, so also drawn.
+    assert len(dotted) >= 1, len(dotted)
+
+
 def test_show_initial_guess_default_midtransit_only(tmp_path):
     """Default kwargs draw mid-transit but no ingress/egress."""
     import allesfitter

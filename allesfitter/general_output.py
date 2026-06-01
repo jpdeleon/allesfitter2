@@ -965,16 +965,26 @@ def plot_1(ax, samples, inst, companion, style,
 ###############################################################################
 #::: predicted-event vertical lines on a 'full'-style axis
 ###############################################################################
+# An event (mid-transit / ingress / egress) is rendered iff it falls inside
+# the instrument's data span OR within this margin of an event that IS in
+# the data span. The "next or previous event" filter prunes far-extrapolated
+# predicted events while still surfacing partial transits at the data edges.
+_EVENT_VISIBILITY_MARGIN_DAYS = 0.5
+
+
 def _draw_event_axvlines(ax, base, params_median, companion, inst,
                          plot_midtransit=True, plot_ingress=False,
                          plot_egress=False):
     """Draw black ``axvline``s at every predicted mid-transit (and
-    optionally ingress / egress) within the axis x-range, computed from
-    the companion's epoch, period, and chord-length transit duration
-    (T14) from `(rsuma, cosi, rr)`.
+    optionally ingress / egress) of `companion` that falls inside this
+    instrument's data span, or within
+    ``_EVENT_VISIBILITY_MARGIN_DAYS`` of an event of the same family
+    that does. Events at the edge of the data (partial transits) are
+    therefore drawn; events extrapolated one period out are not.
 
-    Silently no-ops when the orbital geometry is non-transiting or any
-    required parameter is missing — never raises into the plot pipeline.
+    Math: T14 from the chord-length formula (rsuma, cosi, k); midtransit
+    grid T_n = epoch + n*period. Silently no-ops when the orbital
+    geometry is non-transiting or any required parameter is missing.
     """
     from .utils.prior_sanity import _tdur_days_from_orbit
     try:
@@ -1013,22 +1023,65 @@ def _draw_event_axvlines(ax, base, params_median, companion, inst,
             return
         tdur = 0.0
 
-    xlo, xhi = ax.get_xlim()
-    if not np.isfinite([xlo, xhi]).all() or period <= 0:
+    if period <= 0:
         return
-    n_min = int(np.floor((xlo - epoch) / period))
-    n_max = int(np.ceil((xhi - epoch) / period))
-    midtransits = [epoch + n * period
-                   for n in range(n_min, n_max + 1)]
+    t_data = np.asarray(base.data[inst]['time'], dtype=float)
+    if t_data.size == 0:
+        return
+    data_min = float(np.min(t_data))
+    data_max = float(np.max(t_data))
+    margin = _EVENT_VISIBILITY_MARGIN_DAYS
+
+    # Enumerate one extra period on either side so the in-span set covers
+    # events that fall just outside the data with an in-span partner.
+    n_min = int(np.floor((data_min - period - margin - epoch) / period))
+    n_max = int(np.ceil((data_max + period + margin - epoch) / period))
+    midtransits = [epoch + n * period for n in range(n_min, n_max + 1)]
+
+    # Build the in-span set of events of every TYPE the user asked to draw.
+    # An out-of-span event is kept iff some in-span event of *any* enabled
+    # type is within `margin` of it — i.e. the "next or previous" event in
+    # the sorted candidate list is close enough to a real observed point.
+    in_span = []
+    for t0 in midtransits:
+        if plot_midtransit and data_min <= t0 <= data_max:
+            in_span.append(t0)
+        if plot_ingress and tdur > 0:
+            ti = t0 - 0.5 * tdur
+            if data_min <= ti <= data_max:
+                in_span.append(ti)
+        if plot_egress and tdur > 0:
+            te = t0 + 0.5 * tdur
+            if data_min <= te <= data_max:
+                in_span.append(te)
+    in_span.sort()
+
+    def _visible(t):
+        if data_min <= t <= data_max:
+            return True
+        if not in_span:
+            return False
+        idx = int(np.searchsorted(in_span, t))
+        # Nearest in-span event in time (could be the one before or after).
+        cands = []
+        if idx > 0:
+            cands.append(in_span[idx - 1])
+        if idx < len(in_span):
+            cands.append(in_span[idx])
+        return min(abs(t - c) for c in cands) <= margin
 
     _kw = dict(color='k', lw=0.8, alpha=0.6, zorder=0)
     for t0 in midtransits:
         if plot_ingress and tdur > 0:
-            ax.axvline(t0 - 0.5 * tdur, ls=':', **_kw)
-        if plot_midtransit:
+            ti = t0 - 0.5 * tdur
+            if _visible(ti):
+                ax.axvline(ti, ls=':', **_kw)
+        if plot_midtransit and _visible(t0):
             ax.axvline(t0, ls='--', **_kw)
         if plot_egress and tdur > 0:
-            ax.axvline(t0 + 0.5 * tdur, ls=':', **_kw)
+            te = t0 + 0.5 * tdur
+            if _visible(te):
+                ax.axvline(te, ls=':', **_kw)
 
 
 
