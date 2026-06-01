@@ -15,6 +15,10 @@ Web: www.mnguenther.com
 """
 
 #::: modules
+import json
+import os
+import tempfile
+import warnings
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import minimize, basinhopping
@@ -81,7 +85,83 @@ def simulate_PDF(median, lower_err, upper_err, size=1, plot=True):
 
 
 
-def calculate_skewed_normal_params(median, lower_err, upper_err):
+###############################################################################
+#::: disk cache for the expensive (alpha, loc, scale) solve
+###############################################################################
+#
+# `calculate_skewed_normal_params` solves an inverse percentile problem via
+# scipy.stats.skewnorm.ppf, which internally numerically integrates the
+# skewed-normal CDF. For typical stellar inputs this takes ~10–15 s per call;
+# in pipelines that re-init Basement many times (e.g. per-target loops or
+# successive `config.init(datadir)` calls) the cost adds up to tens of
+# minutes for inputs that never change.
+#
+# Cache the (median, lower_err, upper_err) → (alpha, loc, scale) mapping to
+# a JSON file on disk. Same inputs in any future process get the result
+# instantly. Override the path with the ALLESFITTER_SIMULATE_PDF_CACHE
+# environment variable; set ALLESFITTER_SIMULATE_PDF_NO_CACHE=1 to bypass.
+
+_CACHE_ENV_PATH = 'ALLESFITTER_SIMULATE_PDF_CACHE'
+_CACHE_ENV_DISABLE = 'ALLESFITTER_SIMULATE_PDF_NO_CACHE'
+_DEFAULT_CACHE_PATH = os.path.join(
+    os.path.expanduser('~'), '.allesfitter', 'simulate_PDF_cache.json'
+)
+
+
+def _cache_path():
+    return os.environ.get(_CACHE_ENV_PATH, _DEFAULT_CACHE_PATH)
+
+
+def _cache_disabled():
+    return os.environ.get(_CACHE_ENV_DISABLE, '').strip() in ('1', 'true', 'True')
+
+
+def _cache_key(median, lower_err, upper_err):
+    """Stable string key from three floats. ``repr(float)`` round-trips
+    losslessly in Python 3, so equal inputs always produce equal keys."""
+    return '{}|{}|{}'.format(repr(float(median)),
+                             repr(float(lower_err)),
+                             repr(float(upper_err)))
+
+
+def _cache_load():
+    path = _cache_path()
+    try:
+        with open(path, 'r') as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return {}
+        return data
+    except (OSError, ValueError):
+        return {}
+
+
+def _cache_save(cache_dict):
+    """Atomic write: dump to a sibling temp file then os.replace into place.
+    On any I/O failure we warn but never raise — the cache is an
+    optimisation, not a correctness requirement.
+    """
+    path = _cache_path()
+    try:
+        os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+        fd, tmp = tempfile.mkstemp(
+            prefix='.simulate_PDF_cache_', dir=os.path.dirname(path) or '.',
+            suffix='.json',
+        )
+        try:
+            with os.fdopen(fd, 'w') as f:
+                json.dump(cache_dict, f, indent=2, sort_keys=True)
+            os.replace(tmp, path)
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+    except OSError as exc:
+        warnings.warn(
+            'simulate_PDF cache write to {p} failed ({e}); next call will '
+            'recompute.'.format(p=path, e=exc))
+
+
+def _calculate_skewed_normal_params_uncached(median, lower_err, upper_err):
     '''
     Fits a screwed normal distribution via its CDF to the [16,50,84]-percentiles
     
@@ -179,8 +259,39 @@ def calculate_skewed_normal_params(median, lower_err, upper_err):
     alpha, loc, scale = sol.x
     return alpha, loc, scale
 
-    
-    
+
+def calculate_skewed_normal_params(median, lower_err, upper_err):
+    """Cached public entry point. See
+    :func:`_calculate_skewed_normal_params_uncached` for the math.
+
+    On a cache hit the JSON read is ~1 ms; on a miss the underlying
+    scipy.optimize.minimize + skewnorm.ppf loop takes ~10–15 s (no change
+    from before this wrapper existed). The result is persisted so future
+    process invocations skip the solve entirely.
+
+    Bypass the cache via the ``ALLESFITTER_SIMULATE_PDF_NO_CACHE=1``
+    environment variable; redirect it via ``ALLESFITTER_SIMULATE_PDF_CACHE``.
+    """
+    if _cache_disabled():
+        return _calculate_skewed_normal_params_uncached(
+            median, lower_err, upper_err)
+    key = _cache_key(median, lower_err, upper_err)
+    cache = _cache_load()
+    if key in cache:
+        try:
+            alpha, loc, scale = cache[key]
+            return float(alpha), float(loc), float(scale)
+        except (TypeError, ValueError):
+            # corrupt entry — fall through and recompute
+            pass
+    alpha, loc, scale = _calculate_skewed_normal_params_uncached(
+        median, lower_err, upper_err)
+    cache[key] = [float(alpha), float(loc), float(scale)]
+    _cache_save(cache)
+    return alpha, loc, scale
+
+
+
 if __name__ == '__main__':
     '''
     For testing, simulate a skewed normal distribution with parameters

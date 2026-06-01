@@ -296,6 +296,7 @@ def optimize(
     workers: int = 1,
     quiet: bool = False,
     resume: bool = False,
+    **_extra_kwargs,
 ) -> OptimizeResult:
     """Find a posterior maximum and (optionally) push it into BASEMENT.theta_0.
 
@@ -349,6 +350,29 @@ def optimize(
         every CMA-ES call writes the final state to the same path so a
         future ``resume=True`` is always possible.
     """
+    if _extra_kwargs:
+        import difflib as _difflib
+        _valid_keys = sorted([
+            'datadir', 'method', 'polish', 'n_restarts', 'sigma0', 'maxfevals',
+            'seed', 'save', 'mutate_basement', 'improvement_threshold',
+            'consistency_threshold', 'skip_bounds_check', 'workers', 'quiet',
+            'resume',
+        ])
+        _bits = []
+        for _bad in sorted(_extra_kwargs):
+            _close = _difflib.get_close_matches(
+                _bad, _valid_keys, n=2, cutoff=0.6)
+            _bits.append(
+                "{!r} (did you mean {}?)".format(
+                    _bad, ' or '.join(repr(c) for c in _close))
+                if _close else "{!r}".format(_bad)
+            )
+        raise TypeError(
+            "optimize() got unexpected keyword argument(s): "
+            + ", ".join(_bits)
+            + ".  Valid keyword arguments: {}.".format(_valid_keys)
+        )
+
     # Bootstrap BASEMENT if the caller hasn't already done so.
     if getattr(config, 'BASEMENT', None) is None \
             or os.path.abspath(config.BASEMENT.datadir) != os.path.abspath(datadir):

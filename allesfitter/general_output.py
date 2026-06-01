@@ -255,12 +255,18 @@ def plot_panel_transits(datadir, ax=None, insts=None, companions=None, colors=No
 ###############################################################################
 #::: plot
 ###############################################################################
-def afplot(samples, companion):
+def afplot(samples, companion,
+           plot_midtransit=False, plot_ingress=False, plot_egress=False):
     '''
     Inputs:
     -------
     samples : array
         samples from the initial guess, or from the MCMC / Nested Sampling posteriors
+    plot_midtransit, plot_ingress, plot_egress : bool
+        Forwarded to :func:`plot_1`; control whether the 'full' time-series
+        panel (leftmost column) draws black ``axvline`` markers at the
+        predicted event times computed from the companion's epoch / period
+        / transit-duration.
     '''
 #    global config.BASEMENT
     
@@ -357,7 +363,10 @@ def afplot(samples, companion):
                             )
                             for _sub_ax in _sub_axes:
                                 _xlim = _sub_ax.get_xlim()
-                                plot_1(_sub_ax, samples, inst, companion, style)
+                                plot_1(_sub_ax, samples, inst, companion, style,
+                                       plot_midtransit=plot_midtransit,
+                                       plot_ingress=plot_ingress,
+                                       plot_egress=plot_egress)
                                 _sub_ax.set_xlim(_xlim)
 
                             # Dedupe: keep ylabel + title on the first
@@ -380,8 +389,11 @@ def afplot(samples, companion):
                             # sub-Axes so axes[i,j].figure etc. still work.
                             axes[i, j] = _sub_axes[0]
                             continue
-                    plot_1(axes[i,j], samples, inst, companion, style)
-    
+                    plot_1(axes[i,j], samples, inst, companion, style,
+                           plot_midtransit=plot_midtransit,
+                           plot_ingress=plot_ingress,
+                           plot_egress=plot_egress)
+
         plt.tight_layout()
         return fig, axes
 
@@ -466,12 +478,13 @@ def guesstimator(params_median, companion, base=None, inst=None):
 ###############################################################################
 #::: plot_1 (helper function)
 ###############################################################################
-def plot_1(ax, samples, inst, companion, style, 
+def plot_1(ax, samples, inst, companion, style,
            base=None, dt=None,
            zoomwindow=None, force_binning=False,
            kwargs_data=None,
            kwargs_model=None,
-           kwargs_ax=None):
+           kwargs_ax=None,
+           plot_midtransit=False, plot_ingress=False, plot_egress=False):
     '''
     Inputs:
     -------
@@ -917,7 +930,7 @@ def plot_1(ax, samples, inst, companion, style,
                 # ax.axis('off')
                 # ax.set( ylim=[0.999,1.0005] )
        
-        if style in ['phase_curve', 
+        if style in ['phase_curve',
                      'phase_curve_residuals']:
             try:
                 phase_curve_no_dips = flux_subfct_sinusoidal_phase_curves(params_median, inst, companion, np.ones_like(xx), xx=xx)
@@ -930,9 +943,95 @@ def plot_1(ax, samples, inst, companion, style,
                 # ax.set( ylim=[0.999,1.001] )
 
 
+    #==========================================================================
+    #::: predicted-event axvlines on the 'full' time-series panel
+    #==========================================================================
+    # The leftmost column of afplot uses style='full' — a literal-time
+    # x-axis where mid-transit / ingress / egress lines are physically
+    # meaningful. Skip every other style (phase folds, etc.) because the
+    # x-axis there is phase, not time.
+    if (style == 'full'
+            and companion in base.settings.get('companions_phot', [])
+            and (plot_midtransit or plot_ingress or plot_egress)):
+        _draw_event_axvlines(
+            ax, base, params_median, companion, inst,
+            plot_midtransit=plot_midtransit,
+            plot_ingress=plot_ingress,
+            plot_egress=plot_egress,
+        )
 
 
-    
+
+###############################################################################
+#::: predicted-event vertical lines on a 'full'-style axis
+###############################################################################
+def _draw_event_axvlines(ax, base, params_median, companion, inst,
+                         plot_midtransit=True, plot_ingress=False,
+                         plot_egress=False):
+    """Draw black ``axvline``s at every predicted mid-transit (and
+    optionally ingress / egress) within the axis x-range, computed from
+    the companion's epoch, period, and chord-length transit duration
+    (T14) from `(rsuma, cosi, rr)`.
+
+    Silently no-ops when the orbital geometry is non-transiting or any
+    required parameter is missing — never raises into the plot pipeline.
+    """
+    from .utils.prior_sanity import _tdur_days_from_orbit
+    try:
+        period = float(params_median[companion+'_period'])
+        epoch  = float(params_median[companion+'_epoch'])
+        rsuma  = float(params_median[companion+'_rsuma'])
+        cosi   = float(params_median[companion+'_cosi'])
+    except (KeyError, TypeError, ValueError):
+        return
+    # rr: achromatic key first, else first matching per-bandpass key.
+    rr = params_median.get(companion+'_rr')
+    if rr is None:
+        try:
+            bp = base.settings.get('bandpass', {}).get(inst)
+        except AttributeError:
+            bp = None
+        if bp is not None:
+            rr = params_median.get(companion+'_rr_'+bp)
+        if rr is None:
+            for k, v in params_median.items():
+                if isinstance(k, str) and k.startswith(companion+'_rr_'):
+                    rr = v
+                    break
+    if rr is None:
+        return
+    try:
+        rr = float(rr)
+    except (TypeError, ValueError):
+        return
+
+    tdur = _tdur_days_from_orbit(period, rsuma, cosi, rr)
+    if tdur is None or not np.isfinite(tdur):
+        # Non-transiting geometry or invalid params → still draw mid-transit
+        # if requested (it's the orbital reference time even without a chord)
+        if not plot_midtransit:
+            return
+        tdur = 0.0
+
+    xlo, xhi = ax.get_xlim()
+    if not np.isfinite([xlo, xhi]).all() or period <= 0:
+        return
+    n_min = int(np.floor((xlo - epoch) / period))
+    n_max = int(np.ceil((xhi - epoch) / period))
+    midtransits = [epoch + n * period
+                   for n in range(n_min, n_max + 1)]
+
+    _kw = dict(color='k', lw=0.8, alpha=0.6, zorder=0)
+    for t0 in midtransits:
+        if plot_ingress and tdur > 0:
+            ax.axvline(t0 - 0.5 * tdur, ls=':', **_kw)
+        if plot_midtransit:
+            ax.axvline(t0, ls='--', **_kw)
+        if plot_egress and tdur > 0:
+            ax.axvline(t0 + 0.5 * tdur, ls=':', **_kw)
+
+
+
 ###############################################################################
 #::: plot individual transits
 ###############################################################################
@@ -1183,15 +1282,46 @@ def save_latex_table(samples, mode):
 ###############################################################################
 #::: show initial guess
 ###############################################################################
-def show_initial_guess(datadir, quiet=False, do_logprint=True, do_plot=True, return_figs=False, kwargs_dict=None):
+def show_initial_guess(datadir, quiet=False, do_logprint=True, do_plot=True, return_figs=False, kwargs_dict=None,
+                       plot_midtransit=True, plot_ingress=False, plot_egress=False, **_extra_kwargs):
+    """Optional ``plot_midtransit`` / ``plot_ingress`` / ``plot_egress``
+    flags draw black ``axvline`` markers at the predicted event times on
+    the leftmost ('full' time-series) column of each ``initial_guess_*.pdf``
+    panel. Defaults: midtransit on, ingress/egress off.
+    """
+    if _extra_kwargs:
+        import difflib as _difflib_show
+        _valid_keys = sorted([
+            'datadir', 'quiet', 'do_logprint', 'do_plot', 'return_figs',
+            'kwargs_dict', 'plot_midtransit', 'plot_ingress', 'plot_egress',
+        ])
+        _bits = []
+        for _bad in sorted(_extra_kwargs):
+            _close = _difflib_show.get_close_matches(
+                _bad, _valid_keys, n=2, cutoff=0.6)
+            _bits.append(
+                "{!r} (did you mean {}?)".format(
+                    _bad, ' or '.join(repr(c) for c in _close))
+                if _close else "{!r}".format(_bad)
+            )
+        raise TypeError(
+            "show_initial_guess() got unexpected keyword argument(s): "
+            + ", ".join(_bits)
+            + ".  Valid keyword arguments: {}.".format(_valid_keys)
+        )
     #::: init
-    config.init(datadir, quiet=quiet)    
-    
+    config.init(datadir, quiet=quiet)
+
     #::: show initial guess
-    if do_logprint: 
+    if do_logprint:
         logprint_initial_guess()
-    if do_plot: 
-        return plot_initial_guess(return_figs=return_figs, kwargs_dict=kwargs_dict)
+    if do_plot:
+        return plot_initial_guess(
+            return_figs=return_figs, kwargs_dict=kwargs_dict,
+            plot_midtransit=plot_midtransit,
+            plot_ingress=plot_ingress,
+            plot_egress=plot_egress,
+        )
     
     
 
@@ -1247,13 +1377,19 @@ def logprint_initial_guess():
 ###############################################################################
 #::: plot initial guess
 ###############################################################################
-def plot_initial_guess(return_figs=False, kwargs_dict=None):
-    
+def plot_initial_guess(return_figs=False, kwargs_dict=None,
+                       plot_midtransit=True, plot_ingress=False, plot_egress=False):
+
     samples = draw_initial_guess_samples()
-    
+
     if return_figs==False:
         for companion in config.BASEMENT.settings['companions_all']:
-            fig, axes = afplot(samples, companion)
+            fig, axes = afplot(
+                samples, companion,
+                plot_midtransit=plot_midtransit,
+                plot_ingress=plot_ingress,
+                plot_egress=plot_egress,
+            )
             if fig is not None:
                 fig.savefig( os.path.join(config.BASEMENT.outdir,'initial_guess_'+companion+'.pdf'), bbox_inches='tight' )
                 plt.close(fig)
@@ -1288,7 +1424,12 @@ def plot_initial_guess(return_figs=False, kwargs_dict=None):
     else:
         fig_list = []
         for companion in config.BASEMENT.settings['companions_all']:
-            fig, axes = afplot(samples, companion)
+            fig, axes = afplot(
+                samples, companion,
+                plot_midtransit=plot_midtransit,
+                plot_ingress=plot_ingress,
+                plot_egress=plot_egress,
+            )
             fig_list.append(fig)
         return fig_list
             

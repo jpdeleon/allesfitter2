@@ -343,6 +343,24 @@ def test_resume_with_multiple_restarts_raises(datadir):
                  save=False, quiet=True, resume=True)
 
 
+def test_typo_kwarg_actionable(tmp_path):
+    """Common kwarg typos must raise TypeError with a Did-you-mean hint."""
+    import allesfitter
+    cases = [
+        ('maxfeval', 'maxfevals'),
+        ('mutate_baseline', 'mutate_basement'),
+        ('n_restart', 'n_restarts'),
+        ('improvement_thresh', 'improvement_threshold'),
+    ]
+    for bad, expected in cases:
+        with pytest.raises(TypeError) as ei:
+            allesfitter.optimize(str(tmp_path), **{bad: 1})
+        msg = str(ei.value)
+        assert bad in msg, msg
+        assert expected in msg, (bad, msg)
+        assert "did you mean" in msg.lower()
+
+
 def test_cmaes_missing_dependency_raises_clear_error(datadir, monkeypatch):
     """If `import cma` fails, optimize() should raise an ImportError with
     a guidance message rather than crash deep inside the helper."""
