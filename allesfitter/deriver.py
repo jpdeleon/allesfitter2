@@ -179,6 +179,24 @@ def calculate_values_from_model_curves(p, inst, companion):
 
 
 ###############################################################################
+#::: helper: split a radius-ratio key into derived-parameter naming pieces
+###############################################################################
+def _bandpass_suffix(rr_key):
+    """Split a radius-ratio key into (suffix, label) for derived params.
+
+    ``'b_rr_tess'`` -> ``('_tess', ' tess')``; ``'b_rr'`` -> ``('', '')``.
+    The suffix is appended to derived-parameter keys (e.g.
+    ``b_R_companion/a_tess``); the label (with a leading space) is appended
+    to human-readable plot labels. Uses ``maxsplit=1`` so a bandpass label
+    is never accidentally re-split.
+    """
+    if '_rr_' in rr_key:
+        bp = rr_key.split('_rr_', 1)[1]
+        return '_' + bp, ' ' + bp
+    return '', ''
+
+
+###############################################################################
 #::: the main derive function
 ###############################################################################
 def derive(samples, mode):
@@ -319,12 +337,8 @@ def derive(samples, mode):
         rsuma = get_params(companion+'_rsuma')
         for rr_key in rr_keys_all:
             rr = get_params(rr_key)
-            # Extract bandpass suffix from key
-            if '_rr_' in rr_key:
-                bp_suffix = '_' + rr_key.split('_rr_')[1]
-            else:
-                bp_suffix = ''
-            
+            bp_suffix, _ = _bandpass_suffix(rr_key)
+
             derived_samples[companion+f'_R_companion/a{bp_suffix}'] = rsuma * rr / (1. + rr)
             derived_samples[companion+f'_R_companion_(R_earth{bp_suffix})'] = star['R_star'] * rr * R_sun.value / R_earth.value
             derived_samples[companion+f'_R_companion_(R_jup{bp_suffix})'] = star['R_star'] * rr * R_sun.value / R_jup.value
@@ -476,10 +490,7 @@ def derive(samples, mode):
         #----------------------------------------------------------------------
         # Construct the R_companion key from the rr key
         rr_key = get_rr_key_for_derive(companion)
-        if '_rr_' in rr_key:
-            bp_suffix = '_' + rr_key.split('_rr_')[1]
-        else:
-            bp_suffix = ''
+        bp_suffix, _ = _bandpass_suffix(rr_key)
         r_companion_earth_key = f'{companion}_R_companion_(R_earth{bp_suffix})'
         derived_samples[companion+'_density'] = ( (derived_samples[companion+'_M_companion_(M_earth)'] * M_earth) / (4./3. * np.pi * (derived_samples[r_companion_earth_key] * R_earth)**3 ) ).cgs.value #in cgs
         
@@ -490,8 +501,11 @@ def derive(samples, mode):
         try:
             r_companion_a_key = f'{companion}_R_companion/a{bp_suffix}'
             derived_samples[companion+'_surface_gravity'] = 2. * np.pi / (get_params(companion+'_period')*86400.) * np.sqrt((1.-derived_samples[companion+'_e']**2)) * (get_params(companion+'_K')*1e5) / (derived_samples[r_companion_a_key])**2 / sin_d(derived_samples[companion+'_i'])
-        except:
-            pass
+        except Exception as e:
+            #::: was a bare `except: pass` — surfaced so a genuinely broken
+            #::: derivation is no longer silently dropped (commonly fails when
+            #::: the RV semi-amplitude K is absent for a transit-only fit).
+            logprint('\n! Could not derive {}_surface_gravity: {}'.format(companion, e))
         
         
         #----------------------------------------------------------------------
@@ -540,8 +554,14 @@ def derive(samples, mode):
     #==========================================================================
     derived_samples['combined_host_density'] = []
     for companion in config.BASEMENT.settings['companions_phot']:
-        try: derived_samples['combined_host_density'] = np.append(derived_samples['combined_host_density'], derived_samples[companion+'_host_density'])
-        except: pass
+        try:
+            derived_samples['combined_host_density'] = np.append(derived_samples['combined_host_density'], derived_samples[companion+'_host_density'])
+        except KeyError:
+            #::: host_density is only derived for transiting low-rr companions
+            #::: (see the rr<0.215 branch above); a missing key here is
+            #::: expected. Narrowed from a bare `except: pass` so any other
+            #::: error now propagates instead of being silently swallowed.
+            pass
     
 
     
@@ -563,12 +583,7 @@ def derive(samples, mode):
         #::: (see the rr_keys_all loop above). In achromatic mode this yields a
         #::: single un-suffixed entry, matching the original behaviour.
         for rr_key in get_all_rr_keys(companion):
-            if '_rr_' in rr_key:
-                bp_suffix = '_' + rr_key.split('_rr_')[1]
-                bp_label = ' '+rr_key.split('_rr_')[1]
-            else:
-                bp_suffix = ''
-                bp_label = ''
+            bp_suffix, bp_label = _bandpass_suffix(rr_key)
 
             names.append( companion+'_R_companion/a'+bp_suffix )
             labels.append( 'Companion radius '+companion+bp_label+' over semi-major axis '+companion+'; $R_\mathrm{'+companion+'}/a_\mathrm{'+companion+'}$' )

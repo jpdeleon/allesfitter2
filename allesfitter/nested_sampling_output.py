@@ -722,9 +722,11 @@ def ns_output(datadir, backend=None):
                         first_transit = last_transit
                     else:
                         first_transit = -1
-                except:
+                except Exception:
+                    #::: narrowed from bare `except:` so KeyboardInterrupt /
+                    #::: SystemExit propagate; any plotting error still ends
+                    #::: the per-transit loop exactly as before.
                     first_transit = -1
-                    pass
             
     
     
@@ -974,9 +976,9 @@ def ns_output(datadir, backend=None):
         params_star = np.genfromtxt( os.path.join(config.BASEMENT.datadir,'params_star.csv'), delimiter=',', names=True, dtype=None, encoding='utf-8', comments='#' )
         fig, ax = plot_top_down_view(params_median, params_star)
         fig.savefig( os.path.join(config.BASEMENT.outdir,'top_down_view.pdf'), bbox_inches='tight' )
-        plt.close(fig)        
-    except:
-        logprint('\nOrbital plots could not be produced.')
+        plt.close(fig)
+    except Exception as e:
+        logprint('\nOrbital plots could not be produced: {}'.format(e))
     
     
     #::: plot TTV results (if wished for)
@@ -992,7 +994,7 @@ def ns_output(datadir, backend=None):
     try:
         with open(os.path.join(os.path.dirname(__file__), 'utils', 'quotes.txt')) as dataset:
             return(np.random.choice([l for l in dataset]))
-    except:
+    except Exception:
         return('42')
     
     
@@ -1014,9 +1016,9 @@ def get_ns_posterior_samples(datadir, Nsamples=None, as_type='dic'):
         results = pickle.load(f)
         f.close()
         
-    except:
+    except Exception:
         with open(os.path.join(datadir,'results','save_ns.pickle'),'rb') as f:
-            results = pickle.load(f)    
+            results = pickle.load(f)
 
     return draw_ns_posterior_samples(results, Nsamples=Nsamples, as_type=as_type)
     

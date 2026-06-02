@@ -407,9 +407,11 @@ def mcmc_output(datadir, quiet=False):
                         first_transit = last_transit
                     else:
                         first_transit = -1
-                except:
+                except Exception:
+                    #::: narrowed from bare `except:` so KeyboardInterrupt /
+                    #::: SystemExit propagate; any plotting error still ends
+                    #::: the per-transit loop exactly as before.
                     first_transit = -1
-                    pass
     
     #::: plot the chains (wrapped: OOM or matplotlib error must not kill
     #::: the rest of mcmc_output — tables, residual stats, derived params)
@@ -501,9 +503,9 @@ def mcmc_output(datadir, quiet=False):
         params_star = np.genfromtxt( os.path.join(config.BASEMENT.datadir,'params_star.csv'), delimiter=',', names=True, dtype=None, encoding='utf-8', comments='#' )
         fig, ax = plot_top_down_view(params_median, params_star)
         fig.savefig( os.path.join(config.BASEMENT.outdir,'top_down_view.pdf'), bbox_inches='tight' )
-        plt.close(fig)        
-    except:
-        logprint('\nOrbital plots could not be produced.')
+        plt.close(fig)
+    except Exception as e:
+        logprint('\nOrbital plots could not be produced: {}'.format(e))
         
         
     #::: plot TTV results (if wished for)
@@ -521,7 +523,7 @@ def mcmc_output(datadir, quiet=False):
     try:
         with open(os.path.join(os.path.dirname(__file__), 'utils', 'quotes.txt')) as dataset:
             return(np.random.choice([l for l in dataset]))
-    except:
+    except Exception:
         return('42')
     
     
