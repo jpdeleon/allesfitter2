@@ -65,5 +65,39 @@ markers = [
     "unit: fast unit tests (default)",
 ]
 
+# Ruff: linter + formatter. target-version stays py38 until the runtime env is
+# migrated to 3.11 (see CI). Keep the legacy rule set lenient so the large
+# pre-existing codebase is not flagged wholesale; tighten per-module as files
+# are modernized.
+[tool.ruff]
+target-version = "py38"
+line-length = 100
+extend-exclude = [
+    "allesfitter/_static",
+    "**/.ipynb_checkpoints",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line length handled by formatter; legacy lines are long
+    "E741",  # ambiguous var names (l, I) are common in the science code
+]
+
+# Mypy: start lenient (the codebase is largely untyped). Tighten per-module by
+# adding stricter overrides as type annotations are introduced.
+[tool.mypy]
+python_version = "3.8"
+ignore_missing_imports = true
+warn_redundant_casts = true
+no_implicit_optional = true
+files = ["allesfitter"]
+
 #[tool.setuptools.include-package-data]
 #true
