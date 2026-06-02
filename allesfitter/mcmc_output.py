@@ -444,6 +444,18 @@ def mcmc_output(datadir, quiet=False):
     save_table(posterior_samples, 'mcmc')
     save_latex_table(posterior_samples, 'mcmc')
 
+    #::: write a LaTeX-formatted prior table derived from params.csv.
+    #::: This previously only ran in ns_output(), so MCMC-only runs never
+    #::: produced priors_latex_table.txt. Local import avoids any circular
+    #::: import at module load time.
+    try:
+        from .nested_sampling_output import write_priors_latex_table
+        _priors_fp = write_priors_latex_table()
+        if _priors_fp:
+            logprint('\nWrote prior LaTeX table: {}'.format(_priors_fp))
+    except Exception as _exc:
+        logprint('\n! Could not write prior LaTeX table: {}'.format(_exc))
+
     #::: per-bandpass Rp/Rs posterior overlay (chromatic mode only — the
     #::: helper is a no-op when settings['chromatic'] is False).
     try:

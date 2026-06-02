@@ -558,14 +558,26 @@ def derive(samples, mode):
         names.append( companion+'_a/R_star' )
         labels.append( 'Semi-major axis '+companion+' over host radius; $a_\mathrm{'+companion+'}/R_\star$' )
         
-        names.append( companion+'_R_companion/a'  )
-        labels.append( 'Companion radius '+companion+' over semi-major axis '+companion+'; $R_\mathrm{'+companion+'}/a_\mathrm{'+companion+'}$' )
-        
-        names.append( companion+'_R_companion_(R_earth)' )
-        labels.append( 'Companion radius '+companion+'; $R_\mathrm{'+companion+'}$ ($\mathrm{R_{\oplus}}$)' )
-        
-        names.append( companion+'_R_companion_(R_jup)' )
-        labels.append( 'Companion radius '+companion+'; $R_\mathrm{'+companion+'}$ ($\mathrm{R_{jup}}$)' )
+        #::: R_companion is bandpass-dependent in chromatic mode, so emit one
+        #::: entry per bandpass using the same suffix the derive step stored
+        #::: (see the rr_keys_all loop above). In achromatic mode this yields a
+        #::: single un-suffixed entry, matching the original behaviour.
+        for rr_key in get_all_rr_keys(companion):
+            if '_rr_' in rr_key:
+                bp_suffix = '_' + rr_key.split('_rr_')[1]
+                bp_label = ' '+rr_key.split('_rr_')[1]
+            else:
+                bp_suffix = ''
+                bp_label = ''
+
+            names.append( companion+'_R_companion/a'+bp_suffix )
+            labels.append( 'Companion radius '+companion+bp_label+' over semi-major axis '+companion+'; $R_\mathrm{'+companion+'}/a_\mathrm{'+companion+'}$' )
+
+            names.append( companion+'_R_companion_(R_earth'+bp_suffix+')' )
+            labels.append( 'Companion radius '+companion+bp_label+'; $R_\mathrm{'+companion+'}$ ($\mathrm{R_{\oplus}}$)' )
+
+            names.append( companion+'_R_companion_(R_jup'+bp_suffix+')' )
+            labels.append( 'Companion radius '+companion+bp_label+'; $R_\mathrm{'+companion+'}$ ($\mathrm{R_{jup}}$)' )
         
         names.append( companion+'_a_(R_sun)' )
         labels.append( 'Semi-major axis '+companion+'; $a_\mathrm{'+companion+'}$ ($\mathrm{R_{\odot}}$)' )

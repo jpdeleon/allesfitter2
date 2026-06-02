@@ -626,6 +626,75 @@ def test_show_initial_guess_typo_kwarg_actionable(tmp_path):
     assert "plot_midtransit" in msg
 
 
+def test_unknown_stellar_var_kind_actionable_error(tmp_path):
+    """The same difflib hint pattern landed for `stellar_var_<key>` —
+    typo'd value should raise KeyError naming the setting + suggestions."""
+    d = tmp_path / 'data'; d.mkdir(); (d / 'results').mkdir()
+    (d / 'params.csv').write_text(_params_csv())
+    s = _settings_csv(baseline_type='sample_linear_multi',
+                      cols='airmass fwhm bias')
+    # Inject a typo'd stellar_var_flux value (sample_GP_complec missing the x).
+    s += "stellar_var_flux,sample_GP_complec\n"
+    # Need GP-stellar-var to engage the dispatch; require the hypers.
+    p = (d / 'params.csv').read_text()
+    p += (
+        "stellar_var_gp_complex_lna_flux,0,1,uniform -10 0,,,\n"
+        "stellar_var_gp_complex_lnb_flux,0,1,uniform -10 0,,,\n"
+        "stellar_var_gp_complex_lnc_flux,0,1,uniform -10 0,,,\n"
+        "stellar_var_gp_complex_lnd_flux,0,1,uniform -10 0,,,\n"
+    )
+    (d / 'params.csv').write_text(p)
+    (d / 'settings.csv').write_text(s)
+    _write_lc(d / 'lco.csv', weights=(0., 0., 0.))
+    from allesfitter.basement import Basement
+    from allesfitter.computer import calculate_stellar_var, update_params
+    b = Basement(str(d), quiet=True)
+    config.BASEMENT = b
+    params = update_params(np.array(b.theta_0, dtype=float))
+    with pytest.raises(KeyError) as ei:
+        calculate_stellar_var(params, 'lco', 'flux',
+                              model=np.ones_like(b.data['lco']['flux']),
+                              baseline=0.,
+                              yerr_w=b.data['lco']['err_scales_flux'])
+    msg = str(ei.value)
+    assert 'stellar_var_flux' in msg
+    assert 'sample_GP_complex' in msg, msg     # closest-match suggestion
+    assert 'Did you mean' in msg
+
+
+def test_show_initial_guess_only_ingress(tmp_path):
+    """plot_ingress=True with the other two flags False should draw
+    dotted ingress lines only (no dashed mid-transit, no other dotted
+    line for egress)."""
+    import allesfitter
+    d = _build_datadir(tmp_path, baseline_type='sample_linear_multi',
+                       cols='airmass fwhm bias', weights=(0., 0., 0.))
+    figs = allesfitter.show_initial_guess(
+        str(d), quiet=True, do_logprint=False, return_figs=True,
+        plot_midtransit=False, plot_ingress=True, plot_egress=False)
+    ax = figs[0].axes[0]
+    dashed = sum(1 for ln in ax.lines if ln.get_linestyle() == '--')
+    dotted = sum(1 for ln in ax.lines if ln.get_linestyle() == ':')
+    assert dashed == 0, dashed
+    assert dotted >= 1, dotted
+
+
+def test_linmulti_interp_identity_fast_path(tmp_path):
+    """When `xx` is the same array as the training time grid (the lnlike
+    path), `_linmulti_interp_to_xx` must return the input untouched,
+    avoiding a needless np.interp call. The cosort-for-GP regression
+    test exercises the slow path; this test pins the fast path."""
+    from allesfitter.computer import _linmulti_interp_to_xx
+    d = _build_datadir(tmp_path, baseline_type='sample_linear_multi',
+                       cols='airmass fwhm bias', weights=(0., 0., 0.))
+    b = Basement(str(d), quiet=True)
+    config.BASEMENT = b
+    bl_train = np.arange(len(b.data['lco']['time']), dtype=float)
+    out = _linmulti_interp_to_xx(bl_train, 'lco', b.data['lco']['time'])
+    # Fast path returns the original array unchanged (identity by value)
+    assert np.array_equal(out, bl_train)
+
+
 def test_unknown_baseline_kind_actionable_error(tmp_path):
     """`baseline_flux_<inst>` set to a typo'd value must raise a
     KeyError that (a) names the offending setting key + value,

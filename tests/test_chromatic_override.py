@@ -247,6 +247,34 @@ def test_chromatic_true_when_user_explicit(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+def test_chromatic_value_robust_to_lowercase_and_int(tmp_path):
+    """set_bool() under the hood accepts only `'true'` / `'1'`
+    (case-insensitive) as True; everything else is False. Confirm the
+    override is robust to common spellings.
+
+    For each raw value we pair the matching params layout so the
+    OTHER validator (chromatic⇄params consistency) doesn't fire:
+    expected=False → achromatic params, expected=True → chromatic params.
+    """
+    for raw_value, expected in [
+        ('false', False),
+        ('FALSE', False),
+        ('0', False),
+        ('no', False),       # set_bool defaults to False for unknown
+        ('true', True),
+        ('TRUE', True),
+        ('1', True),
+    ]:
+        sub = tmp_path / raw_value
+        sub.mkdir()
+        kind = 'chromatic' if expected else 'achromatic'
+        d = _make_datadir(sub, params_kind=kind,
+                          chromatic_value=raw_value)
+        b = Basement(str(d), quiet=True)
+        assert b.settings['chromatic'] is expected, (raw_value, expected,
+                                                      b.settings['chromatic'])
+
+
 def test_no_chromatic_setting_preserves_legacy_autodetect(tmp_path):
     """Omit the chromatic key entirely → bandpass-uniqueness auto-detect
     runs as before (4-band MuSCAT → chromatic=True)."""
