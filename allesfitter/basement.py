@@ -470,9 +470,31 @@ class Basement:
         Returns
         -------
         str
-            Parameter key: 'b_rr' for achromatic, 'b_rr_tess' for chromatic
+            Parameter key: 'b_rr' for achromatic, 'b_rr_tess' for chromatic.
+
+        Notes
+        -----
+        The suffix follows the parser's naming, which keys rr by bandpass as
+        soon as a ``bandpass`` row is present — even when ``chromatic`` is
+        auto-detected False because all instruments share one bandpass (two
+        instruments on 'tess' both resolve to the shared scalar
+        ``b_rr_tess``). This deliberately does NOT go through
+        :meth:`get_bandpass`, which suppresses the suffix whenever the
+        chromatic flag is False. The single exception is an *explicit*
+        ``chromatic,False`` override in settings.csv, where the parser
+        collapses rr to a single achromatic ``b_rr`` (LDC keys still stay
+        per-bandpass); that case is honoured here.
         """
-        bandpass = self.get_bandpass(inst)
+        bandpass_dict = self.settings.get('bandpass') or {}
+        if not bandpass_dict:
+            return f'{companion}_rr'
+        explicit_achromatic = (
+            self.settings.get('chromatic_explicit', False)
+            and not self.settings.get('chromatic', False)
+        )
+        if explicit_achromatic:
+            return f'{companion}_rr'
+        bandpass = bandpass_dict.get(inst)
         if bandpass:
             return f'{companion}_rr_{bandpass}'
         return f'{companion}_rr'
@@ -672,8 +694,10 @@ class Basement:
         # while keeping the bandpass row for plot labels / per-band LDCs.
         if 'chromatic' in self._settings_raw_keys:
             self.settings['chromatic'] = set_bool(str(self.settings['chromatic']))
+            self.settings['chromatic_explicit'] = True
         else:
             self.settings['chromatic'] = len(unique_bandpasses) > 1
+            self.settings['chromatic_explicit'] = False
 
 
         #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
