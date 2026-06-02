@@ -113,12 +113,16 @@ class TestStaticPriorChanges:
                 )
 
     def test_lnrho_upper_tightened_to_5(self, source):
-        # Old: uniform -5 10 (60-year correlation). New: uniform -5 5.
+        # The static GP lnrho default is `uniform -1 5` (documented as the
+        # current hardcoded default in _dataset_aware_gp_bounds). The point of
+        # this regression guard is that the upper bound stays tightened at 5 —
+        # the old loose `... 10` upper (a ~60-year correlation) must not return.
         for line in source.splitlines():
             if 'baseline_gp_matern32_lnrho_flux_' in line and 'uniform' in line:
-                assert 'uniform -5 5' in line, (
+                assert 'uniform -1 5' in line, (
                     f"lnrho row missing tightened bound: {line}"
                 )
+                assert 'uniform -1 10' not in line
                 assert 'uniform -5 10' not in line
 
     def test_ttv_prior_tightened_to_pm_005(self, source):

@@ -21,9 +21,16 @@ class TestMaskRanges:
         x_min = [5, 25, 90]
         x_max = [10, 35, 110]
         x_masked, ind_mask, mask = mask_ranges(x, x_min, x_max)
-        assert len(x_masked) == len(x_min) + len(x_max)
+        # mask_ranges masks every point within each inclusive [min, max]
+        # range, so the count is the sum of the range widths (e.g. [5, 10]
+        # masks 6 points), not the number of ranges.
+        expected = np.zeros(len(x), dtype=bool)
+        for lo, hi in zip(x_min, x_max):
+            expected |= (x >= lo) & (x <= hi)
+        assert mask.sum() == expected.sum()
+        assert len(x_masked) == expected.sum()
+        assert np.array_equal(x_masked, x[expected])
         assert len(ind_mask) == len(x_masked)
-        assert mask.sum() == len(x_masked)
 
     def test_no_masking(self):
         x = np.arange(200)
