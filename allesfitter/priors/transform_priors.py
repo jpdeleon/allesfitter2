@@ -108,7 +108,11 @@ def get_u1u2_from_q1q2(q1, q2, Nsamples=10000):
     '''
     q1, q2: float or list of form [median, lower_err, upper_err]
     '''
-    if type(q1)==float and type(q2)==float:
+    #::: scalar inputs (Python float/int, numpy scalar, or 0-d array) take the
+    #::: closed-form branch; sequences are treated as [median, lo, hi] specs.
+    #::: np.ndim==0 is robust where the old `type()==float` check rejected
+    #::: numpy floats (e.g. values returned by the inverse transform).
+    if np.ndim(q1)==0 and np.ndim(q2)==0:
         u1 = 2.*np.sqrt(q1)*q2
         u2 = np.sqrt(q1) * (1. - 2.*q2)
         return u1, u2
@@ -130,13 +134,21 @@ def get_q1q2_from_u1u2(u1, u2, Nsamples=10000):
     '''
     u1, u2: float or list of form [median, lower_err, upper_err]
     '''
-    if type(u1)==float and type(u2)==float:
+    #::: scalar inputs (Python float/int, numpy scalar, or 0-d array) take the
+    #::: closed-form branch; sequences are treated as [median, lo, hi] specs.
+    #::: np.ndim==0 is robust where the old `type()==float` check rejected
+    #::: numpy floats (e.g. values returned by the inverse transform), which
+    #::: made round-trip conversions crash on u1[0].
+    if np.ndim(u1)==0 and np.ndim(u2)==0:
         q1 = (u1 + u2)**2
         q2 = 0.5*u1/(u1+u2)
         return q1, q2
     else:
-        u1 = spdf(u1[0], u1[1], u1[2], size=Nsamples, plot=True)
-        u2 = spdf(u2[0], u2[1], u2[2], size=Nsamples, plot=True)
+        #::: plot=False to match the sibling transforms; with plot=True
+        #::: simulate_PDF returns a (samples, fig) tuple, which then broke the
+        #::: `u1>=0` mask below with a TypeError.
+        u1 = spdf(u1[0], u1[1], u1[2], size=Nsamples, plot=False)
+        u2 = spdf(u2[0], u2[1], u2[2], size=Nsamples, plot=False)
         ind_good = np.where( (u1>=0) & (u1<=1) & (u2>=0) & (u2<=1) )[0]
         u1 = u1[ind_good]
         u2 = u2[ind_good]
