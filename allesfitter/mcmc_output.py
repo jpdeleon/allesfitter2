@@ -36,7 +36,8 @@ import warnings
 from . import config
 from . import deriver
 from .computer import calculate_model, calculate_baseline, calculate_stellar_var
-from .general_output import afplot, afplot_per_transit, save_table, save_latex_table, logprint, get_params_from_samples, plot_ttv_results
+from .general_output import afplot, save_table, save_latex_table, logprint, get_params_from_samples, plot_ttv_results
+from ._output_shared import save_per_transit_plots, write_priors_latex_table
 from .nested_sampling_output import (
     plot_chromatic_rr_histogram,
     plot_linear_baseline_components,
@@ -363,7 +364,18 @@ def mcmc_output(datadir, quiet=False):
     copyfile(os.path.join(config.BASEMENT.outdir,'mcmc_save.h5'), os.path.join(config.BASEMENT.outdir,'mcmc_save_tmp.h5'))
     reader = emcee.backends.HDFBackend( os.path.join(config.BASEMENT.outdir,'mcmc_save_tmp.h5'), read_only=True )
     completed_steps = reader.get_chain().shape[0]*config.BASEMENT.settings['mcmc_thin_by']
-    if completed_steps < config.BASEMENT.settings['mcmc_total_steps']: 
+    #::: Snapshot the user-configured step counts. Quick-look mode (below)
+    #::: temporarily shrinks mcmc_total_steps/mcmc_burn_steps so the downstream
+    #::: output helpers (print_autocorr, draw_mcmc_posterior_samples,
+    #::: plot_MCMC_chains) discard/label against the partial chain. Previously
+    #::: these reductions were written straight into config.BASEMENT.settings
+    #::: and never reverted, so any later same-process read of the global
+    #::: (e.g. get_mcmc_posterior_samples, allesclass) saw the reduced burn-in
+    #::: instead of the user's configured value. We restore the originals once
+    #::: the last consumer (the all-samples draw) has run, below.
+    _orig_total_steps = config.BASEMENT.settings['mcmc_total_steps']
+    _orig_burn_steps  = config.BASEMENT.settings['mcmc_burn_steps']
+    if completed_steps < config.BASEMENT.settings['mcmc_total_steps']:
         #go into quick look mode
         #check how many total steps are actually done so far:
         config.BASEMENT.settings['mcmc_total_steps'] = config.BASEMENT.settings['mcmc_thin_by']*reader.get_chain().shape[0]
@@ -395,24 +407,10 @@ def mcmc_output(datadir, quiet=False):
                 companion, _exc))
             plt.close('all')
             
-    for companion in config.BASEMENT.settings['companions_phot']:
-        for inst in config.BASEMENT.settings['inst_phot']:
-            first_transit = 0
-            while (first_transit >= 0):
-                try:
-                    fig, axes, last_transit, total_transits = afplot_per_transit(posterior_samples, inst, companion, kwargs_dict={'first_transit':first_transit})
-                    fig.savefig( os.path.join(config.BASEMENT.outdir,'mcmc_fit_per_transit_'+inst+'_'+companion+'_' + str(last_transit) + 'th.pdf'), bbox_inches='tight' )
-                    plt.close(fig)
-                    if total_transits > 0 and last_transit < total_transits - 1:
-                        first_transit = last_transit
-                    else:
-                        first_transit = -1
-                except Exception:
-                    #::: narrowed from bare `except:` so KeyboardInterrupt /
-                    #::: SystemExit propagate; any plotting error still ends
-                    #::: the per-transit loop exactly as before.
-                    first_transit = -1
-    
+    #::: per-transit fit plots (shared with ns_output; differs only in the
+    #::: posterior-sample array and the 'mcmc' filename prefix)
+    save_per_transit_plots(posterior_samples, 'mcmc')
+
     #::: plot the chains (wrapped: OOM or matplotlib error must not kill
     #::: the rest of mcmc_output — tables, residual stats, derived params)
     try:
@@ -443,15 +441,23 @@ def mcmc_output(datadir, quiet=False):
 
     #::: save the tables
     posterior_samples = draw_mcmc_posterior_samples(reader) #all samples
+
+    #::: restore the user-configured step counts now that every quick-look
+    #::: consumer above has run; nothing below reads mcmc_total_steps/
+    #::: mcmc_burn_steps. (On the rare path where a consumer above raised,
+    #::: the next mcmc_output() call rebuilds config.BASEMENT from disk, so
+    #::: the reduced values cannot persist beyond this process step anyway.)
+    config.BASEMENT.settings['mcmc_total_steps'] = _orig_total_steps
+    config.BASEMENT.settings['mcmc_burn_steps']  = _orig_burn_steps
+
     save_table(posterior_samples, 'mcmc')
     save_latex_table(posterior_samples, 'mcmc')
 
     #::: write a LaTeX-formatted prior table derived from params.csv.
     #::: This previously only ran in ns_output(), so MCMC-only runs never
-    #::: produced priors_latex_table.txt. Local import avoids any circular
-    #::: import at module load time.
+    #::: produced priors_latex_table.txt. write_priors_latex_table lives in
+    #::: _output_shared (imported at module top).
     try:
-        from .nested_sampling_output import write_priors_latex_table
         _priors_fp = write_priors_latex_table()
         if _priors_fp:
             logprint('\nWrote prior LaTeX table: {}'.format(_priors_fp))
