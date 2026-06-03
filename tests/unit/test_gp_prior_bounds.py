@@ -217,7 +217,7 @@ def test_update_returns_zero_on_missing_file(helpers, tmp_path):
 def test_refined_bounds_pass_prior_sanity(helpers, tmp_path):
     """After the updater rewrites the bounds with dataset-aware values, the
     independent prior_sanity validator should emit zero warnings."""
-    from allesfitter.utils.prior_sanity import validate_gp_priors
+    from allesfitter.validation import validate_gp_priors
 
     p_params = tmp_path / "params.csv"
     p_params.write_text(_DUMMY_PARAMS_CSV)

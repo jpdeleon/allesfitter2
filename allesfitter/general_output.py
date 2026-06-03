@@ -986,7 +986,7 @@ def _draw_event_axvlines(ax, base, params_median, companion, inst,
     grid T_n = epoch + n*period. Silently no-ops when the orbital
     geometry is non-transiting or any required parameter is missing.
     """
-    from .utils.prior_sanity import _tdur_days_from_orbit
+    from .validation.prior_sanity import _tdur_days_from_orbit
     try:
         period = float(params_median[companion+'_period'])
         epoch  = float(params_median[companion+'_epoch'])

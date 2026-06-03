@@ -2228,7 +2228,7 @@ fit_ttvs,False
         # large enough to swallow the transit, GP timescale longer than the
         # observation baseline) before the user kicks off a multi-hour fit.
         try:
-            from allesfitter.utils.prior_sanity import validate_gp_priors
+            from allesfitter.validation import validate_gp_priors
             warnings = validate_gp_priors(outdir, log=logger.warning)
             if not warnings:
                 logger.info("Prior sanity: GP / noise bounds look reasonable.")
