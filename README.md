@@ -1,26 +1,28 @@
 # allesfitter2
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/jpdeleon/allesfitter2)
 
-An extension of the original allesfitter package that streamlines the process of downloading TESS, K2, and Kepler lightcurves and automatically generating all necessary files to run allesfitter.
+allesfitter2 is an extension of the allesfitter package, providing a comprehensive framework for global inference of photometry and radial velocity (RV) data. It specializes in the characterization of exoplanetary systems and eclipsing binaries by integrating transit and RV modeling with robust Bayesian inference engines.
+Several utilities and scripts are added to streamline the process of downloading TESS, K2, and Kepler lightcurves and automatically generating all necessary files to run allesfitter.
 
-## Features
+## New Features
 
 - **Automated lightcurve download** from TESS, K2, and Kepler mission data
 - **Multi-pipeline support** (SPOC, QLP, EVEREST, K2SFF) with configurable parameters
 - **Parameter derivation** from multiple astronomical databases (NExSci, TOI, CTOI, TIC)
 - **Flexible time-window selection** — TESS sectors, K2 campaigns (including split campaigns 11a/11b), and Kepler quarters (single, multiple, or all)
 - **Chromatic transit modeling** — fit a separate `Rp/Rs` per bandpass while keeping orbital parameters globally shared
-- **Shared baseline GP across instruments** — declare `baseline_share_flux,muscat_g:muscat_r:muscat_i:muscat_z` in `settings.csv` to fit a *single* celerite GP realization jointly across all members of a share group (ideal for simultaneous multi-band photometry like MuSCAT, where airmass/seeing systematics are common-mode). Backward compatible: omit the key for legacy per-instrument GPs.
+- **Shared baseline GP across bands** — declare `baseline_share_flux,muscat_g:muscat_r:muscat_i:muscat_z` in `settings.csv` to fit a *single* celerite GP realization jointly across all members of a share group (ideal for simultaneous multi-band photometry like MuSCAT, where airmass/seeing systematics are common-mode). Backward compatible: omit the key for legacy per-instrument GPs.
 - **Warm-start sampler with `allesfitter.optimize()`** — global optimization (CMA-ES default, plus `dual_annealing` / `differential_evolution` / `L-BFGS-B` / `Powell`) finds a MAP point that is then pushed into `BASEMENT.theta_0`, so the next `mcmc_fit` / `ns_fit` starts from a well-converged ball. Safe acceptance gates (improvement, prior-bound, multistart consistency) prevent the optimizer from poisoning the sampler start when it doesn't actually improve. CMA-ES supports warm-resume across calls via a pickled strategy state.
 - **OOM-safe post-processing** — `ns_output` and `mcmc_output` cap figure sizes, subsample posterior draws for the corner plot, and wrap every save site in a `MemoryError`-tolerant try/except. When the fit has more than 25 free parameters, the corner plot automatically hides nuisance rows (`baseline_*`, `ln_err_*`, `ln_jitter_*`, `stellar_var_gp_*`) so the science-relevant parameters stay readable; above 60 dims the corner is skipped entirely with a placeholder. The full posterior still goes into `*_table.csv`, the LaTeX table, and `derive`.
 - **Named ancillary covariates in input CSVs** — per-instrument CSVs may now carry extra columns beyond `time, flux, flux_err` (e.g. `airmass`, `fwhm`, `sky`, `x_centroid`). A `#`-prefixed header line on the first row names them; baselines select a covariate as their regression axis via `baseline_<key>_<inst>_against,<name>`. Works with every existing baseline (`sample_linear`, `hybrid_poly_N`, `hybrid_spline`, `sample_GP_*`). Legacy 3-column and 4-column positional CSVs continue to load unchanged.
-- **N-D linear baseline detrending (`sample_linear_multi` / `hybrid_linear_multi`)** — declare `baseline_flux_<inst>,sample_linear_multi` + `baseline_flux_<inst>_cols,Airmass FWHM(pix) bias` to fit a joint linear model in any number of ancillary covariates (timex-style). The `sample_*` variant samples each weight as a free parameter; the `hybrid_*` variant **analytically marginalises** the Gaussian weights in closed form at every likelihood call, adding zero fit dimensions while still recovering the optimal per-evaluation MAP weights for predictive plotting.
+- **N-D linear baseline detrending (`sample_linear_multi` / `hybrid_linear_multi`)** — declare `baseline_flux_<inst>,sample_linear_multi` + `baseline_flux_<inst>_cols,Airmass FWHM(pix) bias` to fit a joint linear model in any number of ancillary covariates. The `sample_*` variant samples each weight as a free parameter; the `hybrid_*` variant **analytically marginalises** the Gaussian weights in closed form at every likelihood call, adding zero fit dimensions while still recovering the optimal per-evaluation MAP weights for predictive plotting.
 - **Fast Basement init via cached `simulate_PDF`** — the skewed-normal fit to `R_star` / `M_star` from `params_star.csv` (used by `use_host_density_prior=True`) used to add ~22 s to *every* `config.init` call. Results are now persisted to `~/.allesfitter/simulate_PDF_cache.json` keyed on `(median, lower_err, upper_err)`, so the second and every subsequent invocation skips the scipy solve entirely. Bypass via `ALLESFITTER_SIMULATE_PDF_NO_CACHE=1`; redirect via `ALLESFITTER_SIMULATE_PDF_CACHE=/path/to/cache.json`.
 - **Per-bandpass Rp/Rs posterior plot** — `ns_output()` automatically emits `ns_chromatic_rr_<companion>.pdf` overlaying per-bandpass posteriors with a canonical color map (`tess=k`, `g=C0`, `r=C2`, `i=C8`, `z=C3`; viridis fallback for unknown labels)
 - **Strict configuration validation** — clear errors for bandpass/instrument count mismatch, duplicate params, unknown bandpass suffixes, chromatic/achromatic shape inconsistencies, or per-instrument settings keys with orphan suffixes (catches `host_ld_law_<bandpass>` typos)
+- **Band-dependent limb darkening** - `host_ldc_q*_<band>` in params.csv and `host_ld_law_<band>` in settings.csv are now accepted. Although `host_ldc_q*_<inst>` and `host_ld_law_<inst>` are still accepted for backward-compatibility. The number of limb-darkening parameters should depend on the bandpass instead of per instrument.
 - **Sensible LD default** — `host_ld_law_<inst>` now defaults to `quad` (was `None`, which silently disabled limb darkening); explicit `host_ld_law_<inst>,none` still opts out
 - **Raw-flux outlier clipping** via `flux_min_raw` / `flux_max_raw` — clipped points are removed from the fit but overlaid in red on `initial_guess.pdf`
 - **Centralized run log** — every `ns_fit` / `ns_output` / `mcmc_fit` call records a JSONL row at `~/.allesfitter/runs.jsonl` (override via `ALLESFITTER_RUN_LOG`) with absolute datadir, pid, hostname, duration, and status. Inspect with `jq` or `allesfitter.run_log_tail()`.
-- **Built-in quality control** with outlier removal and quality masking
 - **Theoretical limb darkening** coefficients from Claret tables using [limbdark](https://github.com/jpdeleon/limbdark2)
 - **Test suite** under `tests/chromatic/` pins the chromatic + logger contracts with 64+ unit, parsing, likelihood-assembly, end-to-end fit, and run-logger tests
 
@@ -419,6 +421,37 @@ Fit both `rr_bp` (per-band) and `dil_i` (per-inst) with broad priors and the pho
 3. **`ns_chromatic_rr_<companion>.pdf`**: if all bandpasses' `rr` posteriors collapse to similar widths despite very different photometric S/N, dilution is likely soaking up the band-to-band variation.
 
 **Bottom line.** The chromatic depth signal you're hunting for is *exactly the same kind of signal* a free dilution parameter can mimic. Fit `dil` only with strong external priors from contamination catalogs, and never fit it on every instrument simultaneously without anchoring at least one. The conservative `fit=0, value=0` default that `prepare_allesfit.py` emits is the right starting point; promote to `fit=1` only when you have catalog evidence of a contaminant and a defensible prior.
+
+### Limb-darkening keying (band vs. instrument)
+
+Limb darkening is split across **two keys with different scopes**, and it helps to keep them straight:
+
+| Key | Lives in | Scope | Resolution |
+|---|---|---|---|
+| `host_ldc_q*` (the coefficients, fit parameters) | `params.csv` | **Per bandpass** | suffix = bandpass when a `bandpass` row exists, else falls back to `<inst>` (`get_ldc_bandpass` / `get_ldc_key`) |
+| `host_ld_law` (the law, a setting) | `settings.csv` | **Per instrument** (canonical), but **authorable per bandpass** | explicit `host_ld_law_<inst>` wins; else `host_ld_law_<band>` fans out to every instrument on that band; else defaults to `quad` |
+
+**Author it by bandpass.** Limb darkening is a function of wavelength, not of the detector, so the ergonomic and physically-correct way to write both keys is per bandpass:
+
+```
+# settings.csv
+bandpass,tess k2
+host_ld_law_tess,quad
+host_ld_law_k2,quad
+# params.csv
+host_ldc_q1_tess, ...
+host_ldc_q2_tess, ...
+host_ldc_q1_k2,   ...
+host_ldc_q2_k2,   ...
+```
+
+Two instruments mapped to the **same** bandpass therefore **share one set of `q*` parameters** — they are tied by construction, not duplicated. The `_<inst>` forms remain accepted for backward compatibility and as a deliberate per-instrument override.
+
+**Why the law stays instrument-keyed internally.** Every downstream consumer (`computer.py`, `deriver.py`) reads `host_ld_law_<inst>`, because the transit model is *evaluated* per instrument. The per-bandpass form is canonicalized to per-instrument during config parsing. This keeps the rare-but-valid override available (e.g. disable LD on one noisy detector with `host_ld_law_<inst>,none`) without forcing a band-only world on the model layer.
+
+> Note the **reversed precedence** between the two keys: the law resolves *override-first* (instrument beats bandpass), while the coefficients resolve *band-first* (bandpass beats instrument). Both follow the same principle — bandpass is the convenient default, instrument is the unit of evaluation and override.
+
+**Does the number of LD parameters depend on the bandpass or the instrument?** The **count is set by the law** (`none`→0, `lin`→1 `q1`, `quad`→2 `q1,q2`, `sing`→3 `q1,q2,q3` via `LDC3`; see `deriver.py`). That law is canonically **per instrument**, but it **defaults from the bandpass**, and the coefficient parameters it counts are themselves **bandpass-keyed**. So in normal use — where each bandpass maps to one law — **the number of limb-darkening parameters is effectively per bandpass**: instruments sharing a band share the same law *and* the same `q*` parameters. It is per-instrument only if you deliberately override `host_ld_law_<inst>` to a different law than its band-mates, which is discouraged (the shared `q*` parameters would no longer match the per-instrument law's arity).
 
 ### Tracking long-running fits with the centralized run log
 
