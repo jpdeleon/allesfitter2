@@ -727,6 +727,18 @@ class Basement:
         )
         _known_insts = set(self.settings['inst_all'])
         _known_bands = unique_bandpasses
+        #::: host_ld_law is keyed by BANDPASS, not instrument: it carries the
+        #::: q1/q2 limb-darkening coefficients, which depend on the photometric
+        #::: band (true even when chromatic=False). It is resolved per-bandpass
+        #::: downstream (see the host_ld_law defaulting below), so its suffix may
+        #::: be a bandpass label; instruments are still accepted for back-compat.
+        #::: Other per-instrument prefixes (ld_space, companion LD, baseline,
+        #::: error, t_exp, ...) are NOT resolved per-bandpass, so their suffix must
+        #::: still be an instrument to avoid an accepted-but-ignored setting.
+        _bandpass_keyed_prefixes = ('host_ld_law_',)
+        #::: Match the most specific (longest) prefix first, so that e.g.
+        #::: ``t_exp_n_int_<inst>`` is not mis-parsed as ``t_exp_`` + ``n_int_<inst>``.
+        _per_inst_prefixes = tuple(sorted(_per_inst_prefixes, key=len, reverse=True))
         _orphans = []
         for _key in list(self.settings.keys()):
             if _key in ('user-given:', 'automatically set:'):
@@ -743,7 +755,11 @@ class Basement:
                         if _stripped.endswith(_mod):
                             _stripped = _stripped[:-len(_mod)]
                             break
-                    if _stripped and _stripped not in _known_insts:
+                    if _pref in _bandpass_keyed_prefixes:
+                        _valid = _known_insts | set(_known_bands)
+                    else:
+                        _valid = _known_insts
+                    if _stripped and _stripped not in _valid:
                         _orphans.append((_key, _pref, _suffix))
                     break
         if _orphans:
@@ -1042,16 +1058,24 @@ class Basement:
                 if companion+'_grid_'+inst not in self.settings: 
                     self.settings[companion+'_grid_'+inst] = 'default'
                     
-                # host_ld_law default: when the key is absent or blank, fall
-                # back to 'quad'. The prior None default silently disabled
-                # limb darkening, which made host_ldc_q1/q2 in params.csv
-                # appear to have no effect on the transit shape. Users who
-                # genuinely want no LD must write host_ld_law_<inst>,none
-                # explicitly (handled by the elif → None below).
+                # host_ld_law is keyed by BANDPASS: q1/q2 depend on the photometric
+                # band, not the detector (true even when chromatic=False). Resolution
+                # order for each instrument: an explicit per-instrument key wins
+                # (back-compat); otherwise the bandpass-keyed value; otherwise the
+                # 'quad' default. A prior None default silently disabled limb
+                # darkening, making host_ldc_q1/q2 in params.csv appear to have no
+                # effect; write host_ld_law_<band|inst>,none to disable LD explicitly.
+                _band = self.settings.get('bandpass', {}).get(inst)
                 _h_key = 'host_ld_law_'+inst
-                if (_h_key not in self.settings) or (len(str(self.settings[_h_key]))==0):
+                _h_band_key = ('host_ld_law_'+_band) if _band else None
+                if (_h_key in self.settings) and (len(str(self.settings[_h_key])) > 0):
+                    pass  # explicit per-instrument value already in place
+                elif _h_band_key and (_h_band_key in self.settings) \
+                        and (len(str(self.settings[_h_band_key])) > 0):
+                    self.settings[_h_key] = self.settings[_h_band_key]
+                else:
                     self.settings[_h_key] = 'quad'
-                elif str(self.settings[_h_key]).lower() == 'none':
+                if str(self.settings[_h_key]).lower() == 'none':
                     self.settings[_h_key] = None
 
                 if is_empty_or_none(companion+'_ld_law_'+inst):

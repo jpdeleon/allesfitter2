@@ -251,43 +251,23 @@ class TestAchromaticBackcompat:
 # Per-instrument settings suffix validation
 # --------------------------------------------------------------------------- #
 class TestOrphanPerInstSettings:
-    """Regression for the user-reported silent failure:
+    """Per-instrument settings-suffix validation and the bandpass-keyed
+    limb-darkening contract.
 
-    settings.csv had
-        inst_phot,tglc1800_s10s11 tglc600_s37s38 tglc120_s63s64 tglc120_s90
-        bandpass,tess tess tess tess
-        host_ld_law_tess,quad
+    host_ld_law carries the q1/q2 limb-darkening coefficients, which depend on
+    the photometric BANDPASS rather than the detector. A bandpass-keyed
+    ``host_ld_law_<band>`` is therefore accepted and resolved per instrument (so
+    host_ldc_q1/q2 take effect), even when chromatic=False.
 
-    No instrument is named 'tess', so host_ld_law_<actual_inst> defaulted
-    to None and ellc silently received ldc_1=None — host_ldc_q1_tess values
-    in params.csv had zero effect on the transit shape.
+    Other per-instrument prefixes (ld_space, companion LD, baseline, error,
+    t_exp, ...) are NOT resolved per-bandpass, so a non-instrument suffix there
+    is still rejected at config-load time — otherwise the setting would be
+    silently ignored."""
 
-    The validator must catch this at config-load time."""
-
-    def test_host_ld_law_keyed_by_bandpass_raises(self, make_datadir):
-        insts = ["tglc1800_s10s11", "tglc600_s37s38", "tglc120_s63s64", "tglc120_s90"]
-        rows = (
-            [{"name": "b_rr_tess", "value": TRUE_RR_TESS, "fit": 1,
-              "bounds": "uniform 0 0.3", "label": "rr_tess"}]
-            + _common_orbital_rows()
-            + _dilution_rows(insts)
-            + [{"name": f"ln_err_flux_{i}", "value": -7.0, "fit": 0,
-                "bounds": "uniform -15 0", "label": f"ln_err_{i}"} for i in insts]
-            + [{"name": f"baseline_offset_flux_{i}", "value": 0.0, "fit": 0,
-                "bounds": "uniform -0.05 0.05", "label": f"offset_{i}"} for i in insts]
-            + _ldc_rows("tess")
-        )
-        datadir = make_datadir(
-            "orphan_ld_law",
-            inst_phot=insts,
-            bandpass="tess tess tess tess",
-            params_rows=rows,
-            extra_settings=["host_ld_law_tess,quad", "host_ld_space_tess,q"],
-        )
-        with pytest.raises(ValueError, match=r"per-instrument keys whose suffix"):
-            config.init(str(datadir), quiet=True)
-
-    def test_error_message_hints_at_bandpass_confusion(self, make_datadir):
+    def test_host_ld_law_keyed_by_bandpass_is_accepted(self, make_datadir):
+        # host_ld_law is keyed by bandpass: a host_ld_law_<band> row must be
+        # accepted and resolved to each instrument observing that band, so
+        # host_ldc_q1/q2 take effect (no longer a silent failure).
         insts = ["tglc120_s90", "tglc120_s63s64"]
         rows = (
             [{"name": "b_rr_tess", "value": TRUE_RR_TESS, "fit": 1,
@@ -301,17 +281,44 @@ class TestOrphanPerInstSettings:
             + _ldc_rows("tess")
         )
         datadir = make_datadir(
-            "orphan_hint",
+            "bandpass_ld_law_accepted",
             inst_phot=insts,
             bandpass="tess tess",
             params_rows=rows,
             extra_settings=["host_ld_law_tess,quad"],
         )
-        with pytest.raises(ValueError) as exc:
+        config.init(str(datadir), quiet=True)
+        # Each instrument resolves its host_ld_law from the bandpass-keyed value.
+        for i in insts:
+            assert config.BASEMENT.settings["host_ld_law_" + i] == "quad"
+
+    def test_host_ld_space_keyed_by_bandpass_raises(self, make_datadir):
+        # ld_space (unlike ld_law) is NOT resolved per-bandpass downstream, so a
+        # bandpass-keyed host_ld_space_<band> would be silently ignored. The
+        # validator must still reject a non-instrument suffix here, and the error
+        # must name the affected instruments and call out the confusion.
+        insts = ["tglc120_s90", "tglc120_s63s64"]
+        rows = (
+            [{"name": "b_rr_tess", "value": TRUE_RR_TESS, "fit": 1,
+              "bounds": "uniform 0 0.3", "label": "rr_tess"}]
+            + _common_orbital_rows()
+            + _dilution_rows(insts)
+            + [{"name": f"ln_err_flux_{i}", "value": -7.0, "fit": 0,
+                "bounds": "uniform -15 0", "label": f"ln_err_{i}"} for i in insts]
+            + [{"name": f"baseline_offset_flux_{i}", "value": 0.0, "fit": 0,
+                "bounds": "uniform -0.05 0.05", "label": f"offset_{i}"} for i in insts]
+            + _ldc_rows("tess")
+        )
+        datadir = make_datadir(
+            "orphan_ld_space",
+            inst_phot=insts,
+            bandpass="tess tess",
+            params_rows=rows,
+            extra_settings=["host_ld_space_tess,q"],
+        )
+        with pytest.raises(ValueError, match=r"per-instrument keys whose suffix") as exc:
             config.init(str(datadir), quiet=True)
         msg = str(exc.value)
-        # The hint must name the affected instruments and call out the
-        # bandpass/instrument confusion.
         assert "BANDPASS label" in msg
         assert "tglc120_s90" in msg or "tglc120_s63s64" in msg
 
