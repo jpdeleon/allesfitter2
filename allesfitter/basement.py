@@ -1710,6 +1710,12 @@ class Basement:
                 return True
             if key.startswith('baseline_') and '_' in key:
                 return True
+            # Stellar-variability params (stellar_var_gp_{real,complex,matern32,sho}_*,
+            # stellar_var_gp_offset_*, stellar_var_{slope,offset}_*) are keyed by data
+            # type (flux/rv) and consumed by computer.stellar_var_* (e.g. the SHOTerm
+            # log_S0/log_Q/log_omega0 hyperparameters). Accept them like baseline_*.
+            if key.startswith('stellar_var_') and '_' in key:
+                return True
             return False
         
         valid_patterns = get_valid_param_patterns()
