@@ -177,6 +177,27 @@ def test_unknown_covariate_raises_actionable_message(tmp_path):
         Basement(str(d), quiet=True)
 
 
+def test_basement_rejects_inconsistent_companion(tmp_path):
+    """Cross-file consistency wired into Basement.__init__.
+
+    A companion declared in settings.csv with no matching rows in params.csv
+    is something allesfitter's own loaders silently tolerate (they auto-fill
+    defaults for the missing body). The validator wired into Basement after
+    load_params catches the mismatch and raises ConfigError. This exercises
+    the wiring on a check that is unique to the validator (allesfitter already
+    range-checks individual values, so value-outside-prior is caught earlier
+    and would not isolate the wiring).
+    """
+    from allesfitter.validation import ConfigError
+
+    d = _build_datadir(tmp_path)
+    # Declare a phantom companion 'c' with no c_* parameter rows.
+    settings = _settings_csv().replace("companions_phot,b\n", "companions_phot,b c\n")
+    (d / "settings.csv").write_text(settings)
+    with pytest.raises(ConfigError, match="companion 'c'"):
+        Basement(str(d), quiet=True)
+
+
 def test_basement_loads_covariate_axis_into_data(tmp_path):
     d = _build_datadir(tmp_path, against='airmass', with_airmass=True, with_header=True)
     b = Basement(str(d), quiet=True)
