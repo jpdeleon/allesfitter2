@@ -142,8 +142,26 @@ def mcmc_fit(datadir):
             continue_old_run = True
         else:
             raise ValueError('User aborted operation.')
-            
-    
+
+    #::: guard: an existing save file with no completed steps cannot be appended to.
+    #::: emcee's EnsembleSampler/get_last_sample would raise an opaque IndexError on
+    #::: an empty or half-written backend (e.g. a previously aborted run), so detect
+    #::: that here and fall back to a fresh run instead.
+    if continue_old_run:
+        _save_file = os.path.join(config.BASEMENT.outdir, 'mcmc_save.h5')
+        try:
+            #::: mirror exactly what emcee.EnsembleSampler.__init__ does on a re-used
+            #::: backend; if this succeeds the append is safe.
+            emcee.backends.HDFBackend(_save_file).get_last_sample()
+            _has_samples = True
+        except (OSError, KeyError, AttributeError, IndexError):
+            _has_samples = False
+        if not _has_samples:
+            logprint("\nWARNING: '" + _save_file + "' exists but has no readable last "
+                     "sample (empty or half-written backend); cannot append. Starting a "
+                     "fresh run (the existing save file will be overwritten).")
+            continue_old_run = False
+
     #::: continue on the backend / reset the backend
     if os.path.exists(os.path.join(config.BASEMENT.outdir,'mcmc_save.h5')) and not continue_old_run:
         #backend.reset(config.BASEMENT.settings['mcmc_nwalkers'], config.BASEMENT.ndim)
