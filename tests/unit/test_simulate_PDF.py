@@ -26,7 +26,8 @@ def import_module_from_path(module_name, file_path):
     return module
 
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# repo root = three levels up from tests/unit/<this file>
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 simulate_PDF_module = import_module_from_path('simulate_PDF', 
     os.path.join(BASE_DIR, 'allesfitter', 'priors', 'simulate_PDF.py'))

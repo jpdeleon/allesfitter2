@@ -1,0 +1,41 @@
+# Pre-commit hooks for allesfitter2.
+#
+# Setup (once per clone):
+#     pip install pre-commit      # or: uv pip install pre-commit
+#     pre-commit install
+#
+# Thereafter black/ruff run automatically on staged files at commit time.
+# Run across the whole tree on demand with:
+#     pre-commit run --all-files
+#
+# black is the canonical formatter; ruff handles linting + import sorting.
+# Both read their config from pyproject.toml ([tool.black] / [tool.ruff]) so
+# the CLI and the hook never disagree.
+default_language_version:
+  python: python3
+
+repos:
+  - repo: https://github.com/psf/black
+    rev: 24.8.0
+    hooks:
+      - id: black
+        args: ["--config", "pyproject.toml"]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '\.(csv|ipynb)$'
+      - id: end-of-file-fixer
+        exclude: '\.(csv|ipynb)$'
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+        args: ["--maxkb=2048"]
+      - id: check-merge-conflict

@@ -11,6 +11,13 @@ from allesfitter.time_series import (
     mask_regions,
 )
 
+try:
+    import wotan  # noqa: F401  (optional dependency used by slide_clip)
+
+    HAS_WOTAN = True
+except ImportError:
+    HAS_WOTAN = False
+
 
 class TestClean:
     def test_clean_removes_nan(self):
@@ -48,7 +55,7 @@ class TestClean:
         assert len(time_clean) >= 0
 
     def test_clean_with_astropy_time(self):
-        t = Time([50000.0, 50001.0, 50002.0])
+        t = Time([50000.0, 50001.0, 50002.0], format="mjd")
         y = np.array([1.0, 2.0, 3.0])
         time_clean, y_clean, _ = clean(t, y)
         assert len(time_clean) == 3
@@ -80,55 +87,56 @@ class TestSort:
 
 
 class TestSigmaClip:
-    def test_sigma_clip_returns_array(self, sample_flux):
-        result = sigma_clip(sample_time(), sample_flux)
+    def test_sigma_clip_returns_array(self, sample_time, sample_flux):
+        result = sigma_clip(sample_time, sample_flux)
         assert isinstance(result, np.ndarray)
 
-    def test_sigma_clip_preserves_length(self, sample_flux):
-        result = sigma_clip(sample_time(), sample_flux)
+    def test_sigma_clip_preserves_length(self, sample_time, sample_flux):
+        result = sigma_clip(sample_time, sample_flux)
         assert len(result) == len(sample_flux)
 
-    def test_sigma_clip_with_outliers(self, sample_flux_with_outliers):
-        result = sigma_clip(sample_time(), sample_flux_with_outliers, low=4, high=4)
+    def test_sigma_clip_with_outliers(self, sample_time, sample_flux_with_outliers):
+        result = sigma_clip(sample_time, sample_flux_with_outliers, low=4, high=4)
         assert isinstance(result, np.ndarray)
         assert len(result) == len(sample_flux_with_outliers)
         nan_count = np.sum(np.isnan(result))
         assert nan_count >= 2
 
-    def test_sigma_clip_return_mask(self, sample_flux):
+    def test_sigma_clip_return_mask(self, sample_time, sample_flux):
         result = sigma_clip(
-            sample_time(), sample_flux, low=4, high=4, return_mask=True
+            sample_time, sample_flux, low=4, high=4, return_mask=True
         )
         assert isinstance(result, tuple)
         assert len(result) == 4
 
-    def test_sigma_clip_different_sigmas(self, sample_flux):
-        result_loose = sigma_clip(sample_time(), sample_flux, low=5, high=5)
-        result_strict = sigma_clip(sample_time(), sample_flux, low=2, high=2)
+    def test_sigma_clip_different_sigmas(self, sample_time, sample_flux):
+        result_loose = sigma_clip(sample_time, sample_flux, low=5, high=5)
+        result_strict = sigma_clip(sample_time, sample_flux, low=2, high=2)
         nan_loose = np.sum(np.isnan(result_loose))
         nan_strict = np.sum(np.isnan(result_strict))
         assert nan_strict >= nan_loose
 
 
+@pytest.mark.skipif(not HAS_WOTAN, reason="wotan not installed (optional dependency)")
 class TestSlideClip:
-    def test_slide_clip_returns_array(self, sample_flux):
-        result = slide_clip(sample_time(), sample_flux, window_length=1.0)
+    def test_slide_clip_returns_array(self, sample_time, sample_flux):
+        result = slide_clip(sample_time, sample_flux, window_length=1.0)
         assert isinstance(result, np.ndarray)
 
-    def test_slide_clip_preserves_length(self, sample_flux):
-        result = slide_clip(sample_time(), sample_flux, window_length=1.0)
+    def test_slide_clip_preserves_length(self, sample_time, sample_flux):
+        result = slide_clip(sample_time, sample_flux, window_length=1.0)
         assert len(result) == len(sample_flux)
 
-    def test_slide_clip_with_outliers(self, sample_flux_with_outliers):
+    def test_slide_clip_with_outliers(self, sample_time, sample_flux_with_outliers):
         result = slide_clip(
-            sample_time(), sample_flux_with_outliers, window_length=1.0, low=4, high=4
+            sample_time, sample_flux_with_outliers, window_length=1.0, low=4, high=4
         )
         assert isinstance(result, np.ndarray)
         assert len(result) == len(sample_flux_with_outliers)
 
-    def test_slide_clip_return_mask(self, sample_flux):
+    def test_slide_clip_return_mask(self, sample_time, sample_flux):
         result = slide_clip(
-            sample_time(), sample_flux, window_length=1.0, low=4, high=4, return_mask=True
+            sample_time, sample_flux, window_length=1.0, low=4, high=4, return_mask=True
         )
         assert isinstance(result, tuple)
         assert len(result) == 4

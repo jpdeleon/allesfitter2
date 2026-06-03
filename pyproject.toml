@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "allesfitter"
-version = "2"
+dynamic = ["version"]
 description = "A global inference framework for photometry and RV"
 authors = [
     {name = "Jerome de Leon", email = "jpdeleon@g.ecc.u-tokyo.ac.jp"}
@@ -44,6 +44,13 @@ test = [
     "pytest>=7.0.0",
     "mypy>=1.0.0",
 ]
+dev = [
+    "pytest>=7.0.0",
+    "mypy>=1.0.0",
+    "black>=24.0",
+    "ruff>=0.4",
+    "pre-commit>=3.5",
+]
 ultranest = [
     "ultranest>=4.0",
     "h5py",  # required by ultranest for its log_dir/resume backend
@@ -59,11 +66,30 @@ prepare_allesfit = "allesfitter.scripts:prepare_allesfit"
 [tool.setuptools.packages.find]
 where = ["."]
 
+# Version is read from a single source of truth: allesfitter/_version.py.
+# Bump __version__ there and the build, runtime, and installed metadata all
+# follow automatically. setuptools parses the attribute statically (no import).
+[tool.setuptools.dynamic]
+version = {attr = "allesfitter._version.__version__"}
+
 [tool.pytest.ini_options]
 markers = [
     "slow: marks tests that run real samplers (deselect with '-m \"not slow\"')",
     "unit: fast unit tests (default)",
 ]
+
+# Black: the canonical formatter (wired via pre-commit). line-length matches
+# ruff so the two tools never fight over wrapping. Exclude generated/static and
+# notebook-checkpoint trees.
+[tool.black]
+line-length = 100
+target-version = ["py38"]
+extend-exclude = '''
+/(
+    allesfitter/_static
+  | \.ipynb_checkpoints
+)/
+'''
 
 # Ruff: linter + formatter. target-version stays py38 until the runtime env is
 # migrated to 3.11 (see CI). Keep the legacy rule set lenient so the large

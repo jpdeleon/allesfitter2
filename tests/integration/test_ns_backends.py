@@ -339,7 +339,8 @@ def test_dynesty_vs_ultranest_consistency_and_speed(tmp_path):
         "dyn={}, un={}, max_err={}".format(logz_dyn, logz_un, logzerr_max)
     )
 
-    artifact_dir = Path(__file__).parent / "_artifacts"
+    # _artifacts lives under tests/ (one level up from tests/integration/)
+    artifact_dir = Path(__file__).resolve().parents[1] / "_artifacts"
     artifact_dir.mkdir(exist_ok=True)
     (artifact_dir / "ns_backend_speed.json").write_text(json.dumps({
         "dynesty_wall_time_sec": t_dyn,

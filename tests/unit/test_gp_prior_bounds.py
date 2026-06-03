@@ -42,7 +42,16 @@ def helpers():
     Reads the source and exec's only the functions we need so the import
     does not run main(). Avoids depending on argparse / lightkurve etc.
     """
-    src_path = Path(__file__).resolve().parents[1] / "scripts" / "prepare_allesfit.py"
+    # Walk up from this test file to the repo root (the first ancestor that
+    # contains scripts/prepare_allesfit.py). Robust to the tests/unit/ nesting.
+    here = Path(__file__).resolve()
+    src_path = None
+    for ancestor in here.parents:
+        candidate = ancestor / "scripts" / "prepare_allesfit.py"
+        if candidate.exists():
+            src_path = candidate
+            break
+    assert src_path is not None, "could not locate scripts/prepare_allesfit.py from " + str(here)
     src = src_path.read_text()
     # Parse, then exec only the function-def AST nodes we need.
     import ast

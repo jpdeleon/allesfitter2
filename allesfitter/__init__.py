@@ -357,4 +357,5 @@ class allesclass():
     
     
 #::: version
-__version__ = '1.2.10'
+#::: single source of truth lives in allesfitter/_version.py; bump it there.
+from ._version import __version__

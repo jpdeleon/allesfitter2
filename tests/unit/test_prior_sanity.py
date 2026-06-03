@@ -1,9 +1,14 @@
-"""Tests for ``allesfitter.utils.prior_sanity.validate_gp_priors``.
+"""Tests for ``allesfitter.validation.validate_gp_priors``.
 
 The validator is pure: it reads ``params.csv``, ``settings.csv`` and the
 per-instrument data CSVs in a datadir, and returns a list of warning
 strings. We construct miniature, in-memory datadirs in a ``tmp_path``
 fixture and assert the expected warnings fire.
+
+The implementation moved from ``allesfitter.utils.prior_sanity`` into the
+consolidated ``allesfitter.validation`` package; this test imports from the
+new home. (The old path still works via a backward-compat shim, exercised by
+``test_gp_prior_bounds.py``.)
 """
 
 from __future__ import annotations
@@ -14,7 +19,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from allesfitter.utils.prior_sanity import validate_gp_priors
+from allesfitter.validation import validate_gp_priors
 
 
 def _write(p: Path, body: str) -> None:
@@ -218,7 +223,7 @@ def test_tdur_derived_from_params_csv(tmp_path):
     """When tdur_hours_by_companion is None, the validator should derive a
     per-companion tdur from initial-guess orbital rows in params.csv and
     use it for the lnρ-vs-tdur check."""
-    from allesfitter.utils.prior_sanity import (
+    from allesfitter.validation.prior_sanity import (
         _compute_tdur_hours_by_companion,
         _tdur_days_from_orbit,
     )
@@ -255,7 +260,7 @@ def test_tdur_derived_from_params_csv(tmp_path):
 
 def test_tdur_helper_chromatic_rr(tmp_path):
     """The helper should fall back to <c>_rr_<bandpass> when <c>_rr is absent."""
-    from allesfitter.utils.prior_sanity import _compute_tdur_hours_by_companion
+    from allesfitter.validation.prior_sanity import _compute_tdur_hours_by_companion
 
     body = (
         "b_period,3.0,1,uniform 2 4,$P$,,\n"
@@ -273,7 +278,7 @@ def test_tdur_helper_chromatic_rr(tmp_path):
 def test_tdur_helper_missing_inputs_returns_none(tmp_path):
     """If a companion lacks any of per/rsuma/cosi/k, it is omitted; if no
     companion can be resolved, the helper returns None."""
-    from allesfitter.utils.prior_sanity import _compute_tdur_hours_by_companion
+    from allesfitter.validation.prior_sanity import _compute_tdur_hours_by_companion
 
     # b has period but no rsuma → skipped; nothing else qualifies → None.
     (tmp_path / "params.csv").write_text(
@@ -287,7 +292,7 @@ def test_tdur_helper_missing_inputs_returns_none(tmp_path):
 def test_tdur_helper_non_transiting_geometry_omitted(tmp_path):
     """A grazing / non-transiting geometry (b > 1+k) yields NaN tdur and is
     excluded from the dict."""
-    from allesfitter.utils.prior_sanity import _compute_tdur_hours_by_companion
+    from allesfitter.validation.prior_sanity import _compute_tdur_hours_by_companion
 
     # cosi=0.5 with rsuma=0.1 → b=cosi*(1+k)/rsuma = 5.5 → non-transiting.
     (tmp_path / "params.csv").write_text(

@@ -32,9 +32,11 @@ warnings.filterwarnings('ignore', category=np.RankWarning)
 from scipy.stats import truncnorm
 
 #::: allesfitter modules
+from ._version import __version__
 from .exoworlds_rdx.lightcurves.index_transits import index_transits, index_eclipses, get_first_epoch, get_tmid_observed_transits
 from .priors.simulate_PDF import simulate_PDF
 from .utils.mcmc_move_translator import translate_str_to_move
+from .validation import validate_params_settings
 
 #::: plotting settings
 import seaborn as sns
@@ -346,10 +348,14 @@ class Basement:
         print('')
         self.logprint('\nallesfitter version')
         self.logprint('---------------------')
-        self.logprint('v1.2.10')
-        
+        self.logprint('v' + __version__)
+
         self.load_settings()
         self.load_params()
+        #::: structural sanity + cross-file consistency for params.csv/settings.csv.
+        #::: Raises ConfigError (a ValueError) on unambiguous mistakes before any
+        #::: data is loaded. See allesfitter.validation.config_checks.
+        validate_params_settings(self.datadir)
         self.load_data()
         self.validate_baseline_against_covariates()
         self.synthesize_linear_multi_params()

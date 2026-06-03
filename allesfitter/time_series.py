@@ -24,7 +24,10 @@ from astropy.stats import sigma_clip as sigma_clip_
 try:
     from wotan import flatten
 except ImportError:
-    pass
+    # wotan is an optional dependency (only slide_clip needs it). Bind a
+    # sentinel so slide_clip can raise a clear ImportError instead of a
+    # confusing NameError when wotan is not installed.
+    flatten = None
 
 #::: my modules
 from .exoworlds_rdx.lightcurves.lightcurve_tools import rebin_err
@@ -194,6 +197,11 @@ def slide_clip(time, y, window_length=1, low=4, high=4, return_mask=False):
     -------
     Clipped y (outliers replaced with NaN).
     """
+    if flatten is None:
+        raise ImportError(
+            "slide_clip requires the optional 'wotan' package. "
+            "Install it with `pip install wotan` (or `uv pip install wotan`)."
+        )
     y_flat = flatten(time, y, method='biweight', window_length=window_length)
     y2, mask, mask_upper, mask_lower = sigma_clip(time, y_flat, low=low, high=high, return_mask=True)
     y3 = 1*y
