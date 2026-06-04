@@ -5,10 +5,9 @@ per-instrument data CSVs in a datadir, and returns a list of warning
 strings. We construct miniature, in-memory datadirs in a ``tmp_path``
 fixture and assert the expected warnings fire.
 
-The implementation moved from ``allesfitter.utils.prior_sanity`` into the
-consolidated ``allesfitter.validation`` package; this test imports from the
-new home. (The old path still works via a backward-compat shim, exercised by
-``test_gp_prior_bounds.py``.)
+The heuristic checks live in ``allesfitter.validation.prior_checks`` (the
+warning-only sibling of ``config_checks``); this test imports from there and
+from the package-level public surface.
 """
 
 from __future__ import annotations
@@ -223,9 +222,9 @@ def test_tdur_derived_from_params_csv(tmp_path):
     """When tdur_hours_by_companion is None, the validator should derive a
     per-companion tdur from initial-guess orbital rows in params.csv and
     use it for the lnρ-vs-tdur check."""
-    from allesfitter.validation.prior_sanity import (
-        _compute_tdur_hours_by_companion,
-        _tdur_days_from_orbit,
+    from allesfitter.validation.prior_checks import (
+        transit_duration_days,
+        transit_duration_hours_by_companion,
     )
 
     # Hot-Jupiter-ish geometry: per=3 d, R★+Rp/a=0.1, cosi=0.05, k=0.1
@@ -243,13 +242,13 @@ def test_tdur_derived_from_params_csv(tmp_path):
         lc_csvs={"tess.csv": _clean_tess_lc_csv()},
     )
 
-    derived = _compute_tdur_hours_by_companion(d)
+    derived = transit_duration_hours_by_companion(d)
     assert derived is not None and "b" in derived
     # tdur should be ~2.9 h for this geometry
     assert 1.0 < derived["b"] < 5.0, derived
 
     # Independent confirmation via the math helper
-    tdur_d = _tdur_days_from_orbit(per=3.0, rsuma=0.10, cosi=0.05, k=0.10)
+    tdur_d = transit_duration_days(per=3.0, rsuma=0.10, cosi=0.05, k=0.10)
     assert abs(derived["b"] - tdur_d * 24.0) < 1e-6
 
     # The validator should use the derived tdur (not the 0.1 d fallback) —
@@ -260,7 +259,7 @@ def test_tdur_derived_from_params_csv(tmp_path):
 
 def test_tdur_helper_chromatic_rr(tmp_path):
     """The helper should fall back to <c>_rr_<bandpass> when <c>_rr is absent."""
-    from allesfitter.validation.prior_sanity import _compute_tdur_hours_by_companion
+    from allesfitter.validation.prior_checks import transit_duration_hours_by_companion
 
     body = (
         "b_period,3.0,1,uniform 2 4,$P$,,\n"
@@ -270,7 +269,7 @@ def test_tdur_helper_chromatic_rr(tmp_path):
         "b_rr_g,0.11,1,uniform 0 0.3,$k_g$,,\n"
     )
     (tmp_path / "params.csv").write_text(body)
-    out = _compute_tdur_hours_by_companion(tmp_path)
+    out = transit_duration_hours_by_companion(tmp_path)
     assert out is not None and "b" in out
     assert out["b"] > 0
 
@@ -278,7 +277,7 @@ def test_tdur_helper_chromatic_rr(tmp_path):
 def test_tdur_helper_missing_inputs_returns_none(tmp_path):
     """If a companion lacks any of per/rsuma/cosi/k, it is omitted; if no
     companion can be resolved, the helper returns None."""
-    from allesfitter.validation.prior_sanity import _compute_tdur_hours_by_companion
+    from allesfitter.validation.prior_checks import transit_duration_hours_by_companion
 
     # b has period but no rsuma → skipped; nothing else qualifies → None.
     (tmp_path / "params.csv").write_text(
@@ -286,13 +285,13 @@ def test_tdur_helper_missing_inputs_returns_none(tmp_path):
         "b_cosi,0.0,1,uniform 0 1,,,\n"
         "b_rr,0.1,1,uniform 0 1,,,\n"
     )
-    assert _compute_tdur_hours_by_companion(tmp_path) is None
+    assert transit_duration_hours_by_companion(tmp_path) is None
 
 
 def test_tdur_helper_non_transiting_geometry_omitted(tmp_path):
     """A grazing / non-transiting geometry (b > 1+k) yields NaN tdur and is
     excluded from the dict."""
-    from allesfitter.validation.prior_sanity import _compute_tdur_hours_by_companion
+    from allesfitter.validation.prior_checks import transit_duration_hours_by_companion
 
     # cosi=0.5 with rsuma=0.1 → b=cosi*(1+k)/rsuma = 5.5 → non-transiting.
     (tmp_path / "params.csv").write_text(
@@ -301,4 +300,4 @@ def test_tdur_helper_non_transiting_geometry_omitted(tmp_path):
         "b_cosi,0.50,1,uniform 0 1,,,\n"
         "b_rr,0.10,1,uniform 0 1,,,\n"
     )
-    assert _compute_tdur_hours_by_companion(tmp_path) is None
+    assert transit_duration_hours_by_companion(tmp_path) is None

@@ -1,14 +1,11 @@
-"""Prior-bound sanity checks for GP and noise rows in ``params.csv``.
+"""Heuristic prior-bound checks for GP and noise rows in ``params.csv``.
 
-These checks are heuristic — they emit warnings when bounds let parameters
-take physically implausible values for the dataset at hand. They never
-raise; deliberate users can ignore the warning. The goal is to catch the
-common foot-guns where a too-loose GP prior lets the kernel absorb the
-transit, or a too-tight noise prior pegs the chain against the wall.
-
-This module moved here from ``allesfitter.utils.prior_sanity`` as part of the
-consolidated :mod:`allesfitter.validation` package. The old import path still
-works via a thin backward-compatible shim.
+The warning-only sibling of :mod:`allesfitter.validation.config_checks`: where
+that module *raises* on unambiguous structural errors, these checks emit
+warnings when bounds let parameters take physically implausible values for the
+dataset at hand. They never raise; deliberate users can ignore the warning. The
+goal is to catch the common foot-guns where a too-loose GP prior lets the kernel
+absorb the transit, or a too-tight noise prior pegs the chain against the wall.
 
 Triggered checks
 ----------------
@@ -33,15 +30,19 @@ Public API
 ----------
 :func:`validate_gp_priors` — read the datadir, return a list of warning
 strings, optionally piped to a logger.
+:func:`transit_duration_days`, :func:`transit_duration_hours_by_companion` —
+transit-duration helpers also reused by output/visualization code.
 """
 
 from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Callable
 
 import numpy as np
+
+from .parsing import parse_uniform_bounds, read_csv_rows
 
 GP_LNSIGMA_PREFIX = "baseline_gp_matern32_lnsigma_flux_"
 GP_LNRHO_PREFIX = "baseline_gp_matern32_lnrho_flux_"
@@ -54,33 +55,8 @@ _RHO_MIN_CADENCES = 2.0                # ρ should span at least 2 cadences
 _RHO_VS_TDUR_RATIO = 0.5               # ρ should exceed half tdur
 
 
-def _read_csv_rows(path):
-    out = []
-    if not Path(path).exists():
-        return out
-    for line in Path(path).read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        parts = [p.strip() for p in line.split(",")]
-        out.append(parts)
-    return out
-
-
-def _parse_uniform(bounds_str):
-    if not bounds_str:
-        return None
-    tokens = bounds_str.split()
-    if len(tokens) != 3 or tokens[0] != "uniform":
-        return None
-    try:
-        return float(tokens[1]), float(tokens[2])
-    except (TypeError, ValueError):
-        return None
-
-
 def _settings_inst_phot(datadir):
-    for parts in _read_csv_rows(Path(datadir) / "settings.csv"):
+    for parts in read_csv_rows(Path(datadir) / "settings.csv"):
         if parts and parts[0] == "inst_phot" and len(parts) >= 2:
             return parts[1].split()
     return []
@@ -131,10 +107,10 @@ def _cadence(time):
 
 
 def _w(msg):
-    return "prior_sanity: " + msg
+    return "prior_checks: " + msg
 
 
-def _tdur_days_from_orbit(per, rsuma, cosi, k):
+def transit_duration_days(per, rsuma, cosi, k):
     """Transit duration from per, R/a sum, cos i, and Rp/Rs.
 
     Uses the standard chord-length formula:
@@ -161,7 +137,7 @@ def _tdur_days_from_orbit(per, rsuma, cosi, k):
     return per / math.pi * math.asin(arg)
 
 
-def _compute_tdur_hours_by_companion(datadir):
+def transit_duration_hours_by_companion(datadir):
     """Build ``{companion: tdur_hours}`` from initial-guess values in params.csv.
 
     For each companion ``<c>`` (single-letter, e.g. ``b``, ``c``, ...),
@@ -171,7 +147,7 @@ def _compute_tdur_hours_by_companion(datadir):
     companion is included in the returned dict. Returns ``None`` when no
     companion could be resolved (caller falls back to the legacy default).
     """
-    rows = _read_csv_rows(Path(datadir) / "params.csv")
+    rows = read_csv_rows(Path(datadir) / "params.csv")
     if not rows:
         return None
     # name -> initial value (skip rows that don't parse as float)
@@ -203,7 +179,7 @@ def _compute_tdur_hours_by_companion(datadir):
                     break
         if None in (per, rsuma, cosi, k):
             continue
-        tdur_days = _tdur_days_from_orbit(per, rsuma, cosi, k)
+        tdur_days = transit_duration_days(per, rsuma, cosi, k)
         if math.isfinite(tdur_days) and tdur_days > 0:
             by_companion[companion] = tdur_days * 24.0
     return by_companion or None
@@ -229,7 +205,7 @@ def validate_gp_priors(
         from its initial-guess orbital row in ``params.csv``
         (``<c>_period``, ``<c>_rsuma``, ``<c>_cosi``, ``<c>_rr`` or
         ``<c>_rr_<bandpass>``) via the chord-length formula in
-        :func:`_tdur_days_from_orbit`. Falls back to a permissive
+        :func:`transit_duration_days`. Falls back to a permissive
         0.1 d (~2.4 h) only when no companion can be resolved.
     log : callable, optional
         Sink for warnings; receives one fully-formatted message per call.
@@ -243,7 +219,7 @@ def validate_gp_priors(
     """
     msgs: list[str] = []
 
-    params_rows = _read_csv_rows(Path(datadir) / "params.csv")
+    params_rows = read_csv_rows(Path(datadir) / "params.csv")
     if not params_rows:
         return msgs
 
@@ -252,7 +228,7 @@ def validate_gp_priors(
 
     # Resolve transit-duration source (caller > derived from params.csv > fallback).
     if tdur_hours_by_companion is None:
-        tdur_hours_by_companion = _compute_tdur_hours_by_companion(datadir)
+        tdur_hours_by_companion = transit_duration_hours_by_companion(datadir)
     if tdur_hours_by_companion:
         tdur_days = float(np.median(
             [t / 24.0 for t in tdur_hours_by_companion.values() if t]
@@ -264,7 +240,7 @@ def validate_gp_priors(
         if len(row) < 4:
             continue
         name, _value, _fit, bounds = row[0], row[1], row[2], row[3]
-        bnds = _parse_uniform(bounds)
+        bnds = parse_uniform_bounds(bounds)
         if bnds is None:
             continue
         lo, hi = bnds

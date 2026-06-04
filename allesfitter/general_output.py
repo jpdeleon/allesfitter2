@@ -986,7 +986,7 @@ def _draw_event_axvlines(ax, base, params_median, companion, inst,
     grid T_n = epoch + n*period. Silently no-ops when the orbital
     geometry is non-transiting or any required parameter is missing.
     """
-    from .validation.prior_sanity import _tdur_days_from_orbit
+    from .validation import transit_duration_days
     try:
         period = float(params_median[companion+'_period'])
         epoch  = float(params_median[companion+'_epoch'])
@@ -1015,7 +1015,7 @@ def _draw_event_axvlines(ax, base, params_median, companion, inst,
     except (TypeError, ValueError):
         return
 
-    tdur = _tdur_days_from_orbit(period, rsuma, cosi, rr)
+    tdur = transit_duration_days(period, rsuma, cosi, rr)
     if tdur is None or not np.isfinite(tdur):
         # Non-transiting geometry or invalid params → still draw mid-transit
         # if requested (it's the orbital reference time even without a chord)

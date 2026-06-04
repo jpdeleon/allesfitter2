@@ -1,6 +1,6 @@
 """Structural sanity checks for ``params.csv`` and ``settings.csv``.
 
-Unlike :mod:`allesfitter.validation.prior_sanity` (heuristic, warning-only),
+Unlike :mod:`allesfitter.validation.prior_checks` (heuristic, warning-only),
 these checks catch *unambiguous* configuration errors that would otherwise
 fail late, silently, or with a confusing traceback deep inside the sampler:
 
@@ -11,7 +11,9 @@ fail late, silently, or with a confusing traceback deep inside the sampler:
   ``trunc_normal``), inverted bounds, non-positive sigma,
 - an initial value that falls outside its own (uniform / truncated) prior,
 - a companion declared in ``settings.csv`` that has *no* parameter rows in
-  ``params.csv`` — the cross-file consistency check.
+  ``params.csv`` — the cross-file consistency check,
+- a GP baseline combined with a GP stellar-variability model on the same key
+  (forbidden; ``computer.py`` would raise deep inside the likelihood).
 
 Every function is **pure**: it takes already-parsed rows / dicts and returns
 a list of human-readable error strings. :func:`validate_params_settings`
@@ -22,8 +24,9 @@ unit-testable without constructing a full :class:`~allesfitter.basement.Basement
 
 from __future__ import annotations
 
-import os
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Sequence
+
+from .parsing import parse_bounds, read_param_rows, read_settings
 
 # Rows whose ``name`` is one of these are section separators in params.csv,
 # not real parameters; they carry no value/fit/bounds and must be skipped.
@@ -31,6 +34,24 @@ _SENTINEL_NAMES = {"user-given:", "automatically set:"}
 
 # settings.csv keys that hold a space-separated list of companion letters.
 _COMPANION_KEYS = ("companions_phot", "companions_rv")
+
+# Values of ``stellar_var_<key>`` / ``baseline_<key>_<inst>`` that select a
+# Gaussian Process model (mirrors ``GPs`` in :mod:`allesfitter.computer`).
+_GP_VALUES = {
+    "sample_GP_real",
+    "sample_GP_complex",
+    "sample_GP_Matern32",
+    "sample_GP_SHO",
+}
+
+# ``stellar_var_<key>`` pairs with the instrument-list setting ``<key2>`` that
+# enumerates the instruments whose ``baseline_<key>_<inst>`` is checked — the
+# same key/key2 zip used in :func:`allesfitter.computer.calculate_lnlike_total`.
+_STELLAR_VAR_KEY_TO_INST_KEY = {
+    "flux": "inst_phot",
+    "rv": "inst_rv",
+    "rv2": "inst_rv2",
+}
 
 
 class ConfigError(ValueError):
@@ -44,36 +65,11 @@ class ConfigError(ValueError):
 # ---------------------------------------------------------------------------
 # Parsing helpers
 # ---------------------------------------------------------------------------
-
-
-def _read_rows(path: str) -> List[List[str]]:
-    """Split a CSV into stripped token lists, skipping blanks and ``#`` lines."""
-    rows: List[List[str]] = []
-    if not os.path.exists(path):
-        return rows
-    with open(path, encoding="utf-8") as fh:
-        for line in fh.read().splitlines():
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            rows.append([p.strip() for p in line.split(",")])
-    return rows
-
-
-def read_param_rows(datadir: str) -> List[List[str]]:
-    """Return the non-comment rows of ``<datadir>/params.csv``."""
-    return _read_rows(os.path.join(datadir, "params.csv"))
-
-
-def read_settings(datadir: str) -> Dict[str, str]:
-    """Return ``settings.csv`` as a ``{key: value}`` dict (first column keyed)."""
-    out: Dict[str, str] = {}
-    for parts in _read_rows(os.path.join(datadir, "settings.csv")):
-        if not parts:
-            continue
-        key = parts[0]
-        out[key] = parts[1] if len(parts) >= 2 else ""
-    return out
+#
+# Low-level CSV reading (``read_csv_rows``, ``read_param_rows``,
+# ``read_settings``) and bounds parsing (``parse_bounds``) live in
+# :mod:`allesfitter.validation.parsing` and are imported above; they are shared
+# with :mod:`allesfitter.validation.prior_checks`.
 
 
 def companions_from_settings(settings: Dict[str, str]) -> List[str]:
@@ -99,39 +95,6 @@ def _is_coupled(row: Sequence[str]) -> bool:
     checks must skip them.
     """
     return len(row) >= 7 and row[6].strip() != ""
-
-
-def parse_bounds(bounds_str: str) -> Optional[Tuple[str, Tuple[float, ...]]]:
-    """Parse an allesfitter bounds string.
-
-    Recognized forms (whitespace-separated):
-
-    - ``uniform <lo> <hi>``           → ``("uniform", (lo, hi))``
-    - ``normal <mean> <sigma>``       → ``("normal", (mean, sigma))``
-    - ``trunc_normal <lo> <hi> <mean> <sigma>``
-                                      → ``("trunc_normal", (lo, hi, mean, sigma))``
-
-    Returns ``None`` for an empty/whitespace string (the row is fixed or has
-    no prior). Returns ``("__bad__", ())`` when a known keyword is present but
-    the numbers do not parse or the arity is wrong, so callers can flag it.
-    """
-    if bounds_str is None:
-        return None
-    tokens = bounds_str.split()
-    if not tokens:
-        return None
-    kind = tokens[0]
-    nums_raw = tokens[1:]
-    arity = {"uniform": 2, "normal": 2, "trunc_normal": 4}
-    if kind not in arity:
-        return ("__unknown__", ())
-    if len(nums_raw) != arity[kind]:
-        return ("__bad__", ())
-    try:
-        nums = tuple(float(x) for x in nums_raw)
-    except (TypeError, ValueError):
-        return ("__bad__", ())
-    return (kind, nums)
 
 
 # ---------------------------------------------------------------------------
@@ -318,6 +281,42 @@ def check_companions_have_params(
     return errors
 
 
+def check_gp_baseline_vs_stellar_var(settings: Dict[str, str]) -> List[str]:
+    """Forbid a GP baseline and a GP stellar-variability model on the same key.
+
+    For a given key (``flux`` / ``rv`` / ``rv2``), allesfitter cannot combine a
+    GP stellar-variability model with a GP baseline: ``computer.py`` raises a
+    ``KeyError`` deep inside the likelihood (CASE 4). The two GPs would model
+    the same additive correlated signal over the same time axis — statistically
+    degenerate — and allesfitter never builds the combined kernel needed to do
+    it coherently.
+
+    The supported pattern is a GP for stellar variability **plus a non-GP
+    baseline** (e.g. polynomial, ``hybrid_*`` or ``sample_linear``).
+    """
+    errors: List[str] = []
+    for key, inst_key in _STELLAR_VAR_KEY_TO_INST_KEY.items():
+        if settings.get("stellar_var_" + key, "none") not in _GP_VALUES:
+            continue
+        instruments = (settings.get(inst_key, "") or "").split()
+        gp_baseline_insts = [
+            inst
+            for inst in instruments
+            if settings.get(f"baseline_{key}_{inst}", "none") in _GP_VALUES
+        ]
+        if gp_baseline_insts:
+            errors.append(
+                f"settings.csv uses a GP for both stellar_var_{key} and the "
+                f"baseline of instrument(s) {', '.join(gp_baseline_insts)} "
+                f"(baseline_{key}_<inst> set to a sample_GP_* kernel). A GP "
+                f"stellar-variability model and a GP baseline cannot be used at "
+                f"the same time. Supported pattern: keep the GP for stellar "
+                f"variability and switch the baseline to a non-GP model "
+                f"(polynomial / hybrid_* / sample_linear)."
+            )
+    return errors
+
+
 # ---------------------------------------------------------------------------
 # Aggregator
 # ---------------------------------------------------------------------------
@@ -342,6 +341,7 @@ def collect_config_errors(datadir: str) -> List[str]:
     errors += check_bounds_wellformed(rows)
     errors += check_values_within_bounds(rows)
     errors += check_companions_have_params(settings, rows)
+    errors += check_gp_baseline_vs_stellar_var(settings)
     return errors
 
 

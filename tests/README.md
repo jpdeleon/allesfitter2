@@ -46,5 +46,7 @@ The default `addopts` in `pytest.ini` apply `-m "not slow"`, so a bare
 - Validation tests:
   - `tests/unit/test_config_checks.py` — structural `params.csv`/`settings.csv`
     checks (`allesfitter.validation.config_checks`).
-  - `tests/unit/test_prior_sanity.py` — heuristic GP/noise prior checks
-    (`allesfitter.validation.prior_sanity`).
+  - `tests/unit/test_prior_checks.py` — heuristic GP/noise prior checks
+    (`allesfitter.validation.prior_checks`).
+  - `tests/unit/test_parsing.py` — shared CSV readers + bounds parsing
+    (`allesfitter.validation.parsing`).
