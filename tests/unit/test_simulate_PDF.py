@@ -12,10 +12,6 @@ import os
 import sys
 from unittest.mock import MagicMock
 
-sys.modules['matplotlib'] = MagicMock()
-sys.modules['matplotlib.pyplot'] = MagicMock()
-sys.modules['seaborn'] = MagicMock()
-
 from scipy.stats import skewnorm
 
 
@@ -29,8 +25,42 @@ def import_module_from_path(module_name, file_path):
 # repo root = three levels up from tests/unit/<this file>
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-simulate_PDF_module = import_module_from_path('simulate_PDF', 
-    os.path.join(BASE_DIR, 'allesfitter', 'priors', 'simulate_PDF.py'))
+
+def _import_simulate_PDF_with_mocked_plotting():
+    """Import ``simulate_PDF.py`` without requiring matplotlib/seaborn.
+
+    ``simulate_PDF`` imports ``matplotlib.pyplot`` and ``seaborn`` at module
+    scope. We install MagicMock stand-ins in ``sys.modules`` only for the
+    duration of the import so the module's ``plt``/``sns`` names bind to
+    harmless mocks, then we restore the original ``sys.modules`` entries.
+
+    Leaving the mocks installed globally pollutes every later test that does
+    real matplotlib rendering (e.g. ``fig.savefig`` to PDF), which previously
+    caused cross-file failures under the full suite
+    (``ValueError: not enough values to unpack (expected 2, got 0)`` from the
+    PDF backend once ``matplotlib`` had been replaced by a MagicMock).
+    """
+    mocked = {
+        'matplotlib': MagicMock(),
+        'matplotlib.pyplot': MagicMock(),
+        'seaborn': MagicMock(),
+    }
+    saved = {name: sys.modules.get(name) for name in mocked}
+    sys.modules.update(mocked)
+    try:
+        return import_module_from_path(
+            'simulate_PDF',
+            os.path.join(BASE_DIR, 'allesfitter', 'priors', 'simulate_PDF.py'),
+        )
+    finally:
+        for name, original in saved.items():
+            if original is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = original
+
+
+simulate_PDF_module = _import_simulate_PDF_with_mocked_plotting()
 simulate_PDF = simulate_PDF_module.simulate_PDF
 calculate_skewed_normal_params = simulate_PDF_module.calculate_skewed_normal_params
 
