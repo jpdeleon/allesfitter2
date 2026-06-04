@@ -591,109 +591,20 @@ When `-f` has ≥2 distinct instruments and `-bp` is omitted, the script logs a 
 | `-u, --update_db` | Force database updates |
 | `--debug` | Detailed diagnostic output |
 
-## Parameter Sources & Databases
+## Usage notes, settings/prior guide & troubleshooting
 
-### Database Priority and Usage
+Advisory material — how to use allesfitter2 effectively, how to choose
+`settings.csv` / `params.csv` values and priors for your use case, the
+parameter-source/database reference, and the troubleshooting catalog — now
+lives in **[notes.md](notes.md)**:
 
-| Database | Use Case | Parameter Source | Reliability |
-|----------|----------|------------------|-------------|
-| **NExSci** (`-name`) | Confirmed exoplanets | NASA Exoplanet Archive | Highest |
-| **TOI** (`-toi`) | TESS candidates | TFOP database | High |
-| **CTOI** (`-ctoi`) | Community candidates | Community observations | Medium |
-| **TIC** (`-tic`) | Custom analysis | TIC catalog + manual input | Variable |
-
-## Troubleshooting
-
-### Common Issues and Solutions
-
-**"No light curves found"**
-- Verify target name spelling and database availability
-- Try alternative identifiers (TIC vs TOI vs star name)
-- Use `--debug` to see search results
-- Check if target was observed by TESS
-
-**"Multiple exposure times available"**
-- Specify exposure time: `-e 120` or `-e 600`
-- Use `--debug` to see available options
-
-**"Sector not available"**
-- Check available sectors with `-s all`
-- Verify target was observed in requested sector
-
-**"Missing stellar parameters"**
-- Enable interactive mode: `-i` 
-- Check target in TIC catalog
-- Verify coordinates are correct
-
-**"Parameter derivation failed"**
-- Use `--debug` for detailed error messages
-- Check database connectivity with `-u`
-- Try interactive mode for manual input
-
-**"Chromatic configuration mismatch between settings.csv and params.csv"**
-- Your `settings.csv` declares `bandpass,<...>` (chromatic) but `params.csv` still has the achromatic `b_rr` row, or has only some of the expected `b_rr_<bandpass>` rows.
-- Replace `b_rr` with one row per unique bandpass: `b_rr_tess`, `b_rr_k2`, etc.
-- The error message lists exactly which keys to add and/or remove.
-
-**"params.csv references unknown bandpass(es)"**
-- A `b_rr_<suffix>` row uses a suffix that isn't in your `settings.csv` `bandpass` list — usually a typo (`b_rr_tes` vs `tess`).
-- Fix the suffix to match one of the labels in `bandpass`, or add a new label to `bandpass`.
-
-**"settings.csv 'bandpass' has N entries but inst_phot has M entries"**
-- `bandpass` and `inst_phot` must have the same number of space-separated entries; repeat a label to share a band across instruments.
-
-**`KeyError: 'b_rr'` in chromatic mode**
-- Fixed in current main; pull the latest and re-run `show_initial_guess`/`ns_fit`.
-
-**`settings.csv contains per-instrument keys whose suffix is not a known instrument name`**
-- A per-instrument settings row (e.g. `host_ld_law_`, `host_grid_`, `baseline_flux_`, `t_exp_`, …) carries a suffix that is **not** in `inst_phot ∪ inst_rv ∪ inst_rv2`. The most common cause is confusing a bandpass label with an instrument name. If the orphan suffix matches a bandpass, the error explicitly hints at the affected instruments — repeat the row once per instrument that uses that bandpass.
-- Example: with `inst_phot,tglc120_s90 tglc120_s63s64` and `bandpass,tess tess`, write `host_ld_law_tglc120_s90,quad` and `host_ld_law_tglc120_s63s64,quad`, **not** `host_ld_law_tess,quad`.
-
-**Transit shape looks unchanged when editing `host_ldc_q1/q2`**
-- Until v2 the `host_ld_law_<inst>` default was `None`, which silently disabled limb darkening — `ldc_1=None` reached `ellc` and the q1/q2 values had no effect. The current default is `quad`, so this is fixed for new datadirs; for hand-edited configs, ensure `host_ld_law_<inst>,quad` is present per actual instrument. Explicit `host_ld_law_<inst>,none` still opts out cleanly.
-- Note that small q1 deltas (~0.03) only move ellc's `u1, u2` by ~1–2%, which is sub-mmag and often invisible at the default plot scale. Use a larger delta (e.g. 0.1 → 0.9) when sanity-checking the LDC pipeline visually.
-
-**Where are my fits running?**
-- Tail the centralized run log: `tail -n 10 ~/.allesfitter/runs.jsonl` (or whatever path `$ALLESFITTER_RUN_LOG` resolves to). Each `start` row carries `pid`, `hostname`, absolute `datadir`, and `run_id`; the matching `end` row carries `status` and `duration_sec`. See the "Tracking long-running fits" use case above.
-
-### Debug Mode
-
-Enable comprehensive diagnostics:
-```bash
-prepare_allesfit -name "HD 39091" -s 1 --debug
-```
-
-Shows:
-- Database query results
-- Parameter derivation steps
-- Intermediate calculations
-- Generated file contents
-- Error traces
-
-## Best Practices
-
-### 1. Parameter Validation
-- Always use `--debug` for first-time targets
-- Verify stellar parameters match literature values
-- Check transit duration consistency between methods
-- Review generated plots before fitting
-
-### 2. Data Quality
-- Use `pdcsap` over `sap` for SPOC pipeline
-- Apply sigma clipping for noisy data: `-sig 3`
-- Choose appropriate quality bitmask level
-- Inspect lightcurve plots for systematics
-
-### 3. Analysis Strategy
-- Start with single sector for parameter estimation
-- Use multi-sector data for refined parameters
-- Enable `fast_fit` for initial exploration
-- Use strict convergence (`ns_tol,0.01`) for final results
-
-### 4. Pipeline Selection
-- **SPOC:** Better systematics correction, slower cadence
-- **QLP:** Faster processing, higher cadence available
-- Compare both pipelines for robust results
+- [Effective use of allesfitter2](notes.md#effective-use-of-allesfitter2)
+- [Choosing settings & priors by use case](notes.md#choosing-settings--priors-by-use-case)
+- [Prior cookbook](notes.md#prior-cookbook)
+- [Best practices](notes.md#best-practices)
+- [Parameter sources & databases](notes.md#parameter-sources--databases)
+- [Troubleshooting](notes.md#troubleshooting)
+- [TIC contratio vs SPOC CROWDSAP](notes.md#tic-contratio-vs-spoc-crowdsap)
 
 ## Performance Notes
 
