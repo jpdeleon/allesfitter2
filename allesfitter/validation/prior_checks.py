@@ -26,6 +26,12 @@ Triggered checks
     3. upper bound implies ρ > observation baseline — unconstrained,
        degenerate with a linear baseline slope.
 
+``<companion>_sbratio_<inst>`` vs ``secondary_eclipse`` / ``phase_curve``
+    1. ``secondary_eclipse`` on but the ratio is fixed at 0 / its default —
+       no secondary eclipse is modelled (a fixed *non-zero* ratio is allowed).
+    2. the ratio is fitted but ``secondary_eclipse`` is off — a free parameter
+       with no secondary eclipse model.
+
 Public API
 ----------
 :func:`validate_gp_priors` — read the datadir, return a list of warning
@@ -42,7 +48,7 @@ from typing import Callable
 
 import numpy as np
 
-from .parsing import parse_uniform_bounds, read_csv_rows
+from .parsing import parse_uniform_bounds, read_csv_rows, read_settings
 
 GP_LNSIGMA_PREFIX = "baseline_gp_matern32_lnsigma_flux_"
 GP_LNRHO_PREFIX = "baseline_gp_matern32_lnrho_flux_"
@@ -185,6 +191,75 @@ def transit_duration_hours_by_companion(datadir):
     return by_companion or None
 
 
+def _settings_is_true(value) -> bool:
+    """Mirror ``basement.set_bool``: ``'true'`` / ``'1'`` (any case) → True."""
+    return str(value).strip().lower() in ("true", "1")
+
+
+def _sbratio_is_zero_or_empty(value: str) -> bool:
+    """True when a fixed sbratio is 0 or blank (i.e. defaults to 0).
+
+    A blank value lets allesfitter fill its default (0); an explicit 0 is the
+    same. Either way no secondary eclipse is produced. A non-numeric value is
+    treated as 'not zero' here (config_checks flags malformed numbers), so it
+    does not trigger a spurious secondary-eclipse warning.
+    """
+    if value == "":
+        return True
+    try:
+        return float(value) == 0.0
+    except (TypeError, ValueError):
+        return False
+
+
+def check_secondary_eclipse_sbratio(datadir) -> list[str]:
+    """Warn when ``secondary_eclipse`` and the surface brightness ratio disagree.
+
+    The secondary eclipse depth is governed by ``<companion>_sbratio_<inst>``.
+    This heuristic (warning-only) check flags the two inconsistent setups:
+
+    - ``secondary_eclipse=True`` (also forced by ``phase_curve=True``) while the
+      ratio is **fixed at 0 / its default** — no secondary eclipse is modelled
+      despite the setting. A ratio fixed at a *known non-zero* value is allowed
+      (valid "known sbratio" setup) and is **not** warned about.
+    - ``fit=1`` on a ``*_sbratio_*`` row while ``secondary_eclipse`` is off — a
+      free parameter is sampled with no secondary eclipse model.
+
+    Coupled rows are skipped (they inherit ``fit`` from their partner).
+    """
+    settings = read_settings(datadir)
+    sec = _settings_is_true(settings.get("secondary_eclipse", ""))
+    pc = _settings_is_true(settings.get("phase_curve", ""))
+    effective = sec or pc
+
+    msgs: list[str] = []
+    for row in read_csv_rows(Path(datadir) / "params.csv"):
+        if len(row) < 3 or "sbratio" not in row[0].split("_"):
+            continue
+        if len(row) >= 7 and row[6].strip():  # coupled row inherits fit
+            continue
+        name, value, fit = row[0], row[1].strip(), row[2]
+        if effective:
+            if fit != "1" and _sbratio_is_zero_or_empty(value):
+                trigger = (
+                    "secondary_eclipse=True"
+                    if sec
+                    else "phase_curve=True (forces secondary_eclipse)"
+                )
+                msgs.append(_w(
+                    f"{name}: {trigger} but the surface brightness ratio is fixed "
+                    f"at {value or '0 (default)'} (fit=0) — no secondary eclipse "
+                    f"will be modelled. Set fit=1, or fix it at a known non-zero value."
+                ))
+        elif fit == "1":
+            msgs.append(_w(
+                f"{name}: fitted (fit=1) but secondary_eclipse is off — the surface "
+                f"brightness ratio is sampled with no secondary eclipse model. "
+                f"Enable secondary_eclipse, or fix it (fit=0)."
+            ))
+    return msgs
+
+
 def validate_gp_priors(
     datadir,
     *,
@@ -299,6 +374,9 @@ def validate_gp_priors(
                     f"(~{tdur_days:.4f} d) — GP could fit the transit shape."
                 ))
             continue
+
+    # Non-GP heuristic: secondary_eclipse ⇔ surface-brightness-ratio consistency.
+    msgs += check_secondary_eclipse_sbratio(datadir)
 
     if log is not None:
         for m in msgs:

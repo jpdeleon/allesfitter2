@@ -301,3 +301,112 @@ def test_tdur_helper_non_transiting_geometry_omitted(tmp_path):
         "b_rr,0.10,1,uniform 0 1,,,\n"
     )
     assert transit_duration_hours_by_companion(tmp_path) is None
+
+
+# ---------------------------------------------------------------------------
+# 11) secondary_eclipse <-> sbratio consistency (warning, allows fixed non-zero)
+# ---------------------------------------------------------------------------
+
+
+def _sbratio_datadir(tmp_path, *, value, fit, settings):
+    return _make_datadir(
+        tmp_path,
+        params=(
+            "#name,value,fit,bounds,label,unit,coupled\n"
+            "b_rr,0.1,1,uniform 0 0.3,rr,,\n"
+            f"b_sbratio_tess,{value},{fit},uniform 0 1,sb,,\n"
+        ),
+        settings=settings,
+        lc_csvs={},
+    )
+
+
+def test_secondary_eclipse_on_with_fixed_zero_sbratio_warns(tmp_path):
+    from allesfitter.validation import check_secondary_eclipse_sbratio
+
+    d = _sbratio_datadir(tmp_path, value="0.0", fit="0",
+                         settings="inst_phot,tess\nsecondary_eclipse,True")
+    msgs = check_secondary_eclipse_sbratio(d)
+    assert len(msgs) == 1
+    assert "b_sbratio_tess" in msgs[0] and "no secondary eclipse" in msgs[0]
+
+
+def test_secondary_eclipse_on_with_fixed_nonzero_sbratio_allowed(tmp_path):
+    """The key relaxation: a fixed non-zero sbratio is a valid known-ratio
+    setup and must NOT warn even with secondary_eclipse=True."""
+    from allesfitter.validation import check_secondary_eclipse_sbratio
+
+    d = _sbratio_datadir(tmp_path, value="0.3", fit="0",
+                         settings="inst_phot,tess\nsecondary_eclipse,True")
+    assert check_secondary_eclipse_sbratio(d) == []
+
+
+def test_secondary_eclipse_on_with_fitted_sbratio_ok(tmp_path):
+    from allesfitter.validation import check_secondary_eclipse_sbratio
+
+    d = _sbratio_datadir(tmp_path, value="0.1", fit="1",
+                         settings="inst_phot,tess\nsecondary_eclipse,True")
+    assert check_secondary_eclipse_sbratio(d) == []
+
+
+def test_fitted_sbratio_with_secondary_eclipse_off_warns(tmp_path):
+    from allesfitter.validation import check_secondary_eclipse_sbratio
+
+    d = _sbratio_datadir(tmp_path, value="0.1", fit="1",
+                         settings="inst_phot,tess\nsecondary_eclipse,False")
+    msgs = check_secondary_eclipse_sbratio(d)
+    assert len(msgs) == 1
+    assert "secondary_eclipse is off" in msgs[0]
+
+
+def test_secondary_eclipse_off_with_fixed_sbratio_ok(tmp_path):
+    from allesfitter.validation import check_secondary_eclipse_sbratio
+
+    d = _sbratio_datadir(tmp_path, value="0.0", fit="0",
+                         settings="inst_phot,tess\nsecondary_eclipse,False")
+    assert check_secondary_eclipse_sbratio(d) == []
+
+
+def test_phase_curve_forces_secondary_eclipse_warning(tmp_path):
+    from allesfitter.validation import check_secondary_eclipse_sbratio
+
+    d = _sbratio_datadir(tmp_path, value="0.0", fit="0",
+                         settings="inst_phot,tess\nphase_curve,True")
+    msgs = check_secondary_eclipse_sbratio(d)
+    assert len(msgs) == 1
+    assert "phase_curve=True" in msgs[0]
+
+
+def test_empty_sbratio_value_treated_as_default_zero(tmp_path):
+    from allesfitter.validation import check_secondary_eclipse_sbratio
+
+    d = _sbratio_datadir(tmp_path, value="", fit="0",
+                         settings="inst_phot,tess\nsecondary_eclipse,1")
+    msgs = check_secondary_eclipse_sbratio(d)
+    assert len(msgs) == 1
+    assert "0 (default)" in msgs[0]
+
+
+def test_coupled_sbratio_row_skipped(tmp_path):
+    d = _make_datadir(
+        tmp_path,
+        params=(
+            "#name,value,fit,bounds,label,unit,coupled\n"
+            "b_sbratio_tess,0.0,0,uniform 0 1,sb,,\n"
+            "b_sbratio_kepler,,0,,sb,,b_sbratio_tess\n"  # coupled → skipped
+        ),
+        settings="inst_phot,tess kepler\nsecondary_eclipse,True",
+        lc_csvs={},
+    )
+    from allesfitter.validation import check_secondary_eclipse_sbratio
+
+    msgs = check_secondary_eclipse_sbratio(d)
+    # only the non-coupled tess row is flagged
+    assert len(msgs) == 1 and "b_sbratio_tess" in msgs[0]
+
+
+def test_sbratio_warning_surfaces_through_validate_gp_priors(tmp_path):
+    d = _sbratio_datadir(tmp_path, value="0.0", fit="0",
+                         settings="inst_phot,tess\nsecondary_eclipse,True")
+    msgs = validate_gp_priors(d)
+    assert any("b_sbratio_tess" in m for m in msgs)

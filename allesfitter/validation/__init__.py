@@ -39,6 +39,7 @@ from .parsing import (
     read_settings,
 )
 from .prior_checks import (
+    check_secondary_eclipse_sbratio,
     transit_duration_days,
     transit_duration_hours_by_companion,
     validate_gp_priors,
@@ -65,6 +66,7 @@ __all__ = [
     "read_settings",
     # heuristic prior checks
     "validate_gp_priors",
+    "check_secondary_eclipse_sbratio",
     "transit_duration_days",
     "transit_duration_hours_by_companion",
 ]
