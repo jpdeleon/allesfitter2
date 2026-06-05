@@ -2300,30 +2300,39 @@ def calculate_stellar_var(params, inst, key, model=None, baseline=None, yerr_w=N
         if inst=='all': insts = config.BASEMENT.settings[key2]
         else: insts = [inst]
         
+        #::: loop over a separate variable so the `inst` argument is NOT
+        #::: shadowed — we still need to know below whether it was 'all'
+        #::: (shared GP over all instruments) or a single instrument.
         y_list,yerr_w_list = [],[]
-        for inst in insts:
-            if model is None: 
-                model_i = calculate_model(params, inst, key)
+        for inst_i in insts:
+            if model is None:
+                model_i = calculate_model(params, inst_i, key)
             else:
                 model_i = model
-            if baseline is None: 
-                baseline_i = calculate_baseline(params, inst, key, model=model)
+            if baseline is None:
+                baseline_i = calculate_baseline(params, inst_i, key, model=model)
             else:
                 baseline_i = baseline
-            residuals = config.BASEMENT.data[inst][key] - model_i - baseline_i
+            residuals = config.BASEMENT.data[inst_i][key] - model_i - baseline_i
             y_list += list(residuals)
-            
-            if yerr_w is None: 
-                yerr_w_list += list(calculate_yerr_w(params, inst, key))
-            else: 
+
+            if yerr_w is None:
+                yerr_w_list += list(calculate_yerr_w(params, inst_i, key))
+            else:
                 yerr_w_list += list(yerr_w)
-              
-        if inst=='all': ind_sort = config.BASEMENT.data[key2]['ind_sort']
-        else: ind_sort = slice(None)
-        
-        x = 1.*config.BASEMENT.data[key2]['time']
+
+        #::: 'all' uses the merged, time-sorted phot series (ind_sort maps the
+        #::: instrument-concatenated y/yerr into that time order); a single
+        #::: instrument uses its own time grid as-is.
+        if inst=='all':
+            ind_sort = config.BASEMENT.data[key2]['ind_sort']
+            x = 1.*config.BASEMENT.data[key2]['time']
+        else:
+            ind_sort = slice(None)
+            x = 1.*config.BASEMENT.data[inst]['time']
+
         y = np.array(y_list)[ind_sort]
-        yerr_w = np.array(yerr_w_list)[ind_sort]  
+        yerr_w = np.array(yerr_w_list)[ind_sort]
         if xx is None: xx = 1.*x
     
         if stellar_var_method not in stellar_var_switch:
