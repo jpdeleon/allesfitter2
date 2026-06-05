@@ -202,6 +202,51 @@ def _load_inst_csv(path):
     return time, primary, primary_err, custom_series, covariates
 
 
+def _bin_phot_arrays(time, flux, flux_err, custom_series, covariates, dt):
+    """Bin a photometric light curve to a fixed bin width ``dt`` (days).
+
+    ``time``/``flux``/``flux_err`` are combined with an inverse-variance
+    (error-weighted) mean, with the formal binned uncertainty
+    ``1/sqrt(sum(1/err**2))``. ``custom_series`` and every covariate are
+    mean-binned on the **same** bin grid so all per-instrument arrays stay
+    row-aligned. Bins are half-open ``[t0 + k*dt, t0 + (k+1)*dt)``; empty bins
+    are dropped.
+
+    Returns ``(time, flux, flux_err, custom_series, covariates)`` with the same
+    types as the inputs (``covariates`` is a new dict of binned arrays).
+    """
+    time = np.asarray(time, dtype=float)
+    flux = np.asarray(flux, dtype=float)
+    flux_err = np.asarray(flux_err, dtype=float)
+    custom_series = np.asarray(custom_series, dtype=float)
+    cov_items = [(k, np.asarray(v, dtype=float)) for k, v in covariates.items()]
+
+    #::: group points by bin index, sorted so equal bins are contiguous
+    bin_id = np.floor((time - time.min()) / dt).astype(np.int64)
+    order = np.argsort(bin_id, kind='stable')
+    bin_id = bin_id[order]
+    time, flux, flux_err = time[order], flux[order], flux_err[order]
+    custom_series = custom_series[order]
+    cov_items = [(k, v[order]) for k, v in cov_items]
+    groups = np.split(np.arange(len(bin_id)), np.flatnonzero(np.diff(bin_id)) + 1)
+
+    bt, bf, bferr, bcustom = [], [], [], []
+    bcov = {k: [] for k, _ in cov_items}
+    for g in groups:
+        w = 1.0 / np.square(flux_err[g])
+        sw = np.sum(w)
+        bt.append(np.mean(time[g]))
+        bf.append(np.sum(flux[g] * w) / sw)
+        bferr.append(1.0 / np.sqrt(sw))
+        bcustom.append(np.mean(custom_series[g]))
+        for k, v in cov_items:
+            bcov[k].append(np.mean(v[g]))
+
+    binned_covariates = {k: np.asarray(vals, dtype=float) for k, vals in bcov.items()}
+    return (np.asarray(bt), np.asarray(bf), np.asarray(bferr),
+            np.asarray(bcustom), binned_covariates)
+
+
 def _build_linear_design_matrix(data_inst, col_tokens, time_axis):
     """Build the per-instrument design matrix for ``sample_linear_multi``.
 
@@ -622,6 +667,7 @@ class Basement:
             'print_progress', 'quiet',
             'flux_min_raw', 'flux_max_raw',
             'flux_min_flat', 'flux_max_flat',
+            'binning',
             'baseline_share_flux', 'baseline_share_rv', 'baseline_share_rv2',
         }
         for key in self.settings:
@@ -897,6 +943,21 @@ class Basement:
                 'flux_min_raw (%s) must be < flux_max_raw (%s) in settings.csv.'
                 % (self.settings['flux_min_raw'], self.settings['flux_max_raw'])
             )
+
+        #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+        #::: Binning of the input photometric light curves (load_data()).
+        #::: None (default) = no binning. A positive float gives the bin width
+        #::: in DAYS (e.g. 0.0208333 ≈ 30 min). Parsed defensively here so a
+        #::: malformed/<=0 value is reported by validation (config_checks) with
+        #::: a clean message rather than a raw float() traceback.
+        #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+        if ('binning' in self.settings.keys()) and not is_empty_or_none('binning'):
+            try:
+                self.settings['binning'] = float(self.settings['binning'])
+            except (TypeError, ValueError):
+                pass  # leave the raw string; check_binning_value() raises a clean error
+        else:
+            self.settings['binning'] = None
 
         #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
         #::: Flattened-flux outlier clip bounds (applied by config.init() AFTER
@@ -2220,6 +2281,23 @@ class Basement:
                 custom_series = custom_series[_mask]
                 # keep named covariates row-aligned with flux
                 covariates = {k: v[_mask] for k, v in covariates.items()}
+
+            #::: Optional binning of the input light curve (settings['binning'],
+            #::: in days). Applied before `fulldata` so fulldata, fast_fit and
+            #::: covariate detrending all see the binned series; covariates and
+            #::: custom_series are mean-binned on the same grid (row-aligned).
+            #::: `raw_clipped_*` (dropped outliers) are intentionally untouched.
+            _binning = self.settings['binning']
+            if _binning is not None:
+                _span = float(time.max() - time.min()) if len(time) > 1 else 0.0
+                if _binning >= _span:
+                    raise ValueError(
+                        'binning (%g d) must be smaller than the observation '
+                        'baseline of "%s.csv" (%g d). Pick a finer bin width.'
+                        % (_binning, inst, _span)
+                    )
+                time, flux, flux_err, custom_series, covariates = _bin_phot_arrays(
+                    time, flux, flux_err, custom_series, covariates, _binning)
 
             self.fulldata[inst] = {
                           'time':time,

@@ -11,6 +11,7 @@ import pytest
 
 from allesfitter.validation import ConfigError, validate_params_settings
 from allesfitter.validation.config_checks import (
+    check_binning_value,
     check_bounds_wellformed,
     check_companions_have_params,
     check_duplicate_param_names,
@@ -258,3 +259,44 @@ def test_missing_params_csv_returns_empty(tmp_path):
     (tmp_path / "settings.csv").write_text("companions_phot,b\n")
     assert collect_config_errors(str(tmp_path)) == []
     assert validate_params_settings(str(tmp_path)) == []
+
+
+# ---------------------------------------------------------------------------
+# check_binning_value
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("value", ["", "none", "None"])
+def test_binning_absent_or_none_ok(value):
+    assert check_binning_value({"binning": value}) == []
+
+
+def test_binning_missing_key_ok():
+    assert check_binning_value({}) == []
+
+
+def test_binning_valid_float_ok():
+    assert check_binning_value({"binning": "0.0208333"}) == []
+
+
+def test_binning_non_numeric_errors():
+    errors = check_binning_value({"binning": "abc"})
+    assert len(errors) == 1 and "not a number" in errors[0]
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "-0.5"])
+def test_binning_non_positive_errors(value):
+    errors = check_binning_value({"binning": value})
+    assert len(errors) == 1 and "> 0" in errors[0]
+
+
+def test_binning_error_wired_into_aggregator(tmp_path):
+    d = _write_datadir(
+        tmp_path,
+        "#name,value,fit,bounds,label,unit,coupled\n"
+        "b_rr,0.1,1,uniform 0 0.3,rr,,\n",
+        settings="companions_phot,b\nbinning,-1",
+    )
+    with pytest.raises(ConfigError) as exc:
+        validate_params_settings(d)
+    assert "binning" in str(exc.value)

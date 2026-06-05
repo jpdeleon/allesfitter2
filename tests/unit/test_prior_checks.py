@@ -410,3 +410,75 @@ def test_sbratio_warning_surfaces_through_validate_gp_priors(tmp_path):
                          settings="inst_phot,tess\nsecondary_eclipse,True")
     msgs = validate_gp_priors(d)
     assert any("b_sbratio_tess" in m for m in msgs)
+
+
+# ---------------------------------------------------------------------------
+# 12) binning width consistency (warning-only)
+# ---------------------------------------------------------------------------
+
+
+# Orbital rows giving tdur ~2.9 h (0.121 d): per=3, rsuma=0.10, cosi=0.05, k=0.10.
+# Clean LC: 27-day baseline, 2000 pts -> cadence ~0.0135 d (2x ~ 0.027 d).
+_BINNING_ORBIT = (
+    "#name,value,fit,bounds,label,unit,coupled\n"
+    "b_period,3.0,1,uniform 2.9 3.1,P,d,\n"
+    "b_rsuma,0.10,1,uniform 0.05 0.2,rsuma,,\n"
+    "b_cosi,0.05,1,uniform 0 1,cosi,,\n"
+    "b_rr,0.10,1,uniform 0 0.3,rr,,\n"
+)
+
+
+def _binning_datadir(tmp_path, settings_extra):
+    return _make_datadir(
+        tmp_path, params=_BINNING_ORBIT,
+        settings="inst_phot,tess\n" + settings_extra,
+        lc_csvs={"tess.csv": _clean_tess_lc_csv()},
+    )
+
+
+def test_binning_none_no_warning(tmp_path):
+    from allesfitter.validation import check_binning
+    d = _binning_datadir(tmp_path, "t_exp_tess,0.04")  # no binning set
+    assert check_binning(d) == []
+
+
+def test_binning_too_coarse_smears_transit(tmp_path):
+    from allesfitter.validation import check_binning
+    d = _binning_datadir(tmp_path, "binning,0.1\nt_exp_tess,0.1")
+    msgs = check_binning(d)
+    assert any("smear the transit" in m for m in msgs)
+
+
+def test_binning_too_fine_is_noop(tmp_path):
+    from allesfitter.validation import check_binning
+    d = _binning_datadir(tmp_path, "binning,0.005\nt_exp_tess,0.005")
+    msgs = check_binning(d)
+    assert any("little or no binning" in m for m in msgs)
+
+
+def test_binning_without_t_exp_warns(tmp_path):
+    from allesfitter.validation import check_binning
+    d = _binning_datadir(tmp_path, "binning,0.04")  # in-window, no t_exp
+    msgs = check_binning(d)
+    assert any("no t_exp" in m for m in msgs)
+    assert not any("smear" in m or "little or no" in m for m in msgs)
+
+
+def test_binning_reasonable_value_no_warning(tmp_path):
+    from allesfitter.validation import check_binning
+    # 0.04 d: > 2x cadence (~0.027), < 0.5x tdur (~0.06), and t_exp configured.
+    d = _binning_datadir(tmp_path, "binning,0.04\nt_exp_tess,0.04")
+    assert check_binning(d) == []
+
+
+def test_binning_malformed_or_nonpositive_no_warning(tmp_path):
+    """Malformed / <=0 are config_checks ERRORS; the warning layer stays quiet."""
+    from allesfitter.validation import check_binning
+    assert check_binning(_binning_datadir(tmp_path, "binning,abc")) == []
+    assert check_binning(_binning_datadir(tmp_path, "binning,-1")) == []
+
+
+def test_binning_warning_surfaces_through_validate_gp_priors(tmp_path):
+    d = _binning_datadir(tmp_path, "binning,0.1\nt_exp_tess,0.1")
+    msgs = validate_gp_priors(d)
+    assert any("binning=" in m for m in msgs)

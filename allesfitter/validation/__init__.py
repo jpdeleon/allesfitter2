@@ -22,6 +22,7 @@ from .config_checks import (
     ConfigError,
     check_bounds_wellformed,
     check_companions_have_params,
+    check_binning_value,
     check_duplicate_param_names,
     check_fit_flags,
     check_gp_baseline_vs_stellar_var,
@@ -39,6 +40,7 @@ from .parsing import (
     read_settings,
 )
 from .prior_checks import (
+    check_binning,
     check_secondary_eclipse_sbratio,
     transit_duration_days,
     transit_duration_hours_by_companion,
@@ -57,6 +59,7 @@ __all__ = [
     "check_values_within_bounds",
     "check_companions_have_params",
     "check_gp_baseline_vs_stellar_var",
+    "check_binning_value",
     "companions_from_settings",
     # shared parsing helpers
     "parse_bounds",
@@ -67,6 +70,7 @@ __all__ = [
     # heuristic prior checks
     "validate_gp_priors",
     "check_secondary_eclipse_sbratio",
+    "check_binning",
     "transit_duration_days",
     "transit_duration_hours_by_companion",
 ]

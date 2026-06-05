@@ -317,6 +317,33 @@ def check_gp_baseline_vs_stellar_var(settings: Dict[str, str]) -> List[str]:
     return errors
 
 
+def check_binning_value(settings: Dict[str, str]) -> List[str]:
+    """``binning`` (settings.csv) must be empty / ``none`` or a positive float.
+
+    The value is a bin width in **days** (e.g. ``0.0208333`` for 30 min). A
+    non-numeric or non-positive value is an unambiguous mistake and raises.
+    The data-dependent "binning ≥ observation baseline" error is enforced in
+    ``Basement.load_data`` (which has the light-curve time arrays).
+    """
+    raw = (settings.get("binning", "") or "").strip()
+    if raw == "" or raw.lower() == "none":
+        return []
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        return [
+            f"settings.csv 'binning' = {raw!r} is not a number; leave it empty / "
+            f"None to disable, or set a positive bin width in days "
+            f"(e.g. 0.0208333 for 30 min)."
+        ]
+    if val <= 0:
+        return [
+            f"settings.csv 'binning' = {val} must be > 0 (bin width in days); "
+            f"leave it empty / None to disable binning."
+        ]
+    return []
+
+
 # ---------------------------------------------------------------------------
 # Aggregator
 # ---------------------------------------------------------------------------
@@ -342,6 +369,7 @@ def collect_config_errors(datadir: str) -> List[str]:
     errors += check_values_within_bounds(rows)
     errors += check_companions_have_params(settings, rows)
     errors += check_gp_baseline_vs_stellar_var(settings)
+    errors += check_binning_value(settings)
     return errors
 
 

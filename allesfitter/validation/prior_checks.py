@@ -59,6 +59,8 @@ _AMPL_VS_RMS_RATIO = 100.0             # σ_GP > 100× RMS dominates the noise
 _LN_ERR_REL_FLUX_LIMIT = 0.10          # noise > 10% rel flux is suspicious
 _RHO_MIN_CADENCES = 2.0                # ρ should span at least 2 cadences
 _RHO_VS_TDUR_RATIO = 0.5               # ρ should exceed half tdur
+_BINNING_VS_CADENCE_RATIO = 2.0        # binning below this × cadence is ~a no-op
+_BINNING_VS_TDUR_RATIO = 0.5           # binning above this × tdur smears the transit
 
 
 def _settings_inst_phot(datadir):
@@ -260,6 +262,72 @@ def check_secondary_eclipse_sbratio(datadir) -> list[str]:
     return msgs
 
 
+def check_binning(datadir) -> list[str]:
+    """Warn about risky ``binning`` settings (the bin width, in days).
+
+    Errors (non-numeric / ≤ 0 / ≥ baseline) are handled elsewhere
+    (``config_checks.check_binning_value`` and ``Basement.load_data``); this
+    warning-only check flags values that are *valid but risky*:
+
+    1. coarser than ``0.5 ×`` the shortest transit duration — binning may smear
+       the transit shape;
+    2. finer than ``2 ×`` an instrument's native cadence — little/no binning
+       actually happens;
+    3. set while **no** ``t_exp_<inst>`` exposure time is configured — binned
+       points integrate over the bin width, so the transit model should be
+       supersampled (``t_exp_*``) to avoid biasing the transit shape.
+    """
+    settings = read_settings(datadir)
+    raw = (settings.get("binning", "") or "").strip()
+    if raw == "" or raw.lower() == "none":
+        return []
+    try:
+        binning = float(raw)
+    except (TypeError, ValueError):
+        return []  # malformed: config_checks raises; nothing to warn about here
+    if binning <= 0:
+        return []
+
+    msgs: list[str] = []
+
+    #::: 1) transit smearing (uses tdur derived from params.csv)
+    tdur_by_c = transit_duration_hours_by_companion(datadir)
+    if tdur_by_c:
+        tdur_days = min(t / 24.0 for t in tdur_by_c.values() if t)
+        if binning > _BINNING_VS_TDUR_RATIO * tdur_days:
+            msgs.append(_w(
+                f"binning={binning:g} d > {_BINNING_VS_TDUR_RATIO:.0%} of the shortest "
+                f"transit duration (~{tdur_days:.4f} d) — binning may smear the transit."
+            ))
+
+    #::: 2) per-instrument cadence (no-op if finer than the data)
+    for inst in _settings_inst_phot(datadir):
+        t, _f = _load_inst_data(datadir, inst)
+        if t is None:
+            continue
+        cad = _cadence(t)
+        if math.isfinite(cad) and binning < _BINNING_VS_CADENCE_RATIO * cad:
+            msgs.append(_w(
+                f"binning={binning:g} d < {_BINNING_VS_CADENCE_RATIO:.0f}× the native "
+                f"cadence of '{inst}' ({cad:.5f} d) — little or no binning will occur."
+            ))
+
+    #::: 3) no exposure-time supersampling configured
+    has_t_exp = any(
+        k.startswith("t_exp_") and not k.startswith("t_exp_n_int_")
+        and (settings.get(k, "") or "").strip().lower() not in ("", "none")
+        for k in settings
+    )
+    if not has_t_exp:
+        msgs.append(_w(
+            f"binning={binning:g} d is set but no t_exp_* exposure time is configured; "
+            f"binned points integrate over the bin width, so set t_exp_<inst> to "
+            f"supersample the transit model and avoid biasing its shape."
+        ))
+
+    return msgs
+
+
 def validate_gp_priors(
     datadir,
     *,
@@ -377,6 +445,9 @@ def validate_gp_priors(
 
     # Non-GP heuristic: secondary_eclipse ⇔ surface-brightness-ratio consistency.
     msgs += check_secondary_eclipse_sbratio(datadir)
+
+    # Non-GP heuristic: risky input-binning widths.
+    msgs += check_binning(datadir)
 
     if log is not None:
         for m in msgs:

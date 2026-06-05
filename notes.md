@@ -86,6 +86,16 @@ harmless for clean data). Turn it **off** when the out-of-transit baseline
 itself carries signal you are modelling (e.g. phase curves, long GP trends you
 want constrained globally).
 
+**`binning`** — optional; **None** by default. A positive float bins every
+photometric light curve to that width **in days** at load time (e.g.
+`binning,0.0208333` ≈ 30 min); covariate columns are mean-binned on the same
+grid. Use it to speed up fits or suppress short-timescale correlated noise.
+Caveats the validator flags: keep it well below the transit duration (coarse
+bins smear the transit), above the native cadence (otherwise it is a no-op),
+and set a matching `t_exp_<inst>` so the model is supersampled over the bin
+width. Applies to photometry only; RV is untouched. Invalid values
+(non-numeric, ≤ 0, or ≥ the observation baseline) are hard errors.
+
 **Baseline model (`baseline_flux_<inst>`)** — escalate only as far as the data
 demand:
 - `none` / `sample_offset` — flat or single-offset light curves.
