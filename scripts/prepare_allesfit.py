@@ -557,6 +557,38 @@ quartiles_2sig = [2.275, 50.0, 97.725]  # 2-sigma
 quartiles_3sig = [0.135, 50.0, 99.865]  # 3-sigma
 
 
+def _percentile_3sig_safe(samples, fallback, label, planet, logger):
+    """3-sigma percentiles of ``samples``, resilient to an empty/all-NaN input.
+
+    Some targets yield no usable ``(R*+Rp)/a`` samples — e.g. when the stellar
+    mass/radius (hence rho_star) or the period is NaN, ``as_from_rhop`` returns
+    NaNs and the ``0 < rsuma < 1`` validity mask removes every sample. Rather
+    than crashing inside ``np.percentile`` ("cannot do a non-empty take from an
+    empty axes"), warn and fall back to ``fallback`` so prepare_allesfit can
+    still emit a (clearly-flagged, reviewable) prior.
+
+    Parameters
+    ----------
+    samples : array-like
+        Already validity-masked samples (may be empty / all non-finite).
+    fallback : tuple(float, float, float)
+        ``(lo, mid, hi)`` returned when no finite samples remain.
+    label, planet : str
+        Used only in the warning message.
+    """
+    s = np.asarray(samples, dtype=float)
+    s = s[np.isfinite(s)]
+    if s.size == 0:
+        logger.warning(
+            "Planet %s: could not derive %s (no finite samples; check stellar "
+            "mass/radius/period). Falling back to a wide default prior "
+            "(%g, %g, %g) — review %s_rsuma in params.csv before fitting."
+            % (planet, label, fallback[0], fallback[1], fallback[2], planet)
+        )
+        return fallback
+    return tuple(np.percentile(s, q=quartiles_3sig))
+
+
 def _default_prior_bounds(rprs_max, rsuma_min, rsuma_max):
     """Compute the physics-informed default prior upper/lower bounds.
 
@@ -1543,10 +1575,18 @@ def main():
             # FIXME: a_over_Rs_samples produces some NaNs e.g. for Kepler-51
             rsuma_samples = 1/a_over_Rs_samples * (1+rprs_samples)
             idx = (rsuma_samples > 0) & (rsuma_samples < 1)
-            rsuma_min, rsuma, rsuma_max = np.percentile(rsuma_samples[idx], q=quartiles_3sig)
+            rsuma_min, rsuma, rsuma_max = _percentile_3sig_safe(
+                rsuma_samples[idx], fallback=(1e-3, 0.1, 0.25),
+                label="(R*+Rp)/a from rho_star", planet=pl, logger=logger)
             if True:
                 # uniformly distributed from inc_min to 90 deg
-                cosi = np.random.uniform(0, 1/min(a_over_Rs_samples), size=Nsamples)
+                # nanmin (not min) so NaNs in a_over_Rs don't poison cosi; fall
+                # back to an uninformative cos i in [0, 1] when a/Rs is unusable.
+                _a_over_Rs_min = np.nanmin(a_over_Rs_samples)
+                if np.isfinite(_a_over_Rs_min) and _a_over_Rs_min > 0:
+                    cosi = np.random.uniform(0, 1/_a_over_Rs_min, size=Nsamples)
+                else:
+                    cosi = np.random.uniform(0, 1, size=Nsamples)
                 inc_samples = np.arccos(cosi)
             else:
                 # normally distributed
@@ -1570,7 +1610,10 @@ def main():
                     tdur_samples = np.random.normal(tdur, tdurerr, size=Nsamples) / 24
                     rsuma_samples = get_rsuma(tdur_samples, Porb, inc_samples, rprs_samples, b_samples)
                     idx = (rsuma_samples > 0) & (rsuma_samples < 1)
-                    tdur_orbit = get_tdur(Porb, np.median(rsuma_samples[idx]), inc, rprs, b) * 24
+                    _valid = rsuma_samples[idx]
+                    _valid = _valid[np.isfinite(_valid)]
+                    _rsuma_med = np.median(_valid) if _valid.size else np.nan
+                    tdur_orbit = get_tdur(Porb, _rsuma_med, inc, rprs, b) * 24
                     logger.info(
                         f"tdur={tdur:.1f}h ({source}) {tdur_orbit:.1f}h (derived from orbit)"
                     )
@@ -1581,9 +1624,11 @@ def main():
                         == 1
                     ):
                         logger.info("Using Rstar/a derived from orbit.")
-                        rsuma_min, rsuma, rsuma_max = np.percentile(
-                            rsuma_samples[idx], q=quartiles_3sig
-                        )
+                        rsuma_min, rsuma, rsuma_max = _percentile_3sig_safe(
+                            rsuma_samples[idx],
+                            fallback=(rsuma_min, rsuma, rsuma_max),
+                            label="(R*+Rp)/a from transit duration",
+                            planet=pl, logger=logger)
                     else:
                         logger.info("Using Rstar/a derived from rhostar.")
                 except Exception as e:
@@ -1632,6 +1677,8 @@ def main():
             )
             text += f"{pl}_f_c,0,0,uniform -1 1,$\sqrt{{e_{pl}}} \cos{{\omega_{pl}}}$,,\n"
             text += f"{pl}_f_s,0,0,uniform -1 1,$\sqrt{{e_{pl}}} \sin{{\omega_{pl}}}$,,\n"
+            for inst in fns:
+                text += f"#{pl}_sbratio_{inst},0,0,uniform 0 1,$J$,,\n"
         text += "#dilution per instrument,,,,,,\n"
         for inst in fns:
             text += f"dil_{inst},0,0,uniform 0 1,$D_\mathrm{{0; {inst}}}$,,\n"
@@ -1716,21 +1763,22 @@ import allesfitter
 #import os; os.nice(19)
 
 dir_path = '.'
+### ===show fit using initial guess===
 fig = allesfitter.show_initial_guess(dir_path)
 #allesfitter.prepare_ttv_fit(dir_path, style='tessplot')
 
-### ===optimization===
-#allesfitter.optimize(method='cmaes', polish=True, n_restars=3)
+### ===global optimization (methods: cmaes, differential_evolution, dual_annealing)===
+#allesfitter.optimize(method='differential_evolution', refine=True)
 
 ### ===mcmc sampling===
 #with allesfitter.log_run('mcmc_fit', dir_path):
-#    allesfitter.mcmc_fit(dir_path)
-#allesfitter.mcmc_output(dir_path)
+#    allesfitter.mcmc_fit(dir_path, append=True)
+#allesfitter.mcmc_output(dir_path, overwrite=True)
 
 ### ===nested sampling for evidence / model comparison===
 #with allesfitter.log_run('ns_fit', dir_path):
-#    allesfitter.ns_fit(dir_path)
-#allesfitter.ns_output(dir_path)"""
+#    allesfitter.ns_fit(dir_path, overwrite=False)
+#allesfitter.ns_output(dir_path, overwrite=True)"""
 
         if debug:
             logger.info(text4)

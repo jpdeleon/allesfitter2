@@ -286,3 +286,44 @@ def test_write_spoc_contamination_median_across_segments(tmp_path):
     # dilutions = [0.1, 0.3] -> median 0.2
     assert summary["median_dilution"] == pytest.approx(0.2)
     assert summary["median_crowdsap"] == pytest.approx(0.8)
+
+
+# ---------------------------------------------------------------------------
+# _percentile_3sig_safe — empty/all-NaN rsuma samples must not crash
+# ---------------------------------------------------------------------------
+
+
+class _CapLogger:
+    def __init__(self):
+        self.warnings = []
+
+    def warning(self, msg, *args):
+        self.warnings.append(msg % args if args else msg)
+
+
+def test_percentile_3sig_safe_empty_returns_fallback_and_warns():
+    log = _CapLogger()
+    fb = (1e-3, 0.1, 0.25)
+    out = prep._percentile_3sig_safe(
+        np.array([]), fallback=fb, label="(R*+Rp)/a", planet="b", logger=log)
+    assert out == fb
+    assert len(log.warnings) == 1 and "could not derive" in log.warnings[0]
+
+
+def test_percentile_3sig_safe_all_nan_returns_fallback():
+    log = _CapLogger()
+    fb = (1e-3, 0.1, 0.25)
+    out = prep._percentile_3sig_safe(
+        np.full(100, np.nan), fallback=fb, label="x", planet="c", logger=log)
+    assert out == fb
+    assert log.warnings  # warned
+
+
+def test_percentile_3sig_safe_valid_samples_compute_percentiles():
+    log = _CapLogger()
+    samples = np.linspace(0.05, 0.15, 1000)
+    lo, mid, hi = prep._percentile_3sig_safe(
+        samples, fallback=(1e-3, 0.1, 0.25), label="x", planet="b", logger=log)
+    assert lo < mid < hi
+    assert mid == pytest.approx(0.1, abs=1e-3)
+    assert log.warnings == []  # no fallback used
