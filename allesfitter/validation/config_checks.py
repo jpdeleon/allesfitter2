@@ -317,31 +317,43 @@ def check_gp_baseline_vs_stellar_var(settings: Dict[str, str]) -> List[str]:
     return errors
 
 
-def check_binning_value(settings: Dict[str, str]) -> List[str]:
-    """``binning`` (settings.csv) must be empty / ``none`` or a positive float.
-
-    The value is a bin width in **days** (e.g. ``0.0208333`` for 30 min). A
-    non-numeric or non-positive value is an unambiguous mistake and raises.
-    The data-dependent "binning ≥ observation baseline" error is enforced in
-    ``Basement.load_data`` (which has the light-curve time arrays).
-    """
-    raw = (settings.get("binning", "") or "").strip()
+def _check_one_binning(key: str, raw: str) -> List[str]:
+    """Validate a single ``binning`` / ``binning_<inst>`` value string."""
+    raw = (raw or "").strip()
     if raw == "" or raw.lower() == "none":
         return []
     try:
         val = float(raw)
     except (TypeError, ValueError):
         return [
-            f"settings.csv 'binning' = {raw!r} is not a number; leave it empty / "
+            f"settings.csv '{key}' = {raw!r} is not a number; leave it empty / "
             f"None to disable, or set a positive bin width in days "
             f"(e.g. 0.0208333 for 30 min)."
         ]
     if val <= 0:
         return [
-            f"settings.csv 'binning' = {val} must be > 0 (bin width in days); "
+            f"settings.csv '{key}' = {val} must be > 0 (bin width in days); "
             f"leave it empty / None to disable binning."
         ]
     return []
+
+
+def check_binning_value(settings: Dict[str, str]) -> List[str]:
+    """``binning`` / ``binning_<inst>`` must be empty / ``none`` or a positive float.
+
+    The value is a bin width in **days** (e.g. ``0.0208333`` for 30 min). A
+    non-numeric or non-positive value is an unambiguous mistake and raises.
+    ``binning`` is the global default; a per-instrument ``binning_<inst>`` key
+    overrides it for that instrument only and is validated the same way. The
+    data-dependent "binning ≥ observation baseline" error is enforced in
+    ``Basement.load_data`` (which has the light-curve time arrays).
+    """
+    errors: List[str] = []
+    errors += _check_one_binning("binning", settings.get("binning", ""))
+    for key in settings:
+        if key.startswith("binning_"):
+            errors += _check_one_binning(key, settings.get(key, ""))
+    return errors
 
 
 # ---------------------------------------------------------------------------

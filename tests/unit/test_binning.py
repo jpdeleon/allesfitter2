@@ -109,3 +109,90 @@ def test_binning_ge_baseline_raises(tmp_path):
     with pytest.raises(ValueError) as exc:
         config.init(str(d))
     assert "baseline" in str(exc.value)
+
+
+def _two_inst_datadir(tmp_path, *, extra):
+    """A datadir with two dense, identical-cadence photometric instruments."""
+    d = tmp_path / "binning_two"
+    d.mkdir()
+    t = TRUE_EPOCH - 1.0 + np.linspace(0.0, _SPAN_DAYS, _N_RAW)
+    rng = np.random.default_rng(0)
+    insts = ["tess", "muscat"]
+    for inst in insts:
+        flux = 1.0 + rng.normal(0.0, 5e-4, _N_RAW)
+        write_data_csv(d / f"{inst}.csv", t, flux, np.full(_N_RAW, 5e-4))
+    write_settings(d, inst_phot=insts, bandpass=None, extra=extra)
+    rows = (
+        [{"name": "b_rr", "value": TRUE_RR_TESS, "fit": 1,
+          "bounds": "uniform 0 0.3", "label": "rr"}]
+        + common_orbital_rows(fit_orbital=False)
+        + dilution_rows(insts)
+        + err_baseline_rows(insts)
+        + ldc_rows("tess")
+        + ldc_rows("muscat")
+    )
+    write_params(d / "params.csv", rows=rows)
+    return d
+
+
+def test_per_instrument_binning_only_bins_target(tmp_path):
+    from allesfitter import config
+
+    # No global binning; bin TESS only via binning_tess.
+    d = _two_inst_datadir(tmp_path, extra=[f"binning_tess,{_BIN_30MIN}"])
+    config.init(str(d))
+    assert 50 < len(config.BASEMENT.data["tess"]["time"]) < 150  # binned
+    assert len(config.BASEMENT.data["muscat"]["time"]) == _N_RAW  # untouched
+
+
+def test_per_instrument_override_disables_when_global_set(tmp_path):
+    from allesfitter import config
+
+    # Global binning bins everything; binning_muscat (empty) turns it off there.
+    d = _two_inst_datadir(
+        tmp_path, extra=[f"binning,{_BIN_30MIN}", "binning_muscat,"]
+    )
+    config.init(str(d))
+    assert 50 < len(config.BASEMENT.data["tess"]["time"]) < 150  # global applies
+    assert len(config.BASEMENT.data["muscat"]["time"]) == _N_RAW  # override off
+
+
+def test_binning_auto_sets_t_exp_and_n_int(tmp_path):
+    from allesfitter import config
+
+    config.init(str(_dense_datadir(tmp_path, binning=_BIN_30MIN)))
+    s = config.BASEMENT.settings
+    assert s["t_exp_tess"] == _BIN_30MIN     # auto-derived from binning
+    assert s["t_exp_n_int_tess"] == 10       # seeded default
+
+
+def test_binning_does_not_override_explicit_t_exp(tmp_path):
+    from allesfitter import config
+
+    # Global binning bins both. tess has an explicit (different) t_exp → kept;
+    # muscat has none → t_exp auto-set to the bin width.
+    d = _two_inst_datadir(
+        tmp_path, extra=[f"binning,{_BIN_30MIN}", "t_exp_tess,0.005"]
+    )
+    config.init(str(d))
+    s = config.BASEMENT.settings
+    assert s["t_exp_tess"] == 0.005          # explicit value preserved
+    assert s["t_exp_muscat"] == _BIN_30MIN   # auto-derived
+
+
+def test_binning_model_evaluates_with_supersampling(tmp_path):
+    """Regression: auto-set n_int>1 must not overrun ellc's output buffer.
+
+    Binning auto-sets t_exp_n_int=10, so the initial-guess model goes through
+    ellc.fluxes with supersampling — which used to raise IndexError because the
+    C output buffer was sized to n_obs instead of the n_int-times-longer t_calc.
+    """
+    from allesfitter import config
+    from allesfitter.computer import calculate_model, update_params
+
+    config.init(str(_dense_datadir(tmp_path, binning=_BIN_30MIN)))
+    assert config.BASEMENT.settings["t_exp_n_int_tess"] == 10
+    p = update_params(config.BASEMENT.theta_0)
+    model = calculate_model(p, "tess", "flux", xx=None)  # ellc.fluxes, n_int=10
+    assert len(model) == len(config.BASEMENT.data["tess"]["time"])
+    assert np.isfinite(model).all()

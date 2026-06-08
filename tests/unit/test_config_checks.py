@@ -290,6 +290,21 @@ def test_binning_non_positive_errors(value):
     assert len(errors) == 1 and "> 0" in errors[0]
 
 
+@pytest.mark.parametrize("value", ["", "none", "0.0208333"])
+def test_per_instrument_binning_valid_ok(value):
+    assert check_binning_value({"binning_tess": value}) == []
+
+
+def test_per_instrument_binning_non_numeric_errors():
+    errors = check_binning_value({"binning_tess": "abc"})
+    assert len(errors) == 1 and "binning_tess" in errors[0]
+
+
+def test_per_instrument_binning_non_positive_errors():
+    errors = check_binning_value({"binning": "0.02", "binning_tess": "-1"})
+    assert len(errors) == 1 and "binning_tess" in errors[0] and "> 0" in errors[0]
+
+
 def test_binning_error_wired_into_aggregator(tmp_path):
     d = _write_datadir(
         tmp_path,

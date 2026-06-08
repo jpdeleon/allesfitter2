@@ -202,6 +202,13 @@ def _load_inst_csv(path):
     return time, primary, primary_err, custom_series, covariates
 
 
+# Default number of integration sub-samples used when t_exp is auto-derived
+# from `binning`. A binned point is the time-average over the bin width, so the
+# transit model must be integrated over that window; t_exp alone (n_int == 1) is
+# inert, so we seed a sensible n_int when the user left it unset.
+_BINNING_DEFAULT_N_INT = 10
+
+
 def _bin_phot_arrays(time, flux, flux_err, custom_series, covariates, dt):
     """Bin a photometric light curve to a fixed bin width ``dt`` (days).
 
@@ -684,6 +691,7 @@ class Basement:
                 'g_ld_law_', 'g_ld_space_', 'g_grid_', 'g_shape_', 'g_flux_weighted_', 'g_N_spots_',
                 'baseline_flux_', 'baseline_rv_', 'baseline_rv2_',
                 'error_flux_', 'error_rv_', 'error_rv2_',
+                'binning_',
                 't_exp_', 'stellar_var_flux', 'stellar_var_rv',
             ]):
                 warnings.warn('Unrecognized setting key "'+key+'" in settings.csv. This may be a typo or deprecated keyword.')
@@ -958,6 +966,23 @@ class Basement:
                 pass  # leave the raw string; check_binning_value() raises a clean error
         else:
             self.settings['binning'] = None
+
+        #::: Per-instrument binning overrides: `binning_<inst>` bins only that
+        #::: instrument's light curve, leaving the rest at the global `binning`.
+        #::: Parsed defensively (float-or-None) for every photometric instrument;
+        #::: invalid values are reported by check_binning_value(). A key present
+        #::: but empty/None disables binning for that instrument (overrides the
+        #::: global value), so absence (fall back to global) and explicit-None
+        #::: (force off) stay distinguishable.
+        for inst in self.settings['inst_phot']:
+            key = 'binning_' + inst
+            if (key in self.settings.keys()) and not is_empty_or_none(key):
+                try:
+                    self.settings[key] = float(self.settings[key])
+                except (TypeError, ValueError):
+                    pass  # leave raw; check_binning_value() raises a clean error
+            elif key in self.settings.keys():
+                self.settings[key] = None
 
         #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
         #::: Flattened-flux outlier clip bounds (applied by config.init() AFTER
@@ -1449,8 +1474,47 @@ class Basement:
                     raise ValueError('"t_exp_n_int_'+inst+'" must be >= 1, but is given as '+str(self.settings['t_exp_n_int_'+inst])+' in params.csv')
             else:
                 self.settings['t_exp_n_int_'+inst] = None
-  
-    
+
+        #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+        #::: Auto-derive t_exp from binning (photometry only).
+        #::: A binned point is the time-average of the flux over the bin width,
+        #::: so the transit model must be integrated over that window. When an
+        #::: instrument is binned (global `binning` or a per-instrument
+        #::: `binning_<inst>` override) and the user did NOT set t_exp for it, we
+        #::: set t_exp_<inst> = bin width and seed t_exp_n_int_<inst> (which is
+        #::: inert at 1) so the supersampling actually takes effect. An explicit
+        #::: user t_exp is never overwritten; a mismatch is surfaced instead.
+        #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+        for inst in self.settings['inst_phot']:
+            _bkey = 'binning_' + inst
+            _eff_binning = (self.settings[_bkey] if _bkey in self.settings
+                            else self.settings['binning'])
+            if _eff_binning is None:
+                continue
+            if self.settings['t_exp_'+inst] is None:
+                self.settings['t_exp_'+inst] = float(_eff_binning)
+                self.logprint(
+                    '\nAuto-set t_exp_'+inst+' = '+repr(float(_eff_binning))
+                    + ' d to match binning of "'+inst+'" (binned points are '
+                    + 'time-averages over the bin width; the model is integrated '
+                    + 'over t_exp).')
+                if self.settings['t_exp_n_int_'+inst] is None:
+                    self.settings['t_exp_n_int_'+inst] = _BINNING_DEFAULT_N_INT
+                    self.logprint(
+                        'Auto-set t_exp_n_int_'+inst+' = '
+                        + str(_BINNING_DEFAULT_N_INT)
+                        + ' (sub-samples for the t_exp integration; set it '
+                        + 'explicitly in settings.csv to override).')
+            elif (np.isscalar(self.settings['t_exp_'+inst])
+                  and not np.isclose(self.settings['t_exp_'+inst], _eff_binning)):
+                warnings.warn(
+                    'binning of "'+inst+'" is '+repr(float(_eff_binning))
+                    + ' d but t_exp_'+inst+' is explicitly set to '
+                    + repr(self.settings['t_exp_'+inst])+' d. Keeping your '
+                    + 't_exp_'+inst+'; for binned data t_exp usually equals the '
+                    + 'bin width. Remove t_exp_'+inst+' to auto-match the binning.')
+
+
         #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
         #::: Number of spots
         #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
@@ -2282,12 +2346,19 @@ class Basement:
                 # keep named covariates row-aligned with flux
                 covariates = {k: v[_mask] for k, v in covariates.items()}
 
-            #::: Optional binning of the input light curve (settings['binning'],
-            #::: in days). Applied before `fulldata` so fulldata, fast_fit and
-            #::: covariate detrending all see the binned series; covariates and
-            #::: custom_series are mean-binned on the same grid (row-aligned).
-            #::: `raw_clipped_*` (dropped outliers) are intentionally untouched.
-            _binning = self.settings['binning']
+            #::: Optional binning of the input light curve (in days). Applied
+            #::: before `fulldata` so fulldata, fast_fit and covariate detrending
+            #::: all see the binned series; covariates and custom_series are
+            #::: mean-binned on the same grid (row-aligned). `raw_clipped_*`
+            #::: (dropped outliers) are intentionally untouched.
+            #::: A per-instrument `binning_<inst>` overrides the global `binning`
+            #::: for this instrument only (explicit empty/None turns it off here
+            #::: even when the global default bins everything else).
+            _bkey = 'binning_' + inst
+            if _bkey in self.settings:
+                _binning = self.settings[_bkey]
+            else:
+                _binning = self.settings['binning']
             if _binning is not None:
                 _span = float(time.max() - time.min()) if len(time) > 1 else 0.0
                 if _binning >= _span:

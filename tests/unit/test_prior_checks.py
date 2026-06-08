@@ -456,12 +456,28 @@ def test_binning_too_fine_is_noop(tmp_path):
     assert any("little or no binning" in m for m in msgs)
 
 
-def test_binning_without_t_exp_warns(tmp_path):
+def test_binning_without_t_exp_no_warning(tmp_path):
+    """Missing t_exp is fine now — Basement auto-derives t_exp = bin width."""
     from allesfitter.validation import check_binning
     d = _binning_datadir(tmp_path, "binning,0.04")  # in-window, no t_exp
     msgs = check_binning(d)
-    assert any("no t_exp" in m for m in msgs)
+    assert not any("t_exp" in m for m in msgs)
     assert not any("smear" in m or "little or no" in m for m in msgs)
+
+
+def test_binning_t_exp_mismatch_warns(tmp_path):
+    """An explicit t_exp that disagrees with the bin width is flagged."""
+    from allesfitter.validation import check_binning
+    d = _binning_datadir(tmp_path, "binning,0.04\nt_exp_tess,0.01")
+    msgs = check_binning(d)
+    assert any("differs from the bin width" in m for m in msgs)
+
+
+def test_binning_t_exp_matches_no_warning(tmp_path):
+    """t_exp equal to the bin width is the recommended setup — no warning."""
+    from allesfitter.validation import check_binning
+    d = _binning_datadir(tmp_path, "binning,0.04\nt_exp_tess,0.04")
+    assert not any("t_exp" in m for m in check_binning(d))
 
 
 def test_binning_reasonable_value_no_warning(tmp_path):
@@ -482,3 +498,18 @@ def test_binning_warning_surfaces_through_validate_gp_priors(tmp_path):
     d = _binning_datadir(tmp_path, "binning,0.1\nt_exp_tess,0.1")
     msgs = validate_gp_priors(d)
     assert any("binning=" in m for m in msgs)
+
+
+def test_per_instrument_binning_override_warns(tmp_path):
+    """A `binning_<inst>` override (no global binning) is judged per instrument."""
+    from allesfitter.validation import check_binning
+    d = _binning_datadir(tmp_path, "binning_tess,0.1\nt_exp_tess,0.1")
+    assert any("smear the transit" in m for m in check_binning(d))
+
+
+def test_per_instrument_override_disables_global_warning(tmp_path):
+    """An empty `binning_<inst>` turns binning off for that inst (no warnings)."""
+    from allesfitter.validation import check_binning
+    # Global binning is risky (smears), but the only instrument overrides it off.
+    d = _binning_datadir(tmp_path, "binning,0.1\nbinning_tess,\nt_exp_tess,0.1")
+    assert check_binning(d) == []

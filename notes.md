@@ -96,6 +96,21 @@ and set a matching `t_exp_<inst>` so the model is supersampled over the bin
 width. Applies to photometry only; RV is untouched. Invalid values
 (non-numeric, ≤ 0, or ≥ the observation baseline) are hard errors.
 
+When an instrument is binned and you have **not** set `t_exp_<inst>`, allesfitter
+auto-sets `t_exp_<inst>` to the bin width and seeds `t_exp_n_int_<inst>` (default
+10), logging both — binned points are time-averages over the bin width, so the
+transit model must be integrated over that window. An explicit `t_exp_<inst>` is
+never overwritten; a value that differs from the bin width is surfaced as a
+warning instead.
+
+**`binning_<inst>`** — optional per-instrument override of `binning` (same
+units, days). Set it to bin only specific light curves: e.g. leave the global
+`binning` empty and add `binning_TESS,0.0208333` to bin TESS alone, or set a
+different width per instrument. A `binning_<inst>` key that is present but empty
+/ `None` turns binning **off** for that instrument even when the global
+`binning` bins everything else. Instruments without an override fall back to the
+global `binning`. Validated exactly like `binning` (per-instrument).
+
 **Baseline model (`baseline_flux_<inst>`)** — escalate only as far as the data
 demand:
 - `none` / `sample_offset` — flat or single-offset light curves.
