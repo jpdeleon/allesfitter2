@@ -415,7 +415,18 @@ class Basement:
         if self.settings['shift_epoch']:
             try:
                 self.change_epoch()
-            except:
+            except Exception as err:
+                #::: If the user explicitly asked for shift_epoch in settings.csv,
+                #::: a failed calculation is a real problem they need to see, not
+                #::: something to silently swallow. Only downgrade to a warning
+                #::: when shift_epoch was defaulted (e.g. a single transit with no
+                #::: period given, where shifting is meaningless anyway).
+                if 'shift_epoch' in self._settings_raw_keys:
+                    raise ValueError(
+                        'shift_epoch=True was set in settings.csv, but the epoch '
+                        'shift failed: '+str(err)+'\nCheck that a valid period and '
+                        'epoch are given for every companion, or set shift_epoch '
+                        'to False.') from err
                 warnings.warn('\nCould not shift epoch (you can peacefully ignore this warning if no period was given)\n')
         
         if self.settings['fit_ttvs']:  
@@ -677,24 +688,40 @@ class Basement:
             'binning',
             'baseline_share_flux', 'baseline_share_rv', 'baseline_share_rv2',
         }
-        for key in self.settings:
-            if key in ['user-given:', 'automatically set:']:
-                continue
-            if key not in valid_settings_keys and not any(key.startswith(prefix) for prefix in [
-                'host_ld_law_', 'host_ld_space_', 'host_grid_', 'host_shape_', 'host_flux_weighted_',
-                'host_rotfac_', 'host_hf_', 'host_bfac_', 'host_heat_', 'host_lambda_', 'host_N_spots_',
-                'b_ld_law_', 'b_ld_space_', 'b_grid_', 'b_shape_', 'b_flux_weighted_', 'b_N_spots_',
-                'c_ld_law_', 'c_ld_space_', 'c_grid_', 'c_shape_', 'c_flux_weighted_', 'c_N_spots_',
-                'd_ld_law_', 'd_ld_space_', 'd_grid_', 'd_shape_', 'd_flux_weighted_', 'd_N_spots_',
-                'e_ld_law_', 'e_ld_space_', 'e_grid_', 'e_shape_', 'e_flux_weighted_', 'e_N_spots_',
-                'f_ld_law_', 'f_ld_space_', 'f_grid_', 'f_shape_', 'f_flux_weighted_', 'f_N_spots_',
-                'g_ld_law_', 'g_ld_space_', 'g_grid_', 'g_shape_', 'g_flux_weighted_', 'g_N_spots_',
-                'baseline_flux_', 'baseline_rv_', 'baseline_rv2_',
-                'error_flux_', 'error_rv_', 'error_rv2_',
-                'binning_',
-                't_exp_', 'stellar_var_flux', 'stellar_var_rv',
-            ]):
-                warnings.warn('Unrecognized setting key "'+key+'" in settings.csv. This may be a typo or deprecated keyword.')
+        valid_settings_prefixes = [
+            'host_ld_law_', 'host_ld_space_', 'host_grid_', 'host_shape_', 'host_flux_weighted_',
+            'host_rotfac_', 'host_hf_', 'host_bfac_', 'host_heat_', 'host_lambda_', 'host_N_spots_',
+            'b_ld_law_', 'b_ld_space_', 'b_grid_', 'b_shape_', 'b_flux_weighted_', 'b_N_spots_',
+            'c_ld_law_', 'c_ld_space_', 'c_grid_', 'c_shape_', 'c_flux_weighted_', 'c_N_spots_',
+            'd_ld_law_', 'd_ld_space_', 'd_grid_', 'd_shape_', 'd_flux_weighted_', 'd_N_spots_',
+            'e_ld_law_', 'e_ld_space_', 'e_grid_', 'e_shape_', 'e_flux_weighted_', 'e_N_spots_',
+            'f_ld_law_', 'f_ld_space_', 'f_grid_', 'f_shape_', 'f_flux_weighted_', 'f_N_spots_',
+            'g_ld_law_', 'g_ld_space_', 'g_grid_', 'g_shape_', 'g_flux_weighted_', 'g_N_spots_',
+            'baseline_flux_', 'baseline_rv_', 'baseline_rv2_',
+            'error_flux_', 'error_rv_', 'error_rv2_',
+            'binning_',
+            't_exp_', 'stellar_var_flux', 'stellar_var_rv',
+        ]
+
+        #::: Every key in settings.csv is an explicit user choice. An
+        #::: unrecognized key (typo or deprecated keyword) is otherwise silently
+        #::: ignored, so the fit quietly runs with a default instead of the
+        #::: user's intent. Collect all offenders and fail loudly with one
+        #::: comprehensive message rather than warning and continuing.
+        unrecognized_settings = [
+            key for key in self.settings
+            if key not in ['user-given:', 'automatically set:']
+            and key not in valid_settings_keys
+            and not any(key.startswith(prefix) for prefix in valid_settings_prefixes)
+        ]
+        if unrecognized_settings:
+            msg = ('The following setting keys in settings.csv are not '
+                   'recognized, likely due to a typo or a deprecated keyword:\n')
+            for key in unrecognized_settings:
+                msg += '  - '+key+'\n'
+            msg += ('Fix or remove these keys. Refusing to silently ignore '
+                    'settings that would otherwise fall back to defaults.')
+            raise ValueError(msg)
 
         
         #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
@@ -881,10 +908,7 @@ class Basement:
         #::: Multiprocess settings
         #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
         self.settings['multiprocess'] = set_bool(self.settings['multiprocess'])
-        
-        from pprint import pprint
-        pprint(self.settings)
-        
+
         if 'multiprocess_cores' not in self.settings.keys():
             self.settings['multiprocess_cores'] = cpu_count()-1
         elif self.settings['multiprocess_cores'] == 'all':
@@ -1851,25 +1875,89 @@ class Basement:
         
         valid_patterns = get_valid_param_patterns()
         allkeys_list = list(buf['name'])
-        
+        fit_flags = buf['fit'] if 'fit' in buf.dtype.names else None
+
+        def _is_free_param(idx):
+            #::: a row counts as a free parameter only if its fit flag is 1
+            if fit_flags is None:
+                return False
+            try:
+                return int(float(str(np.atleast_1d(fit_flags)[idx]).strip())) == 1
+            except (ValueError, TypeError):
+                return False
+
         unrecognized = []
-        for key in allkeys_list:
+        unrecognized_free = []
+        for idx, key in enumerate(allkeys_list):
             key_clean = key.strip()
             if key_clean in ['user-given:', 'automatically set:']:
                 continue
             if not is_valid_key(key_clean, valid_patterns):
-                unrecognized.append(key_clean)
-        
+                if _is_free_param(idx):
+                    unrecognized_free.append(key_clean)
+                else:
+                    unrecognized.append(key_clean)
+
+        #::: A free parameter (fit=1) that is not recognized would otherwise be
+        #::: silently dropped from the fit, so the user would believe they are
+        #::: sampling a dimension that is actually ignored. Fail loudly instead.
+        if unrecognized_free:
+            msg = ('The following parameters in params.csv are set as free '
+                   '(fit=1) but are not recognized, likely due to a typo in the '
+                   'parameter name or instrument suffix:\n')
+            for key in unrecognized_free:
+                msg += '  - '+key+'\n'
+            msg += ('Fix the parameter name(s), or set fit=0 to keep them as '
+                    'fixed values. Refusing to silently drop a free parameter.')
+            raise ValueError(msg)
+
         if unrecognized:
             self.logprint('\nWARNING: The following parameters in params.csv are not recognized and will be ignored:')
             for key in unrecognized:
                 self.logprint('  - '+key)
             self.logprint('')
-                
-                
+
+
         #==========================================================================
-        #::: set up stuff   
-        #==========================================================================          
+        #::: luser-proof: N_spots set in settings.csv must have matching spot
+        #::: parameters in params.csv, otherwise update_params() crashes later
+        #::: with a cryptic KeyError. Warn and reset the count to 0 so that
+        #::: plotting and fitting can still proceed (consistent with the
+        #::: warn-not-raise policy used elsewhere for config mismatches).
+        #==========================================================================
+        allkeys_set = set(k.strip() for k in allkeys_list)
+        _spot_suffixes = ['_long_', '_lat_', '_size_', '_brightness_']
+
+        def _check_spot_params(count_key, prefix):
+            n = self.settings.get(count_key, 0)
+            if not n:
+                return
+            missing = [
+                prefix+'spot_'+str(i)+suffix+inst
+                for i in range(1, n+1)
+                for suffix in _spot_suffixes
+                if prefix+'spot_'+str(i)+suffix+inst not in allkeys_set
+            ]
+            if missing:
+                self.logprint(
+                    '\nWARNING: '+count_key+' = '+str(n)+' in settings.csv, but the '
+                    'following spot parameters are missing from params.csv:')
+                for key in missing:
+                    self.logprint('  - '+key)
+                self.logprint(
+                    'Resetting '+count_key+' to 0. Add the spot parameters to '
+                    'params.csv to model these spots.\n')
+                self.settings[count_key] = 0
+
+        for inst in self.settings['inst_all']:
+            _check_spot_params('host_N_spots_'+inst, 'host_')
+            for companion in self.settings['companions_all']:
+                _check_spot_params(companion+'_N_spots_'+inst, companion+'_')
+
+
+        #==========================================================================
+        #::: set up stuff
+        #==========================================================================
         self.allkeys = np.atleast_1d(buf['name']) #len(all rows in params.csv)
         self.labels = np.atleast_1d(buf['label']) #len(all rows in params.csv)
         self.units = np.atleast_1d(buf['unit']) #len(all rows in params.csv)
