@@ -674,6 +674,7 @@ class Basement:
             'companions_phot', 'companions_rv', 'companions_all', 'inst_phot', 'inst_rv', 'inst_rv2', 'inst_all',
             'time_format', 'multiprocess', 'multiprocess_cores', 'fast_fit', 'fast_fit_width',
             'secondary_eclipse', 'phase_curve', 'phase_curve_style', 'shift_epoch',
+            'mask_transit',
             'inst_for_b_epoch', 'inst_for_c_epoch', 'inst_for_d_epoch', 'inst_for_e_epoch', 'inst_for_f_epoch', 'inst_for_g_epoch',
             'mcmc_nwalkers', 'mcmc_total_steps', 'mcmc_burn_steps', 'mcmc_thin_by', 'mcmc_pre_run_loops', 'mcmc_pre_run_steps', 'mcmc_moves',
             'ns_modus', 'ns_nlive', 'ns_bound', 'ns_sample', 'ns_tol', 'ns_backend',
@@ -951,6 +952,30 @@ class Basement:
             self.settings['fast_fit_width'] = float(self.settings['fast_fit_width'])
         else:
             self.settings['fast_fit_width'] = 8./24.
+
+        #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+        #::: Mask transit
+        #::: When True, the in-transit points are removed from each photometric
+        #::: light curve at load time (the inverse of fast_fit). This lets the
+        #::: user model `stellar_var` or spots on the out-of-transit data alone,
+        #::: without the transit biasing the fit. The transit window half-width
+        #::: is `fast_fit_width` (the same window fast_fit uses). All transit
+        #::: parameters must be fixed (fit=0) in params.csv; load_params()
+        #::: enforces this, since fitting a transit that is no longer in the data
+        #::: is meaningless.
+        #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+        if ('mask_transit' in self.settings.keys()) and len(self.settings['mask_transit']):
+            self.settings['mask_transit'] = set_bool(self.settings['mask_transit'])
+        else:
+            self.settings['mask_transit'] = False
+
+        #::: fast_fit (keep only in-transit) and mask_transit (drop in-transit)
+        #::: are exact opposites; enabling both at once is a contradiction.
+        if self.settings['mask_transit'] and self.settings['fast_fit']:
+            raise ValueError(
+                'mask_transit==True and fast_fit==True are mutually exclusive in '
+                'settings.csv: fast_fit keeps only the in-transit data, while '
+                'mask_transit removes it. Set one of them to False.')
 
         #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
         #::: Raw-flux outlier clip bounds (applied at load time in load_data())
@@ -2320,7 +2345,37 @@ class Basement:
     
         self.ndim = len(self.theta_0)                   #len(ndim)
 
-    
+
+        #==========================================================================
+        #::: luser proof: mask_transit removes the transit from the data, so every
+        #::: transit parameter MUST be fixed (fit=0). A free transit parameter
+        #::: would be sampled against data that no longer contains the transit,
+        #::: which is meaningless. Fail loudly listing the offenders so the user
+        #::: either fixes them or turns mask_transit off.
+        #==========================================================================
+        if self.settings.get('mask_transit', False):
+            #::: per-companion transit-shape + ephemeris parameters; `rr` is
+            #::: handled separately to also catch the chromatic `_rr_<band>` keys.
+            _transit_suffixes = ['_rsuma', '_cosi', '_epoch', '_period',
+                                 '_f_s', '_f_c']
+            _free_transit = []
+            for companion in self.settings['companions_phot']:
+                for key in self.fitkeys:
+                    k = str(key)
+                    if k == companion+'_rr' or k.startswith(companion+'_rr_'):
+                        _free_transit.append(k)
+                    elif any(k == companion+suf for suf in _transit_suffixes):
+                        _free_transit.append(k)
+            if _free_transit:
+                raise ValueError(
+                    'mask_transit==True in settings.csv removes the transit from '
+                    'the data, so all transit parameters must be fixed (fit=0) in '
+                    'params.csv. The following transit parameters are still free '
+                    '(fit=1):\n  - ' + '\n  - '.join(_free_transit)
+                    + '\nSet fit=0 for these (you are modelling stellar_var/spots '
+                    'on the out-of-transit data), or set mask_transit=False.')
+
+
         #==========================================================================
         #::: luser proof: check if all initial guesses lie within their bounds
         #==========================================================================
@@ -2475,6 +2530,13 @@ class Basement:
                 _ind_in = self.fulldata[inst].get('all_ind_in')
                 if _ind_in is not None and len(covariates):
                     covariates = {k: v[_ind_in] for k, v in covariates.items()}
+            elif (self.settings['mask_transit']) and (len(self.settings['inst_phot'])>0):
+                time, flux, flux_err, custom_series = self.mask_phot_transit(time, flux, flux_err, custom_series=custom_series, inst=inst)
+                # mask_phot_transit writes the surviving (out-of-transit) indices
+                # to fulldata; use them to keep every covariate row-aligned.
+                _ind_out = self.fulldata[inst].get('all_ind_out')
+                if _ind_out is not None and len(covariates):
+                    covariates = {k: v[_ind_out] for k, v in covariates.items()}
             self.data[inst] = {
                           'time':time,
                           'flux':flux,
@@ -2767,6 +2829,52 @@ class Basement:
             return time, flux, flux_err
         else:
             custom_series = custom_series[ind_in]
+            return time, flux, flux_err, custom_series
+
+
+    ###############################################################################
+    #::: mask_phot_transit (inverse of reduce_phot_data)
+    ###############################################################################
+    def mask_phot_transit(self, time, flux, flux_err, custom_series=None, inst=None):
+        '''
+        Remove the in-transit points, keeping only the out-of-transit data.
+
+        This is the inverse of reduce_phot_data() and is used when
+        ``mask_transit==True`` so the user can model stellar variability or
+        spots on data that no longer contains the transit signal. The transit
+        window half-width is taken from ``fast_fit_width`` (the same window
+        fast_fit uses). The surviving (out-of-transit) indices are written to
+        ``self.fulldata[inst]`` so load_data() can keep covariates row-aligned.
+        '''
+        ind_in = []
+
+        for companion in self.settings['companions_phot']:
+            epoch  = self.params[companion+'_epoch']
+            period = self.params[companion+'_period']
+            width  = self.settings['fast_fit_width']
+            if self.settings['secondary_eclipse']:
+                ind_ecl1x, ind_ecl2x, ind_outx = index_eclipses(time,epoch,period,width,width) #TODO: currently this assumes width_occ == width_tra
+                ind_in += list(ind_ecl1x)
+                ind_in += list(ind_ecl2x)
+            else:
+                ind_inx, ind_outx = index_transits(time,epoch,period,width)
+                ind_in += list(ind_inx)
+
+        ind_in = np.sort(np.unique(ind_in))
+        ind_out = np.delete( np.arange(len(time)), ind_in )
+        self.fulldata[inst]['all_ind_in'] = ind_in
+        self.fulldata[inst]['all_ind_out'] = ind_out
+
+        if len(ind_out)==0:
+            raise ValueError(inst+'.csv contains only in-transit data after masking; nothing is left to model. Check that your epoch/period guess and fast_fit_width are correct.')
+
+        time = time[ind_out]
+        flux = flux[ind_out]
+        flux_err = flux_err[ind_out]
+        if custom_series is None:
+            return time, flux, flux_err
+        else:
+            custom_series = custom_series[ind_out]
             return time, flux, flux_err, custom_series
 
 
