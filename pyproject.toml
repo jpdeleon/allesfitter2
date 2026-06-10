@@ -62,6 +62,7 @@ Download = "https://github.com/jpdeleon/allesfitter2"
 
 [project.scripts]
 prepare_allesfit = "allesfitter.scripts:prepare_allesfit"
+run_allesfitter_grid = "allesfitter.scripts:run_allesfitter_grid"
 
 [tool.setuptools.packages.find]
 where = ["."]

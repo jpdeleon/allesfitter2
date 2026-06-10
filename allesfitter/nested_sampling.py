@@ -32,6 +32,7 @@ import multiprocessing
 multiprocessing.set_start_method('fork', force=True)
 #solves python>=3.8 issues, see https://stackoverflow.com/questions/60518386/error-with-module-multiprocessing-under-python3-8
 import gzip
+import shutil
 try:
    import cPickle as pickle
 except:
@@ -45,7 +46,7 @@ warnings.filterwarnings('ignore', category=np.RankWarning)
 #::: allesfitter modules
 from . import config
 from .computer import update_params, calculate_lnlike_total
-from .general_output import logprint
+from .general_output import logprint, resolve_overwrite
 
 
 
@@ -101,7 +102,7 @@ def my_truncnorm_isf(q,a,b,mean,std):
 ###############################################################################
 #::: Nested Sampling fitter class
 ###############################################################################
-def ns_fit(datadir, backend=None):
+def ns_fit(datadir, backend=None, overwrite=None):
     """Run nested sampling and persist the result.
 
     Parameters
@@ -113,12 +114,23 @@ def ns_fit(datadir, backend=None):
         1. ``settings.csv`` ``ns_backend`` row (if set);
         2. this kwarg (if provided);
         3. ``'dynesty'`` (default).
+    overwrite : bool or None, optional
+        If ``True``, overwrite an existing ``save_ns.pickle.gz`` and start a
+        genuinely fresh run (also wiping ultranest's ``ultranest_logs`` resume
+        store). If ``False``, abort when a save file exists. If ``None``
+        (default) and a save file exists, the user is prompted interactively
+        (overwrite / abort); a non-interactive stdin proceeds by overwriting.
 
     Notes
     -----
     Saves an ``NSResults`` (unified schema) to
     ``<outdir>/save_ns.pickle.gz``. ``ns_output`` auto-detects the backend
     from the saved object.
+
+    There is no ``append`` option: nested sampling has no chain to extend, the
+    results pickle is rewritten wholesale every run, and ``ultranest`` already
+    auto-resumes from its ``ultranest_logs`` store unless ``overwrite=True``
+    clears it (``dynesty`` cannot resume at all).
     """
     #::: init
     config.init(datadir)
@@ -130,6 +142,19 @@ def ns_fit(datadir, backend=None):
         or 'dynesty'
     )
     resolved = str(resolved).lower()
+
+    #::: resolve overwrite for an existing save file (prompts if overwrite is
+    #::: None; EOFError-safe so non-interactive/batch runs proceed by
+    #::: overwriting). Raises ValueError if the user (or overwrite=False) aborts.
+    save_file = os.path.join(config.BASEMENT.outdir, 'save_ns.pickle.gz')
+    resolve_overwrite(save_file, overwrite=overwrite, label='Nested Sampling save')
+
+    #::: an explicit overwrite=True also clears ultranest's resume store so the
+    #::: run starts genuinely fresh (otherwise ultranest auto-resumes from it).
+    if overwrite:
+        ultranest_logs = os.path.join(config.BASEMENT.outdir, 'ultranest_logs')
+        if os.path.isdir(ultranest_logs):
+            shutil.rmtree(ultranest_logs)
 
     #::: dispatch (imports happen lazily, so ultranest stays optional)
     from .utils.ns_backends import get_backend, validate_settings_for_backend

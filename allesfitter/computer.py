@@ -69,6 +69,7 @@ import difflib as _difflib
 from .basement import BASELINE_GP_HYPER_PREFIXES
 # from .limb_darkening import LDC3
 from .flares.aflare import aflare1
+from .bumps.bump import bump_model
 # from .exoworlds_rdx.lightcurves.lightcurve_tools import calc_phase
 from .lightcurves import translate_limb_darkening_from_q_to_u as q_to_u
 # from .lightcurves import translate_limb_darkening_from_u_to_q as u_to_q
@@ -525,11 +526,18 @@ def flux_fct_full(params, inst, companion, xx=None, settings=None):
     #-------------------------------------------------------------------------- 
     if settings['N_flares'] > 0:
         model_flux += flux_subfct_flares(params, inst, companion, xx=xx, settings=settings) - 1.
-    
-    
-    #-------------------------------------------------------------------------- 
+
+
+    #--------------------------------------------------------------------------
+    #::: flux sub-fct: bump models (starspot-crossing events)
+    #--------------------------------------------------------------------------
+    if settings.get('N_bumps_'+_bump_bandpass_suffix(inst, settings), 0) > 0:
+        model_flux += flux_subfct_bumps(params, inst, companion, xx=xx, settings=settings) - 1.
+
+
+    #--------------------------------------------------------------------------
     #::: return
-    #-------------------------------------------------------------------------- 
+    #--------------------------------------------------------------------------
     return model_flux
 
 
@@ -796,13 +804,71 @@ def flux_subfct_flares(params, inst, companion, xx=None, settings=None, return_f
     if settings['N_flares'] > 0:
         for i in range(1,settings['N_flares']+1):
             model_flux += (1.-params['dil_'+inst]) * aflare1(xx, params['flare_tpeak_'+str(i)], params['flare_fwhm_'+str(i)], params['flare_ampl_'+str(i)], upsample=True, uptime=10)
-    
-    
-    #-------------------------------------------------------------------------- 
+
+
+    #--------------------------------------------------------------------------
     #::: return
-    #-------------------------------------------------------------------------- 
+    #--------------------------------------------------------------------------
     return model_flux
-    
+
+
+
+#==============================================================================
+#::: flux sub-fct: bump models (starspot-crossing events during transit)
+#==============================================================================
+def _bump_bandpass_suffix(inst, settings):
+    '''
+    The spot-crossing depth is wavelength-dependent (like limb darkening), so
+    bump keys are suffixed by bandpass when a bandpass row is present, and fall
+    back to the instrument name otherwise. Mirrors Basement.get_ldc_bandpass.
+    '''
+    bandpass = (settings.get('bandpass') or {}).get(inst)
+    return bandpass if bandpass else inst
+
+
+def flux_subfct_bumps(params, inst, companion, xx=None, settings=None, return_fluxes=False):
+
+    #--------------------------------------------------------------------------
+    #::: defaults
+    #--------------------------------------------------------------------------
+    if settings is None:
+        settings = config.BASEMENT.settings
+
+    if xx is None:
+        xx = config.BASEMENT.data[inst]['time']
+
+    model_flux = np.ones_like(xx)
+
+
+    #--------------------------------------------------------------------------
+    #::: bumps (count + amplitude keyed by bandpass; geometry shared across bands)
+    #::: if bumps_persistent: a long-lived spot is crossed every transit, so the
+    #::: bump recurs at tpeak + n*period (companion's orbital period) across xx
+    #--------------------------------------------------------------------------
+    suffix = _bump_bandpass_suffix(inst, settings)
+    n_bumps = settings.get('N_bumps_'+suffix, 0)
+    if n_bumps > 0:
+        persistent = settings.get('bumps_persistent', False)
+        for i in range(1, n_bumps+1):
+            tpeak = params['bump_tpeak_'+str(i)]
+            width = params['bump_width_'+str(i)]
+            ampl = params['bump_ampl_'+suffix+'_'+str(i)]
+            if persistent:
+                period = params[companion+'_period']
+                #::: only the epochs whose bump center lands within the data span
+                n_lo = int(np.floor((np.min(xx) - tpeak) / period))
+                n_hi = int(np.ceil((np.max(xx) - tpeak) / period))
+                for n in range(n_lo, n_hi+1):
+                    model_flux += (1.-params['dil_'+inst]) * bump_model(xx, tpeak + n*period, width, ampl)
+            else:
+                model_flux += (1.-params['dil_'+inst]) * bump_model(xx, tpeak, width, ampl)
+
+
+    #--------------------------------------------------------------------------
+    #::: return
+    #--------------------------------------------------------------------------
+    return model_flux
+
 
 
 #==============================================================================
@@ -906,12 +972,19 @@ def flux_fct_piecewise(params, inst, companion, xx=None, settings=None):
                 model_flux_piecewise = np.ones_like(xx)
                     
             model_flux[ind] = model_flux_piecewise
-    
 
-    #-------------------------------------------------------------------------- 
+
+    #--------------------------------------------------------------------------
+    #::: flux sub-fct: bump models (starspot-crossing events)
+    #--------------------------------------------------------------------------
+    if settings.get('N_bumps_'+_bump_bandpass_suffix(inst, settings), 0) > 0:
+        model_flux += flux_subfct_bumps(params, inst, companion, xx=xx, settings=settings) - 1.
+
+
+    #--------------------------------------------------------------------------
     #::: return
-    #-------------------------------------------------------------------------- 
-    return model_flux     
+    #--------------------------------------------------------------------------
+    return model_flux
 
 
 

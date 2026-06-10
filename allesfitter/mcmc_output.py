@@ -36,7 +36,7 @@ import warnings
 from . import config
 from . import deriver
 from .computer import calculate_model, calculate_baseline, calculate_stellar_var
-from .general_output import afplot, save_table, save_latex_table, logprint, get_params_from_samples, plot_ttv_results
+from .general_output import afplot, save_table, save_latex_table, logprint, get_params_from_samples, plot_ttv_results, resolve_overwrite
 from ._output_shared import save_per_transit_plots, write_priors_latex_table
 from .nested_sampling_output import (
     plot_chromatic_rr_histogram,
@@ -326,7 +326,7 @@ def print_autocorr(sampler):
 ###############################################################################
 #::: analyse the output from save_mcmc.h5 file
 ###############################################################################
-def mcmc_output(datadir, quiet=False):
+def mcmc_output(datadir, quiet=False, overwrite=None):
     '''
     Inputs:
     -------
@@ -334,29 +334,23 @@ def mcmc_output(datadir, quiet=False):
         the working directory for allesfitter
         must contain all the data files
         output directories and files will also be created inside datadir
-            
+    overwrite : bool or None, optional
+        If ``True``, overwrite existing MCMC output files without prompting;
+        if ``False``, abort. If ``None`` (default) and output files already
+        exist, the user is prompted interactively (overwrite / abort).
+
     Outputs:
     --------
-    This will output information into the console, and create a output files 
-    into datadir/results/ (or datadir/QL/ if QL==True)    
+    This will output information into the console, and create a output files
+    into datadir/results/ (or datadir/QL/ if QL==True)
     '''
     config.init(datadir, quiet=quiet)
-    
-    
+
+
     #::: security check
-    if os.path.exists(os.path.join(config.BASEMENT.outdir,'mcmc_table.csv')):
-        try:
-            overwrite = str(input('MCMC output files already exists in '+config.BASEMENT.outdir+'.\n'+\
-                                  'What do you want to do?\n'+\
-                                  '1 : overwrite the output files\n'+\
-                                  '2 : abort\n'))
-            if (overwrite == '1'):
-                pass
-            else:
-                raise ValueError('User aborted operation.')
-        except EOFError:
-            warnings.warn("MCMC output files already existed from a previous run, and were automatically overwritten.")
-            pass
+    resolve_overwrite(
+        os.path.join(config.BASEMENT.outdir, 'mcmc_table.csv'),
+        overwrite=overwrite, label='MCMC output')
     
     
     #::: load the mcmc_save.h5

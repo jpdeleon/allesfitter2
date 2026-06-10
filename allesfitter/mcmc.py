@@ -45,7 +45,7 @@ warnings.filterwarnings('ignore', category=np.RankWarning)
 #::: allesfitter modules
 from . import config
 from .computer import update_params, calculate_lnlike_total
-from .general_output import logprint
+from .general_output import logprint, resolve_overwrite_append
 from .mcmc_output import print_autocorr
 
 
@@ -122,26 +122,30 @@ def mcmc_lnprob(theta):
 ###########################################################################
 #::: MCMC fit
 ###########################################################################
-def mcmc_fit(datadir):
-    
+def mcmc_fit(datadir, overwrite=None, append=None):
+    """Run MCMC sampling for parameter inference.
+
+    Parameters
+    ----------
+    datadir : str
+        Working directory containing ``settings.csv`` / ``params.csv``.
+    overwrite : bool or None, optional
+        If ``True``, overwrite an existing ``mcmc_save.h5`` and start fresh.
+    append : bool or None, optional
+        If ``True``, append to (continue from) an existing ``mcmc_save.h5``.
+
+    Notes
+    -----
+    If neither ``overwrite`` nor ``append`` is given and a save file already
+    exists, the user is prompted interactively (overwrite / append / abort).
+    """
+
     #::: init
     config.init(datadir)
-    
-    
-    continue_old_run = False
-    if os.path.exists(os.path.join(config.BASEMENT.outdir,'mcmc_save.h5')):
-        overwrite = str(input(os.path.join(config.BASEMENT.outdir,'mcmc_save.h5')+\
-                              ' already exists.\n'+\
-                              'What do you want to do?\n'+\
-                              '1 : overwrite the save file\n'+\
-                              '2 : append to the save file\n'+\
-                              '3 : abort\n'))
-        if (overwrite == '1'):
-            continue_old_run = False
-        elif (overwrite == '2'):
-            continue_old_run = True
-        else:
-            raise ValueError('User aborted operation.')
+
+    continue_old_run = resolve_overwrite_append(
+        os.path.join(config.BASEMENT.outdir, 'mcmc_save.h5'),
+        overwrite=overwrite, append=append)
 
     #::: guard: an existing save file with no completed steps cannot be appended to.
     #::: emcee's EnsembleSampler/get_last_sample would raise an opaque IndexError on

@@ -27,6 +27,7 @@ from __future__ import annotations
 from typing import Dict, List, Sequence
 
 from .parsing import parse_bounds, read_param_rows, read_settings
+from .physical_limits import check_value, eccentricity_error, lookup_limit
 
 # Rows whose ``name`` is one of these are section separators in params.csv,
 # not real parameters; they carry no value/fit/bounds and must be skipped.
@@ -356,6 +357,104 @@ def check_binning_value(settings: Dict[str, str]) -> List[str]:
     return errors
 
 
+def check_params_within_physical_limits(rows: Sequence[Sequence[str]]) -> List[str]:
+    """Enforce unambiguous physical ranges on initial values *and* prior bounds.
+
+    For every real, non-coupled row whose name has a registered physical limit
+    (see :mod:`allesfitter.validation.physical_limits`):
+
+    - the initial value must lie inside the limit;
+    - for fitted rows, the prior support must stay inside the limit too — a
+      ``uniform`` / ``trunc_normal`` ``lo``/``hi`` that strays outside lets the
+      sampler explore physically impossible territory (e.g. an ``rsuma`` prior
+      with ``hi > 1``).
+
+    Only catches unambiguous constraints (rsuma, dilution, vsini); debatable
+    cases (rr > 1, lambda range) warn in ``prior_checks`` instead.
+    """
+    errors: List[str] = []
+    for row in rows:
+        if not _is_real_param(row) or len(row) < 2 or _is_coupled(row):
+            continue
+        name = row[0]
+        limit = lookup_limit(name)
+        if limit is None:
+            continue
+
+        #::: initial value
+        value = row[1].strip()
+        if value != "":
+            try:
+                err = check_value(name, float(value))
+            except (TypeError, ValueError):
+                err = None  # caught by check_values_numeric
+            if err:
+                errors.append("params.csv row " + err)
+
+        #::: prior bounds (fitted rows only)
+        if len(row) < 4 or row[2] != "1":
+            continue
+        parsed = parse_bounds(row[3])
+        if parsed is None:
+            continue
+        kind, nums = parsed
+        if kind == "uniform":
+            lo, hi = nums
+        elif kind == "trunc_normal":
+            lo, hi = nums[0], nums[1]
+        else:
+            continue  # normal priors are unbounded; nothing physical to clamp
+        #::: A prior may *touch* a physical endpoint (e.g. the ubiquitous
+        #::: ``uniform 0 1`` on rsuma) even when the open interval excludes it —
+        #::: the sampler simply never lands exactly on the boundary. Only flag a
+        #::: prior that extends *beyond* the physical range.
+        label = f" ({limit.label})" if limit.label else ""
+        if lo < limit.lo:
+            errors.append(
+                f"params.csv row '{name}'{label} prior lower bound {lo:g} is "
+                f"below its physical range {limit.describe()}."
+            )
+        if hi > limit.hi:
+            errors.append(
+                f"params.csv row '{name}'{label} prior upper bound {hi:g} is "
+                f"above its physical range {limit.describe()}."
+            )
+    return errors
+
+
+def check_eccentricity(rows: Sequence[Sequence[str]]) -> List[str]:
+    """Cross-parameter: each companion's ``f_s**2 + f_c**2`` must be < 1.
+
+    Gathers the initial ``<c>_f_s`` / ``<c>_f_c`` values per companion and flags
+    any pair implying eccentricity ``e >= 1`` (an unbound orbit). Individually
+    each is only bounded to ``[-1, 1]``, so this is the joint check that closes
+    the ``e`` up-to-2 gap. Coupled / non-numeric rows are skipped.
+    """
+    f_s: Dict[str, float] = {}
+    f_c: Dict[str, float] = {}
+    for row in rows:
+        if not _is_real_param(row) or len(row) < 2 or _is_coupled(row):
+            continue
+        name, value = row[0], row[1].strip()
+        if value == "":
+            continue
+        try:
+            val = float(value)
+        except (TypeError, ValueError):
+            continue
+        if name.endswith("_f_s"):
+            f_s[name[: -len("_f_s")]] = val
+        elif name.endswith("_f_c"):
+            f_c[name[: -len("_f_c")]] = val
+
+    errors: List[str] = []
+    for companion in sorted(set(f_s) & set(f_c)):
+        err = eccentricity_error(companion, f_s[companion], f_c[companion])
+        if err:
+            errors.append("params.csv " + err)
+    return errors
+
+
 # ---------------------------------------------------------------------------
 # Aggregator
 # ---------------------------------------------------------------------------
@@ -382,6 +481,8 @@ def collect_config_errors(datadir: str) -> List[str]:
     errors += check_companions_have_params(settings, rows)
     errors += check_gp_baseline_vs_stellar_var(settings)
     errors += check_binning_value(settings)
+    errors += check_params_within_physical_limits(rows)
+    errors += check_eccentricity(rows)
     return errors
 
 

@@ -362,6 +362,113 @@ def check_binning(datadir) -> list[str]:
     return msgs
 
 
+def _params_values(datadir) -> dict[str, float]:
+    """Return ``{name: initial_value}`` for rows whose value parses as a float."""
+    values: dict[str, float] = {}
+    for row in read_csv_rows(Path(datadir) / "params.csv"):
+        if len(row) < 2:
+            continue
+        try:
+            values[row[0]] = float(row[1])
+        except (TypeError, ValueError):
+            continue
+    return values
+
+
+def check_radius_ratio(datadir) -> list[str]:
+    """Warn when a radius ratio ``<c>_rr`` exceeds 1 (companion larger than host).
+
+    ``rr`` > 1 is physical for some eclipsing binaries (a giant primary eclipsed
+    by a smaller-but-brighter companion is the usual transit case; the reverse
+    gives ``rr`` > 1), so this is a *warning*, not an error. Flags both the
+    initial value and a uniform prior whose upper bound exceeds 1.
+    """
+    msgs: list[str] = []
+    for row in read_csv_rows(Path(datadir) / "params.csv"):
+        if not row or "_rr" not in row[0]:
+            continue
+        name = row[0]
+        #::: match <c>_rr or chromatic <c>_rr_<bandpass>
+        if not (name.endswith("_rr") or "_rr_" in name):
+            continue
+        if len(row) >= 2:
+            try:
+                if float(row[1]) > 1.0:
+                    msgs.append(_w(
+                        f"{name}: initial value {float(row[1]):g} > 1 — companion "
+                        f"radius exceeds the host's; unusual for a transiting planet."
+                    ))
+            except (TypeError, ValueError):
+                pass
+        if len(row) >= 4 and row[2] == "1":
+            bnds = parse_uniform_bounds(row[3])
+            if bnds is not None and bnds[1] > 1.0:
+                msgs.append(_w(
+                    f"{name}: uniform prior upper bound {bnds[1]:g} > 1 — allows "
+                    f"a companion larger than the host."
+                ))
+    return msgs
+
+
+def check_spin_orbit_angle(datadir) -> list[str]:
+    """Warn when a projected spin-orbit angle ``*_lambda`` leaves [-180, 180] deg.
+
+    ``lambda`` is an angle in degrees; values outside ``[-180, 180]`` are not
+    wrong (they wrap), but usually signal a units or sign mistake. Warning-only.
+    """
+    msgs: list[str] = []
+    for row in read_csv_rows(Path(datadir) / "params.csv"):
+        if not row or "lambda" not in row[0].split("_"):
+            continue
+        name = row[0]
+        if len(row) >= 2:
+            try:
+                val = float(row[1])
+            except (TypeError, ValueError):
+                continue
+            if not (-180.0 <= val <= 180.0):
+                msgs.append(_w(
+                    f"{name}: initial value {val:g} deg is outside [-180, 180] — "
+                    f"check units/sign of the projected spin-orbit angle."
+                ))
+    return msgs
+
+
+def check_transit_geometry(datadir) -> list[str]:
+    """Warn when initial orbital values imply a non-transiting geometry.
+
+    The impact parameter ``b = cos(i) * (1 + k) / rsuma`` must satisfy
+    ``b <= 1 + k`` for the companion to cross the stellar disk at all. When the
+    initial guess gives ``b > 1 + k`` the transit model produces no eclipse, so
+    the fit starts with zero signal — almost always a mistake. Warning-only
+    (a grazing/near-miss start can still be deliberate).
+    """
+    values = _params_values(datadir)
+    msgs: list[str] = []
+    for name in values:
+        if not name.endswith("_period"):
+            continue
+        companion = name[: -len("_period")]
+        rsuma = values.get(f"{companion}_rsuma")
+        cosi = values.get(f"{companion}_cosi")
+        k = values.get(f"{companion}_rr")
+        if k is None:
+            for key in values:
+                if key.startswith(f"{companion}_rr_"):
+                    k = values[key]
+                    break
+        if None in (rsuma, cosi, k) or rsuma <= 0:
+            continue
+        b = abs(cosi) * (1.0 + k) / rsuma
+        if b > 1.0 + k:
+            msgs.append(_w(
+                f"companion '{companion}': initial impact parameter "
+                f"b=cosi*(1+k)/rsuma={b:g} > 1+k={1.0 + k:g} — the companion "
+                f"does not transit with these initial values (no eclipse modelled)."
+            ))
+    return msgs
+
+
 def validate_gp_priors(
     datadir,
     *,
@@ -482,6 +589,11 @@ def validate_gp_priors(
 
     # Non-GP heuristic: risky input-binning widths.
     msgs += check_binning(datadir)
+
+    # Non-GP heuristics: physically-debatable model parameters (warn, never raise).
+    msgs += check_radius_ratio(datadir)
+    msgs += check_spin_orbit_angle(datadir)
+    msgs += check_transit_geometry(datadir)
 
     if log is not None:
         for m in msgs:

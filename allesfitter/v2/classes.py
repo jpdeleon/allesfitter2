@@ -98,7 +98,10 @@ class allesclass2():
         
     def add_flare(self, name):
         pass #TODO
-    
+
+    def add_bump(self, name):
+        pass #TODO
+
     def add_observation(self, inst, key, time, y, yerr):
         self.data[inst] = {}
         self.data[inst]['time'] = time

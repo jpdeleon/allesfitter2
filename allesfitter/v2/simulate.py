@@ -28,6 +28,7 @@ import matplotlib.pyplot as plt
 import os, sys
 import ellc
 from .flares.aflare import aflare1
+from ..bumps.bump import bump_model as _bump_model
 
 
 
@@ -64,3 +65,7 @@ def transit_model(time, rr=0.1, rsuma=0.1, cosi=0, epoch=0, period=1, ldc=[0.5,0
 
 def flare_model(time, tpeak, fwhm, ampl):
     return aflare1(time, tpeak, fwhm, ampl, upsample=True, uptime=10)
+
+
+def bump_model(time, tpeak, width, ampl):
+    return _bump_model(time, tpeak, width, ampl)

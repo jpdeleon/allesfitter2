@@ -1,14 +1,14 @@
 """Global + local optimization of the joint posterior, intended as a
 warm-start for mcmc_fit / ns_fit.
 
-Default stack: CMA-ES global search → L-BFGS-B polish → acceptance gates →
+Default stack: CMA-ES global search → L-BFGS-B refine → acceptance gates →
 optional in-place update of ``config.BASEMENT.theta_0`` so that the next
 sampler call starts from the optimized point.
 
 Public entry point:
 
     >>> import allesfitter
-    >>> res = allesfitter.optimize('.', method='cmaes', polish=True)
+    >>> res = allesfitter.optimize('.', method='cmaes', refine=True)
     >>> if res.accepted:
     ...     allesfitter.mcmc_fit('.')   # warm-started
 
@@ -60,7 +60,7 @@ class OptimizeResult:
     nfev: int
     wallclock_s: float
     reject_reason: str = ""
-    polish: bool = False
+    refine: bool = False
     bounds: list = field(default_factory=list)
     resumed_from_pickle: bool = False
 
@@ -262,12 +262,12 @@ def _run_cmaes(x0, bounds, sigma0, maxfevals=None, seed=None, verbose=False,
             resumed)
 
 
-def _polish(theta, bounds, maxiter=30):
-    """L-BFGS-B finite-diff polish within `maxiter` steps. Catches and
-    returns the input theta unchanged if the polish fails."""
+def _refine(theta, bounds, maxiter=30):
+    """L-BFGS-B finite-diff refinement within `maxiter` steps. Catches and
+    returns the input theta unchanged if the refinement fails."""
     try:
         x, nfev, _ = _run_local('L-BFGS-B', theta, bounds, maxiter=maxiter)
-        # only accept the polish if it didn't regress
+        # only accept the refinement if it didn't regress
         if _objective(x) < _objective(theta):
             return x, nfev
     except Exception:
@@ -283,7 +283,7 @@ def _polish(theta, bounds, maxiter=30):
 def optimize(
     datadir: str,
     method: str = 'cmaes',
-    polish: bool = True,
+    refine: bool = True,
     n_restarts: int = 1,
     sigma0: float = None,
     maxfevals: int = None,
@@ -309,7 +309,7 @@ def optimize(
         One of ``'cmaes'`` (default, requires ``pip install cma``),
         ``'dual_annealing'``, ``'differential_evolution'``, ``'L-BFGS-B'``,
         ``'Powell'``, ``'TNC'``, ``'SLSQP'``, ``'trust-constr'``.
-    polish : bool
+    refine : bool
         If True and ``method`` is global, run a short L-BFGS-B from the
         global optimum to refine within the basin.
     n_restarts : int
@@ -353,7 +353,7 @@ def optimize(
     if _extra_kwargs:
         import difflib as _difflib
         _valid_keys = sorted([
-            'datadir', 'method', 'polish', 'n_restarts', 'sigma0', 'maxfevals',
+            'datadir', 'method', 'refine', 'n_restarts', 'sigma0', 'maxfevals',
             'seed', 'save', 'mutate_basement', 'improvement_threshold',
             'consistency_threshold', 'skip_bounds_check', 'workers', 'quiet',
             'resume',
@@ -459,9 +459,9 @@ def optimize(
                     method, _LOCAL_METHODS, _GLOBAL_METHODS))
         any_success = any_success or ok_r
 
-        if polish and method in _GLOBAL_METHODS:
-            x_r, nfev_polish = _polish(x_r, bounds)
-            nfev_r += nfev_polish
+        if refine and method in _GLOBAL_METHODS:
+            x_r, nfev_refine = _refine(x_r, bounds)
+            nfev_r += nfev_refine
 
         # Clip into bounds to guard against tiny numerical overshoot.
         x_r = _clip_to_bounds(x_r, bounds)
@@ -515,7 +515,7 @@ def optimize(
         nfev=int(total_nfev),
         wallclock_s=float(wallclock),
         reject_reason=reject,
-        polish=bool(polish and method in _GLOBAL_METHODS),
+        refine=bool(refine and method in _GLOBAL_METHODS),
         bounds=[list(bb) for bb in bounds],
         resumed_from_pickle=bool(resumed_from_pickle),
     )

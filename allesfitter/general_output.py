@@ -62,9 +62,128 @@ def logprint(*text):
     except OSError:
         pass #For unknown reasons, the combination of open() and os.path.join() does not work on some Windows versions
     sys.stdout = original
-                     
-    
-    
+
+
+
+###############################################################################
+#::: resolve overwrite/append decision for an existing save file
+###############################################################################
+def resolve_overwrite_append(save_path, overwrite=None, append=None):
+    """Decide whether to continue an existing run or start fresh.
+
+    Shared by ``mcmc_fit`` and ``ns_fit`` to handle a pre-existing save file.
+
+    Parameters
+    ----------
+    save_path : str
+        Path to the save file (e.g. ``mcmc_save.h5`` / ``save_ns.pickle.gz``).
+    overwrite : bool or None
+        If ``True``, start a fresh run (overwrite). If ``False``, continue.
+    append : bool or None
+        If ``True``, continue from the existing save (append). If ``False``,
+        start fresh.
+
+    Returns
+    -------
+    continue_old_run : bool
+        ``True``  → append/continue from the existing save file.
+        ``False`` → overwrite/start a fresh run.
+
+    Behaviour
+    ---------
+    * If ``save_path`` does not exist, returns ``False`` (nothing to continue).
+    * If both ``overwrite`` and ``append`` are ``None``, prompts interactively
+      (1 overwrite / 2 append / 3 abort) — the historical default.
+    * Otherwise the decision is taken from the flags without prompting.
+      Contradictory flags (both ``True`` or both ``False``) raise ``ValueError``.
+    """
+    if not os.path.exists(save_path):
+        return False
+
+    #::: non-interactive: at least one flag was given
+    if overwrite is not None or append is not None:
+        if bool(overwrite) and bool(append):
+            raise ValueError("overwrite=True and append=True are mutually "
+                             "exclusive; pass only one.")
+        if overwrite is False and append is False:
+            raise ValueError("overwrite=False and append=False leave no action; "
+                             "pass overwrite=True or append=True.")
+        #::: either flag uniquely determines the action
+        return bool(append) or (overwrite is False)
+
+    #::: interactive default (historical behaviour)
+    choice = str(input(save_path + ' already exists.\n' +
+                       'What do you want to do?\n' +
+                       '1 : overwrite the save file\n' +
+                       '2 : append to the save file\n' +
+                       '3 : abort\n'))
+    if choice == '1':
+        return False
+    elif choice == '2':
+        return True
+    else:
+        raise ValueError('User aborted operation.')
+
+
+###############################################################################
+#::: resolve overwrite decision for existing output files
+###############################################################################
+def resolve_overwrite(save_path, overwrite=None, label='Output'):
+    """Decide whether to overwrite existing output files or abort.
+
+    Shared by ``mcmc_output`` and ``ns_output``. Unlike the fitters there is
+    no 'append' path — output is regenerated wholesale — so this only chooses
+    between overwrite and abort.
+
+    Parameters
+    ----------
+    save_path : str
+        Sentinel output file whose existence triggers the check
+        (e.g. ``mcmc_table.csv`` / ``ns_table.csv``).
+    overwrite : bool or None
+        If ``True``, overwrite without prompting. If ``False``, abort.
+    label : str
+        Human-readable name used in the prompt / warning.
+
+    Returns
+    -------
+    None
+        Returns normally if it is safe to proceed (overwrite).
+
+    Raises
+    ------
+    ValueError
+        If the user (or ``overwrite=False``) aborts.
+
+    Behaviour
+    ---------
+    * If ``save_path`` does not exist, returns immediately.
+    * If ``overwrite`` is given, the decision is taken without prompting.
+    * If ``overwrite`` is ``None``, prompts interactively (1 overwrite /
+      2 abort). A non-interactive stdin (``EOFError``) proceeds with a
+      warning, preserving the historical auto-overwrite behaviour.
+    """
+    if not os.path.exists(save_path):
+        return
+    if overwrite is not None:
+        if overwrite:
+            return
+        raise ValueError('User aborted operation.')
+    try:
+        choice = str(input(label + ' files already exists in ' +
+                           os.path.dirname(save_path) + '.\n' +
+                           'What do you want to do?\n' +
+                           '1 : overwrite the output files\n' +
+                           '2 : abort\n'))
+    except EOFError:
+        warnings.warn(label + " files already existed from a previous run, "
+                      "and were automatically overwritten.")
+        return
+    if choice == '1':
+        return
+    raise ValueError('User aborted operation.')
+
+
 ###############################################################################
 #::: draw samples from the initial guess
 ###############################################################################
@@ -1248,7 +1367,7 @@ def _key_should_be_included(key, companions_to_include):
     if companion_prefix in companions_to_include:
         return True
     if companion_prefix in ['host', 'dil', 'ln', 'baseline', 'error', 'gp',
-                            'R', 'M', 'Teff', 'flare', 'stellar']:
+                            'R', 'M', 'Teff', 'flare', 'bump', 'stellar']:
         return True
     return False
 

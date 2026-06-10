@@ -15,7 +15,9 @@ from allesfitter.validation.config_checks import (
     check_bounds_wellformed,
     check_companions_have_params,
     check_duplicate_param_names,
+    check_eccentricity,
     check_fit_flags,
+    check_params_within_physical_limits,
     check_values_numeric,
     check_values_within_bounds,
     collect_config_errors,
@@ -315,3 +317,90 @@ def test_binning_error_wired_into_aggregator(tmp_path):
     with pytest.raises(ConfigError) as exc:
         validate_params_settings(d)
     assert "binning" in str(exc.value)
+
+
+# ---------------------------------------------------------------------------
+# check_params_within_physical_limits
+# ---------------------------------------------------------------------------
+
+
+def test_rsuma_initial_value_above_one_flagged():
+    rows = [["b_rsuma", "1.5", "0", ""]]
+    errors = check_params_within_physical_limits(rows)
+    assert len(errors) == 1 and "b_rsuma" in errors[0] and "(0, 1]" in errors[0]
+
+
+def test_rsuma_prior_upper_bound_above_one_flagged():
+    rows = [["b_rsuma", "0.1", "1", "uniform 0 5"]]
+    errors = check_params_within_physical_limits(rows)
+    assert any("upper bound 5" in e for e in errors)
+
+
+def test_dilution_negative_initial_flagged():
+    rows = [["dil_tess", "-0.1", "0", ""]]
+    errors = check_params_within_physical_limits(rows)
+    assert len(errors) == 1 and "dil_tess" in errors[0]
+
+
+def test_vsini_negative_prior_lower_bound_flagged():
+    rows = [["host_vsini", "5", "1", "uniform -1 10"]]
+    errors = check_params_within_physical_limits(rows)
+    assert any("lower bound -1" in e for e in errors)
+
+
+def test_physical_limits_ignore_unregistered_and_coupled():
+    rows = [
+        ["b_period", "1e6", "1", "uniform 0 1e7"],  # no registered limit
+        ["b_rsuma", "", "0", "", "", "", "a_rsuma"],  # coupled -> skipped
+    ]
+    assert check_params_within_physical_limits(rows) == []
+
+
+def test_valid_rsuma_passes():
+    rows = [["b_rsuma", "0.1", "1", "uniform 0 0.5"]]
+    assert check_params_within_physical_limits(rows) == []
+
+
+# ---------------------------------------------------------------------------
+# check_eccentricity
+# ---------------------------------------------------------------------------
+
+
+def test_eccentricity_above_one_flagged():
+    rows = [
+        ["b_f_s", "0.8", "1", "uniform -1 1"],
+        ["b_f_c", "0.8", "1", "uniform -1 1"],
+    ]
+    errors = check_eccentricity(rows)
+    assert len(errors) == 1 and "b" in errors[0] and "e=f_s^2+f_c^2" in errors[0]
+
+
+def test_eccentricity_below_one_passes():
+    rows = [
+        ["b_f_s", "0.1", "1", "uniform -1 1"],
+        ["b_f_c", "0.1", "1", "uniform -1 1"],
+    ]
+    assert check_eccentricity(rows) == []
+
+
+def test_eccentricity_per_companion():
+    rows = [
+        ["b_f_s", "0.0", "0", ""],
+        ["b_f_c", "0.0", "0", ""],
+        ["c_f_s", "0.9", "1", "uniform -1 1"],
+        ["c_f_c", "0.9", "1", "uniform -1 1"],
+    ]
+    errors = check_eccentricity(rows)
+    assert len(errors) == 1 and "c" in errors[0]
+
+
+def test_physical_checks_wired_into_aggregator(tmp_path):
+    d = _write_datadir(
+        tmp_path,
+        "#name,value,fit,bounds,label,unit,coupled\n"
+        "b_rsuma,1.5,1,uniform 0 5,rsuma,,\n",
+        settings="companions_phot,b",
+    )
+    with pytest.raises(ConfigError) as exc:
+        validate_params_settings(d)
+    assert "b_rsuma" in str(exc.value)

@@ -20,12 +20,14 @@ from __future__ import annotations
 
 from .config_checks import (
     ConfigError,
+    check_binning_value,
     check_bounds_wellformed,
     check_companions_have_params,
-    check_binning_value,
     check_duplicate_param_names,
+    check_eccentricity,
     check_fit_flags,
     check_gp_baseline_vs_stellar_var,
+    check_params_within_physical_limits,
     check_values_numeric,
     check_values_within_bounds,
     collect_config_errors,
@@ -39,9 +41,18 @@ from .parsing import (
     read_param_rows,
     read_settings,
 )
+from .physical_limits import (
+    Limit,
+    check_value,
+    eccentricity_error,
+    lookup_limit,
+)
 from .prior_checks import (
     check_binning,
+    check_radius_ratio,
     check_secondary_eclipse_sbratio,
+    check_spin_orbit_angle,
+    check_transit_geometry,
     transit_duration_days,
     transit_duration_hours_by_companion,
     validate_gp_priors,
@@ -60,7 +71,14 @@ __all__ = [
     "check_companions_have_params",
     "check_gp_baseline_vs_stellar_var",
     "check_binning_value",
+    "check_params_within_physical_limits",
+    "check_eccentricity",
     "companions_from_settings",
+    # physical-limit registry
+    "Limit",
+    "lookup_limit",
+    "check_value",
+    "eccentricity_error",
     # shared parsing helpers
     "parse_bounds",
     "parse_uniform_bounds",
@@ -71,6 +89,9 @@ __all__ = [
     "validate_gp_priors",
     "check_secondary_eclipse_sbratio",
     "check_binning",
+    "check_radius_ratio",
+    "check_spin_orbit_angle",
+    "check_transit_geometry",
     "transit_duration_days",
     "transit_duration_hours_by_companion",
 ]

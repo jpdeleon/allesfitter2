@@ -478,10 +478,10 @@ def _chromatic_settings_csv(insts, bandpasses) -> str:
         settings += [
             f"host_ld_law_{i},quad",
             f"error_flux_{i},sample",
-            f"dil_{i},0",
-            f"ln_err_flux_{i},-6",
         ]
-    # Add a real per-inst row for ln_err so params.csv expects it
+    # Note: dil_<inst> and ln_err_flux_<inst> are *parameters* (params.csv),
+    # not settings — dil_<inst> defaults to 0 and ln_err rows are added to
+    # params.csv in _make_chromatic_datadir.
     return "\n".join(settings) + "\n"
 
 

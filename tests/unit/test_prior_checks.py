@@ -513,3 +513,90 @@ def test_per_instrument_override_disables_global_warning(tmp_path):
     # Global binning is risky (smears), but the only instrument overrides it off.
     d = _binning_datadir(tmp_path, "binning,0.1\nbinning_tess,\nt_exp_tess,0.1")
     assert check_binning(d) == []
+
+
+# ---------------------------------------------------------------------------
+# Physically-debatable model-parameter warnings (warn-only)
+# ---------------------------------------------------------------------------
+
+
+def test_radius_ratio_above_one_warns(tmp_path):
+    from allesfitter.validation import check_radius_ratio
+
+    d = _make_datadir(
+        tmp_path,
+        params="""#name,value,fit,bounds,label,unit,coupled
+b_rr,1.5,1,uniform 0 2,rr,,
+""",
+        settings="companions_phot,b\ninst_phot,tess",
+        lc_csvs={},
+    )
+    msgs = check_radius_ratio(d)
+    assert any("initial value 1.5" in m for m in msgs)
+    assert any("upper bound 2" in m for m in msgs)
+
+
+def test_radius_ratio_normal_planet_no_warning(tmp_path):
+    from allesfitter.validation import check_radius_ratio
+
+    d = _make_datadir(
+        tmp_path,
+        params="""#name,value,fit,bounds,label,unit,coupled
+b_rr,0.1,1,uniform 0 0.3,rr,,
+""",
+        settings="companions_phot,b",
+        lc_csvs={},
+    )
+    assert check_radius_ratio(d) == []
+
+
+def test_spin_orbit_angle_out_of_range_warns(tmp_path):
+    from allesfitter.validation import check_spin_orbit_angle
+
+    d = _make_datadir(
+        tmp_path,
+        params="""#name,value,fit,bounds,label,unit,coupled
+host_lambda_tess,200,1,uniform -360 360,lambda,,
+""",
+        settings="companions_phot,b",
+        lc_csvs={},
+    )
+    msgs = check_spin_orbit_angle(d)
+    assert len(msgs) == 1 and "200" in msgs[0]
+
+
+def test_non_transiting_geometry_warns(tmp_path):
+    from allesfitter.validation import check_transit_geometry
+
+    # cosi=0.5, rsuma=0.1, k=0.1 -> b = 0.5*1.1/0.1 = 5.5 >> 1+k=1.1
+    d = _make_datadir(
+        tmp_path,
+        params="""#name,value,fit,bounds,label,unit,coupled
+b_period,3,1,uniform 2 4,period,,
+b_rsuma,0.1,1,uniform 0 1,rsuma,,
+b_cosi,0.5,1,uniform 0 1,cosi,,
+b_rr,0.1,1,uniform 0 0.3,rr,,
+""",
+        settings="companions_phot,b",
+        lc_csvs={},
+    )
+    msgs = check_transit_geometry(d)
+    assert len(msgs) == 1 and "does not transit" in msgs[0]
+
+
+def test_transiting_geometry_no_warning(tmp_path):
+    from allesfitter.validation import check_transit_geometry
+
+    # cosi=0.0 -> b=0, clearly transiting
+    d = _make_datadir(
+        tmp_path,
+        params="""#name,value,fit,bounds,label,unit,coupled
+b_period,3,1,uniform 2 4,period,,
+b_rsuma,0.1,1,uniform 0 1,rsuma,,
+b_cosi,0.0,1,uniform 0 1,cosi,,
+b_rr,0.1,1,uniform 0 0.3,rr,,
+""",
+        settings="companions_phot,b",
+        lc_csvs={},
+    )
+    assert check_transit_geometry(d) == []

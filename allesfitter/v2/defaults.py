@@ -272,7 +272,17 @@ def fill_settings(settings=None):
         
     if 'N_flares' not in settings:
         settings['N_flares'] = 0.
-        
+
+    #::: bump count is keyed by bandpass (fallback: instrument)
+    _bump_bandpass = settings.get('bandpass') or {}
+    for inst in settings.get('inst_phot', []):
+        suffix = _bump_bandpass.get(inst) or inst
+        if 'N_bumps_'+suffix not in settings:
+            settings['N_bumps_'+suffix] = 0.
+
+    if 'bumps_persistent' not in settings:
+        settings['bumps_persistent'] = False
+
     if 'N_spots' not in settings:
         settings['N_spots'] = 0.
         

@@ -45,7 +45,7 @@ except ImportError:           # corner is a transitive dynesty dep, but guard an
 from . import config
 from . import deriver
 from .computer import calculate_model, calculate_baseline, calculate_stellar_var
-from .general_output import afplot, save_table, save_latex_table, logprint, get_params_from_samples, plot_ttv_results
+from .general_output import afplot, save_table, save_latex_table, logprint, get_params_from_samples, plot_ttv_results, resolve_overwrite
 from ._output_shared import save_per_transit_plots, write_priors_latex_table
 from .plot_top_down_view import plot_top_down_view
 from .utils.colormaputil import truncate_colormap
@@ -550,7 +550,7 @@ def plot_linear_baseline_components(posterior_samples=None, prefix='ns'):
 #::: write_priors_latex_table` keeps working unchanged.
 
 
-def ns_output(datadir, backend=None):
+def ns_output(datadir, backend=None, overwrite=None):
     '''
     Inputs:
     -------
@@ -565,6 +565,10 @@ def ns_output(datadir, backend=None):
         ``'dynesty'``. Affects only the trace plot (which uses
         ``dynesty.plotting.traceplot`` when available); the corner plot
         and downstream analysis are backend-agnostic.
+    overwrite : bool or None, optional
+        If ``True``, overwrite existing Nested Sampling output files without
+        prompting; if ``False``, abort. If ``None`` (default) and output files
+        already exist, the user is prompted interactively (overwrite / abort).
 
     Outputs:
     --------
@@ -572,24 +576,12 @@ def ns_output(datadir, backend=None):
     into datadir/results/ (or datadir/QL/ if QL==True)
     '''
     config.init(datadir)
-    
-    
+
+
     #::: security check
-    if os.path.exists(os.path.join(config.BASEMENT.outdir,'ns_table.csv')):
-        try:
-            overwrite = str(input('Nested Sampling output files already exists in '+config.BASEMENT.outdir+'\n'+\
-                                  '-----------------------------------------------'+''.join(['-']*len(config.BASEMENT.outdir))+'\n'\
-                                  'What do you want to do?\n'+\
-                                  '1 : overwrite the output files\n'+\
-                                  '2 : abort\n'))
-            if (overwrite == '1'):
-                print('\n')
-                pass
-            else:
-                raise ValueError('User aborted operation.')
-        except EOFError:
-            warnings.warn("Nested Sampling output files already existed from a previous run, and were automatically overwritten.")
-            pass
+    resolve_overwrite(
+        os.path.join(config.BASEMENT.outdir, 'ns_table.csv'),
+        overwrite=overwrite, label='Nested Sampling output')
     
     
     #::: load the save_ns.pickle

@@ -37,6 +37,7 @@ from .exoworlds_rdx.lightcurves.index_transits import index_transits, index_ecli
 from .priors.simulate_PDF import simulate_PDF
 from .utils.mcmc_move_translator import translate_str_to_move
 from .validation import validate_params_settings
+from .validation.physical_limits import eccentricity_error, lookup_limit
 
 #::: plotting settings
 import seaborn as sns
@@ -681,7 +682,7 @@ class Basement:
             'un_min_ess', 'un_max_iters',
             'bandpass', 'chromatic',
             'fit_ttvs', 'exact_grav', 'use_host_density_prior', 'use_tidal_eccentricity_prior',
-            'N_flares', 'N_spots',
+            'N_flares', 'N_spots', 'bumps_persistent',
             't_exp_tess', 't_exp_kepler', 't_exp_n_int_tess', 't_exp_n_int_kepler',
             'print_progress', 'quiet',
             'flux_min_raw', 'flux_max_raw',
@@ -701,6 +702,7 @@ class Basement:
             'baseline_flux_', 'baseline_rv_', 'baseline_rv2_',
             'error_flux_', 'error_rv_', 'error_rv2_',
             'binning_',
+            'N_bumps_',
             't_exp_', 'stellar_var_flux', 'stellar_var_rv',
         ]
 
@@ -1587,7 +1589,33 @@ class Basement:
             self.settings['N_flares'] = int(self.settings['N_flares'])
         else:
             self.settings['N_flares'] = 0
-        
+
+
+
+
+        #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+        #::: Number of bumps (starspot-crossing events), keyed by bandpass
+        #::: (falls back to per-instrument when no bandpass row is given). The
+        #::: crossing depth is wavelength-dependent, exactly like limb darkening,
+        #::: so two instruments sharing a bandpass share one N_bumps_<bp> count.
+        #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+        #::: iterate over unique suffixes so a shared bandpass is parsed once
+        #::: (otherwise the second visit would len() an already-int value)
+        _bump_bandpass = self.settings.get('bandpass') or {}
+        _bump_suffixes = {(_bump_bandpass.get(inst) or inst) for inst in self.settings['inst_phot']}
+        for _suffix in _bump_suffixes:
+            _key = 'N_bumps_'+_suffix
+            if _key in self.settings and len(self.settings[_key]):
+                self.settings[_key] = int(self.settings[_key])
+            else:
+                self.settings[_key] = 0
+
+        #::: bumps_persistent: repeat each bump at tpeak + n*period (every transit)
+        if ('bumps_persistent' in self.settings.keys()) and len(self.settings['bumps_persistent']):
+            self.settings['bumps_persistent'] = set_bool(self.settings['bumps_persistent'])
+        else:
+            self.settings['bumps_persistent'] = False
+
         
         
         
@@ -1865,7 +1893,19 @@ class Basement:
                 valid_patterns.add('flare_'+str(i)+'_duration')
                 valid_patterns.add('flare_'+str(i)+'_amplitude')
                 valid_patterns.add('flare_'+str(i)+'_beta')
-            
+
+            for i in range(1, 10):
+                valid_patterns.add('bump_tpeak_'+str(i))
+                valid_patterns.add('bump_width_'+str(i))
+
+            #::: bump amplitude is wavelength-dependent: keyed by bandpass when a
+            #::: bandpass row is present, else falls back to the instrument name
+            _bump_bandpass = self.settings.get('bandpass') or {}
+            for inst in inst_phot:
+                _suffix = _bump_bandpass.get(inst) or inst
+                for i in range(1, 10):
+                    valid_patterns.add('bump_ampl_'+_suffix+'_'+str(i))
+
             return valid_patterns
         
         def is_valid_key(key, valid_patterns):
@@ -2005,9 +2045,19 @@ class Basement:
         #==========================================================================
         #::: function to automatically set default params if they were not given
         #==========================================================================
+        #::: When a key has a registered *physical* limit (see
+        #::: allesfitter.validation.physical_limits) the registry is the single
+        #::: source of truth for its (min, max) — so e.g. rsuma <= 1, dilution
+        #::: in [0, 1) and vsini >= 0 are enforced here without duplicating the
+        #::: numbers. Keys with no registered limit fall back to the explicit
+        #::: default_min / default_max passed by the caller.
         def validate(key, default, default_min, default_max):
             if (key in self.params) and (self.params[key] is not None):
-                if (self.params[key] < default_min) or (self.params[key] > default_max):
+                limit = lookup_limit(key)
+                if limit is not None and isinstance(self.params[key], (int, float)):
+                    if not limit.contains(self.params[key]):
+                        raise ValueError("User input for "+key+" is "+str(self.params[key])+" but must lie within "+limit.describe()+".")
+                elif (self.params[key] < default_min) or (self.params[key] > default_max):
                     raise ValueError("User input for "+key+" is "+str(self.params[key])+" but must lie within ["+str(default_min)+","+str(default_max)+"].")
             if (key not in self.params):
                 self.params[key] = default
@@ -2079,6 +2129,14 @@ class Basement:
                 validate(companion+'_K', 0., 0., np.inf)
                 validate(companion+'_f_s', 0., -1, 1)
                 validate(companion+'_f_c', 0., -1, 1)
+                #::: joint eccentricity constraint e = f_s^2 + f_c^2 < 1
+                #::: (each is bounded [-1,1] alone, which would admit e up to 2)
+                f_s_val = self.params.get(companion+'_f_s')
+                f_c_val = self.params.get(companion+'_f_c')
+                if isinstance(f_s_val, (int, float)) and isinstance(f_c_val, (int, float)):
+                    ecc_err = eccentricity_error(companion, f_s_val, f_c_val)
+                    if ecc_err is not None:
+                        raise ValueError("User input invalid: "+ecc_err)
                 validate('dil_'+inst, 0., -np.inf, np.inf)
                 
                 #::: limb darkenings, u-space (per-bandpass in chromatic, per-inst in achromatic)
