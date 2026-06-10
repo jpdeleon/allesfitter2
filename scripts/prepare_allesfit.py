@@ -557,6 +557,38 @@ quartiles_2sig = [2.275, 50.0, 97.725]  # 2-sigma
 quartiles_3sig = [0.135, 50.0, 99.865]  # 3-sigma
 
 
+def _percentile_3sig_safe(samples, fallback, label, planet, logger):
+    """3-sigma percentiles of ``samples``, resilient to an empty/all-NaN input.
+
+    Some targets yield no usable ``(R*+Rp)/a`` samples — e.g. when the stellar
+    mass/radius (hence rho_star) or the period is NaN, ``as_from_rhop`` returns
+    NaNs and the ``0 < rsuma < 1`` validity mask removes every sample. Rather
+    than crashing inside ``np.percentile`` ("cannot do a non-empty take from an
+    empty axes"), warn and fall back to ``fallback`` so prepare_allesfit can
+    still emit a (clearly-flagged, reviewable) prior.
+
+    Parameters
+    ----------
+    samples : array-like
+        Already validity-masked samples (may be empty / all non-finite).
+    fallback : tuple(float, float, float)
+        ``(lo, mid, hi)`` returned when no finite samples remain.
+    label, planet : str
+        Used only in the warning message.
+    """
+    s = np.asarray(samples, dtype=float)
+    s = s[np.isfinite(s)]
+    if s.size == 0:
+        logger.warning(
+            "Planet %s: could not derive %s (no finite samples; check stellar "
+            "mass/radius/period). Falling back to a wide default prior "
+            "(%g, %g, %g) — review %s_rsuma in params.csv before fitting."
+            % (planet, label, fallback[0], fallback[1], fallback[2], planet)
+        )
+        return fallback
+    return tuple(np.percentile(s, q=quartiles_3sig))
+
+
 def _default_prior_bounds(rprs_max, rsuma_min, rsuma_max):
     """Compute the physics-informed default prior upper/lower bounds.
 
@@ -1543,10 +1575,18 @@ def main():
             # FIXME: a_over_Rs_samples produces some NaNs e.g. for Kepler-51
             rsuma_samples = 1/a_over_Rs_samples * (1+rprs_samples)
             idx = (rsuma_samples > 0) & (rsuma_samples < 1)
-            rsuma_min, rsuma, rsuma_max = np.percentile(rsuma_samples[idx], q=quartiles_3sig)
+            rsuma_min, rsuma, rsuma_max = _percentile_3sig_safe(
+                rsuma_samples[idx], fallback=(1e-3, 0.1, 0.25),
+                label="(R*+Rp)/a from rho_star", planet=pl, logger=logger)
             if True:
                 # uniformly distributed from inc_min to 90 deg
-                cosi = np.random.uniform(0, 1/min(a_over_Rs_samples), size=Nsamples)
+                # nanmin (not min) so NaNs in a_over_Rs don't poison cosi; fall
+                # back to an uninformative cos i in [0, 1] when a/Rs is unusable.
+                _a_over_Rs_min = np.nanmin(a_over_Rs_samples)
+                if np.isfinite(_a_over_Rs_min) and _a_over_Rs_min > 0:
+                    cosi = np.random.uniform(0, 1/_a_over_Rs_min, size=Nsamples)
+                else:
+                    cosi = np.random.uniform(0, 1, size=Nsamples)
                 inc_samples = np.arccos(cosi)
             else:
                 # normally distributed
@@ -1570,7 +1610,10 @@ def main():
                     tdur_samples = np.random.normal(tdur, tdurerr, size=Nsamples) / 24
                     rsuma_samples = get_rsuma(tdur_samples, Porb, inc_samples, rprs_samples, b_samples)
                     idx = (rsuma_samples > 0) & (rsuma_samples < 1)
-                    tdur_orbit = get_tdur(Porb, np.median(rsuma_samples[idx]), inc, rprs, b) * 24
+                    _valid = rsuma_samples[idx]
+                    _valid = _valid[np.isfinite(_valid)]
+                    _rsuma_med = np.median(_valid) if _valid.size else np.nan
+                    tdur_orbit = get_tdur(Porb, _rsuma_med, inc, rprs, b) * 24
                     logger.info(
                         f"tdur={tdur:.1f}h ({source}) {tdur_orbit:.1f}h (derived from orbit)"
                     )
@@ -1581,9 +1624,11 @@ def main():
                         == 1
                     ):
                         logger.info("Using Rstar/a derived from orbit.")
-                        rsuma_min, rsuma, rsuma_max = np.percentile(
-                            rsuma_samples[idx], q=quartiles_3sig
-                        )
+                        rsuma_min, rsuma, rsuma_max = _percentile_3sig_safe(
+                            rsuma_samples[idx],
+                            fallback=(rsuma_min, rsuma, rsuma_max),
+                            label="(R*+Rp)/a from transit duration",
+                            planet=pl, logger=logger)
                     else:
                         logger.info("Using Rstar/a derived from rhostar.")
                 except Exception as e:
@@ -1676,12 +1721,6 @@ def main():
             text += f"#baseline_gp_offset_flux_{inst},0,1,uniform -0.1 0.1,$\mathrm{{offset ({inst})}}$,,\n"
             text += f"baseline_gp_matern32_lnsigma_flux_{inst},-5,1,uniform -10 -3,$\mathrm{{gp ln \sigma ({inst})}}$,,\n"
             text += f"baseline_gp_matern32_lnrho_flux_{inst},0,1,uniform -1 5,$\mathrm{{gp ln \\rho ({inst})}}$,,\n"
-
-        text += "#stellar variability,,,,,,\n"
-        text += "#stellar_var_gp_sho_lnS0_flux,-9.698,0,uniform -12 -5,gp: $\ln S_\mathrm{0}$,rel. flux,\n"
-        text += "#stellar_var_gp_sho_lnQ_flux,0.73,0,uniform -0.35 5,gp: $\ln Q_\mathrm{0}$,rel. flux,\n"
-        text += "#stellar_var_gp_sho_lnomega0_flux,1.220,0,uniform -2 2,gp: $\ln \omega_\mathrm{0}$,rel. flux,\n"
-        text += f"#host_rotfac_{inst},1.0,0,uniform 0 10,$P_{{orbit}} / P_{{rot}}$ (1=synchronous),\n"
         # TTV rows: when --ttv is NOT set, keep the commented-out stub for
         # reference. When --ttv IS set, the real per-transit rows are
         # appended after the lightcurve download (below) because we need
@@ -1729,7 +1768,7 @@ fig = allesfitter.show_initial_guess(dir_path)
 #allesfitter.prepare_ttv_fit(dir_path, style='tessplot')
 
 ### ===global optimization (methods: cmaes, differential_evolution, dual_annealing)===
-#allesfitter.optimize(dir_path, method='differential_evolution', refine=True)
+#allesfitter.optimize(method='differential_evolution', refine=True)
 
 ### ===mcmc sampling===
 #with allesfitter.log_run('mcmc_fit', dir_path):
@@ -2046,23 +2085,17 @@ companions_rv,
 inst_phot,{' '.join(fns)}
 inst_rv,
 time_format,BJD_TDB
+{_bandpass_row}
+#flux_min_raw,0.9
+#flux_max_raw,1.1
 ###############################################################################,
 # Fit performance settings,
 ###############################################################################,
 multiprocess,True
 multiprocess_cores,40
-#binning,0.0208333
-mask_transit,False
 fast_fit,True
-fast_fit_width,0.333
+fast_fit_width,0.3333333333333333
 #fast_fit_width,0.5
-#flux_min_raw,0.9
-#flux_max_raw,1.1
-###############################################################################,
-# Model settings,
-###############################################################################,
-{_bandpass_row}
-chromatic,False
 secondary_eclipse,False
 phase_curve,False
 shift_epoch,True\n"""
@@ -2106,10 +2139,8 @@ ns_tol,100
         text2 += "### crucial only for long (>600s) exposure times,\n"
         for inst in fns:
             text2 += f"t_exp_{inst},{t_exp_val:.6f}\n"
+            text2 += f"#t_exp_{inst},0.020833\n"
             text2 += f"#t_exp_n_int_{inst},10\n"
-            text2 += f"#t_exp_qlp1800,0.020833\n"
-            text2 += f"#t_exp_qlp600,0.00694444\n"
-            text2 += f"#t_exp_spoc120,0.00138889\n"
         text2 += """###############################################################################,
 # Baseline settings per instrument: sample / hybrid,
 # if 'sample_offset' one corresponding parameter called 'baseline_offset_key_inst' has to be given in params.csv,
@@ -2122,8 +2153,6 @@ ns_tol,100
             text2 += f"#baseline_flux_{inst},hybrid_spline\n"
             text2 += f"#baseline_flux_{inst},hybrid_poly_2\n"
             text2 += f"baseline_flux_{inst},sample_GP_Matern32\n"
-            text2 += f"#baseline_flux_m2g,hybrid_linear_multi\n"
-            text2 += f"#baseline_flux_m2g,Airmass DX(pix) DY(pix) FWHM(pix) Peak(ADU) bias\n"
         text2 += """###############################################################################,
 # Error settings (overall scaling) per instrument: sample / hybrid,
 # if 'sample' one corresponding parameter called 'ln_err_key_inst' (photometry) or 'ln_jitter_key_inst' (RV) has to be given in params.csv,
