@@ -40,6 +40,10 @@ Astropy units are nice and fancy, but can cause a 17x slow-down for parts of thi
 Use constants' values instead of units.
 """
 
+#::: Precomputed CGS gravitational constant, so density helpers on the
+#::: likelihood hot path avoid per-call astropy unit arithmetic (see Readme).
+_G_CGS = G.cgs.value
+
 
 
 
@@ -392,18 +396,15 @@ def calc_rho_host(P, radius_1, rr, rho_comp,
     -------
     None.
     """
-    #apply units
-    P *= u.d #in days
-    rho_comp = rho_comp * u.g / (u.cm)**3 #in cgs
-    
-    #calculate
-    rho_host = ( (3*np.pi) / (G*P**2) * (1./radius_1)**3 - rr**3 * rho_comp ).decompose()
-    
-    #return
-    if return_unit == 'cgs':
-        return rho_host.cgs.value
-    else:
+    #::: Pure-float CGS computation (no astropy units). The previous
+    #::: astropy-Quantity version performed ~200 unit ops per call and
+    #::: dominated the rhostar-prior likelihood; per the module Readme,
+    #::: units cause a ~17x slow-down. Inputs: P [days], radius_1 = R_host/a,
+    #::: rr = R_comp/R_host, rho_comp [cgs g/cm^3]; result is in cgs.
+    if return_unit != 'cgs':
         return None #TODO
+    P_s = P * 86400. #days -> s
+    return (3.*np.pi) / (_G_CGS * P_s**2) * (1./radius_1)**3 - rr**3 * rho_comp
 
 
 
