@@ -492,7 +492,7 @@ def derive(samples, mode):
         rr_key = get_rr_key_for_derive(companion)
         bp_suffix, _ = _bandpass_suffix(rr_key)
         r_companion_earth_key = f'{companion}_R_companion_(R_earth{bp_suffix})'
-        derived_samples[companion+'_density'] = ( (derived_samples[companion+'_M_companion_(M_earth)'] * M_earth) / (4./3. * np.pi * (derived_samples[r_companion_earth_key] * R_earth)**3 ) ).cgs.value #in cgs
+        derived_samples[companion+'_density'] = (derived_samples[companion+'_M_companion_(M_earth)'] * M_earth.cgs.value) / (4./3. * np.pi * (derived_samples[r_companion_earth_key] * R_earth.cgs.value)**3 ) #in cgs (floats; no astropy Quantity arithmetic over the sample array)
         
         
         #----------------------------------------------------------------------
