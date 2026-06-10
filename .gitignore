@@ -16,3 +16,9 @@ test-opencode.json
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+
+# virtual environment
+.venv/
+
+# example datasets and fit-result outputs (large; not tracked)
+examples/
