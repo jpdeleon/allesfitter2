@@ -836,8 +836,8 @@ def plot_1(ax, samples, inst, companion, style,
                                 if style in ['full_minus_offset']:
                                     baseline -= np.median(baseline)
                                 stellar_var = calculate_stellar_var(p, 'all', key, xx=xx) #evaluated on xx (!)
-                                ax.plot( xx, baseline+stellar_var+baseline_plus, marker=None, ls='-', color='orange', alpha=alpha, zorder=12 )
-                                ax.plot( xx, model+baseline+stellar_var, 'r-', alpha=alpha, zorder=12 )
+                                ax.plot( xx, baseline+stellar_var+baseline_plus, marker=None, ls='-', color='orange', alpha=alpha, zorder=12, rasterized=True )
+                                ax.plot( xx, model+baseline+stellar_var, 'r-', alpha=alpha, zorder=12, rasterized=True )
                 else:
                     ax.text(0.05, 0.95, f'(The model is not plotted here because the\nphotometric data spans more than {plot_time_limit} days)', fontsize=10, va='top', ha='left', transform=ax.transAxes)  
             elif key in ['rv', 'rv2']:
@@ -850,8 +850,8 @@ def plot_1(ax, samples, inst, companion, style,
                     if style in ['full_minus_offset']:
                         baseline -= np.median(baseline)
                     stellar_var = calculate_stellar_var(p, 'all', key, xx=xx) #evaluated on xx (!)
-                    ax.plot( xx, baseline+stellar_var+baseline_plus, marker=None, ls='-', color='orange', alpha=alpha, zorder=12 )
-                    ax.plot( xx, model+baseline+stellar_var, 'r-', alpha=alpha, zorder=12 )
+                    ax.plot( xx, baseline+stellar_var+baseline_plus, marker=None, ls='-', color='orange', alpha=alpha, zorder=12, rasterized=True )
+                    ax.plot( xx, model+baseline+stellar_var, 'r-', alpha=alpha, zorder=12, rasterized=True )
         
         #::: other stuff
         if timelabel=='Time_since':
@@ -929,7 +929,7 @@ def plot_1(ax, samples, inst, companion, style,
                     p = update_params(s)
 #                    p = update_params(s, phased=True)
                     model = rv_fct(p, inst, companion, xx=xx2)[i_return]
-                    ax.plot( xx*zoomfactor, model, 'r-', alpha=alpha, zorder=12 )
+                    ax.plot( xx*zoomfactor, model, 'r-', alpha=alpha, zorder=12, rasterized=True )
             
         
         #----------------------------------------------------------------------
@@ -1008,7 +1008,7 @@ def plot_1(ax, samples, inst, companion, style,
                         p = update_params(s)
     #                    p = update_params(s, phased=True)
                         model = flux_fct(p, inst, companion, xx=xx2) #evaluated on xx (!)
-                        ax.plot( xx*zoomfactor, model, 'r-', alpha=alpha, zorder=12 )
+                        ax.plot( xx*zoomfactor, model, 'r-', alpha=alpha, zorder=12, rasterized=True )
              
         
         #----------------------------------------------------------------------
@@ -1302,8 +1302,8 @@ def afplot_per_transit(samples, inst, companion, base=None, kwargs_dict=None):
                 model = calculate_model(p, inst, key, xx=xx) #evaluated on xx (!)
                 baseline = calculate_baseline(p, inst, key, xx=xx) #evaluated on xx (!)
                 stellar_var = calculate_stellar_var(p, 'all', key, xx=xx) #evaluated on xx (!)
-                ax.plot( xx, baseline+stellar_var+baseline_plus, marker=None, ls='-', color='orange', alpha=alpha, zorder=12 )
-                ax.plot( xx, model+baseline+stellar_var, 'r-', alpha=alpha, zorder=12 )
+                ax.plot( xx, baseline+stellar_var+baseline_plus, marker=None, ls='-', color='orange', alpha=alpha, zorder=12, rasterized=True )
+                ax.plot( xx, model+baseline+stellar_var, 'r-', alpha=alpha, zorder=12, rasterized=True )
             ax.set(xlim=[t-zoomwindow/2., t+zoomwindow/2.])
             ax.axvline(t,color='grey',lw=2,ls='--',label='linear prediction')
             if base.settings['fit_ttvs']==True:

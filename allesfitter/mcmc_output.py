@@ -386,7 +386,7 @@ def mcmc_output(datadir, quiet=False, overwrite=None):
 
 
     #::: plot the fit
-    posterior_samples = draw_mcmc_posterior_samples(reader, Nsamples=20) #only 20 samples for plotting
+    posterior_samples = draw_mcmc_posterior_samples(reader, Nsamples=10) #only a few samples for plotting (fit-plot speed; was 20)
     
     for companion in config.BASEMENT.settings['companions_all']:
         try:

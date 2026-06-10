@@ -600,7 +600,7 @@ def ns_output(datadir, backend=None, overwrite=None):
            
     
     #::: plot the fit
-    posterior_samples_for_plot = draw_ns_posterior_samples(results, Nsamples=20) #only 20 samples for plotting
+    posterior_samples_for_plot = draw_ns_posterior_samples(results, Nsamples=10) #only a few samples for plotting (fit-plot speed; was 20)
     
     for companion in config.BASEMENT.settings['companions_all']:
         fig, axes = afplot(posterior_samples_for_plot, companion)
