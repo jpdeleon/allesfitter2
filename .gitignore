@@ -22,3 +22,30 @@ test-opencode.json
 
 # example datasets and fit-result outputs (large; not tracked)
 examples/
+
+# ============================================================
+# Large generated fit artifacts (purged from history 2026-06-10)
+# ============================================================
+# Binary sampler / MCMC save-states
+*.h5
+*.pickle
+*.pickle.gz
+*.gz
+
+# Astronomy data blobs
+*.fits
+
+# Result figures (corner plots, chains, diagnostics)
+*.pdf
+*.jpg
+*.jpeg
+*.png
+# ...but keep packaged logos / reference assets and docs imagery
+!allesfitter/_static/**
+!docs/**
+
+# Fit input/intermediate data CSVs in result & prior dirs
+# (params*.csv and settings.csv stay tracked — they are config, not data)
+**/results/**/*.csv
+**/results_*/**/*.csv
+**/priors/**/*.csv
