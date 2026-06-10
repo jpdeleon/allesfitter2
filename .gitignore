@@ -6,7 +6,7 @@ __pycache__/
 dist/
 build/
 allesfitter/utils/data/nexsci*.csv
-utils/data/TOIs.csv
+allesfitter/utils/data/TOIs.csv
 
 # run / build / tool artifacts
 outcmaes/
