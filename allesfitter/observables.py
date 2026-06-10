@@ -44,6 +44,21 @@ Use constants' values instead of units.
 #::: likelihood hot path avoid per-call astropy unit arithmetic (see Readme).
 _G_CGS = G.cgs.value
 
+#::: Precomputed CGS values of common units (e.g. u.Rsun -> R_sun in cm,
+#::: u.Msun -> M_sun in g), so calc_rho avoids per-call astropy unit work.
+_CGS_FACTOR = {}
+for _name in ('Rsun', 'Msun', 'Rjup', 'Mjup', 'Rearth', 'Mearth',
+              'R_sun', 'M_sun', 'R_jup', 'M_jup', 'R_earth', 'M_earth'):
+    _unit = getattr(u, _name, None)
+    if _unit is not None:
+        _CGS_FACTOR[_unit] = (1. * _unit).cgs.value
+
+
+def _unit_cgs(unit):
+    """CGS scalar value of ``unit`` (precomputed for common units)."""
+    factor = _CGS_FACTOR.get(unit)
+    return factor if factor is not None else (1. * unit).cgs.value
+
 
 
 
@@ -355,19 +370,13 @@ def calc_rho(R, M,
     -------
     None.
     """
-    #apply units
-    R *= R_unit
-    M *= M_unit
-    
-    #calculate
-    V = 4./3. * np.pi * R**3
-    rho = M / V
-    
-    #return
-    if return_unit == 'cgs':
-        return rho.cgs.value
-    else:
+    #::: Pure-float CGS computation (no per-call astropy unit arithmetic);
+    #::: see the module Readme note on the ~17x unit slow-down.
+    if return_unit != 'cgs':
         return None #TODO
+    R_cm = R * _unit_cgs(R_unit)
+    M_g = M * _unit_cgs(M_unit)
+    return M_g / (4./3. * np.pi * R_cm**3)
     
     
     
