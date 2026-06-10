@@ -5,7 +5,7 @@ __pycache__/
 *.egg-info
 dist/
 build/
-utils/data/nexsci*.csv
+allesfitter/utils/data/nexsci*.csv
 utils/data/TOIs.csv
 
 # run / build / tool artifacts
