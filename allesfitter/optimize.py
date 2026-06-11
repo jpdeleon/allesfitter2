@@ -22,6 +22,7 @@ from __future__ import print_function, division, absolute_import
 import json
 import os
 import pickle
+import sys
 import warnings
 from dataclasses import dataclass, field, asdict
 from time import time as _now
@@ -35,6 +36,37 @@ _CMA_STATE_FILENAME = 'optimize_cma_state.pkl'
 
 from . import config
 from .mcmc import mcmc_lnprob
+
+
+###############################################################################
+#::: print function that prints into console and logfile at the same time
+###############################################################################
+def logprint(*text: Any, quiet: bool = False) -> None:
+    """Print to console and append to the run's timestamped logfile.
+
+    Mirrors ``general_output.logprint`` so that ``optimize()`` output is
+    recorded in the same ``logfile_<now>.log`` as the sampler runs. The
+    console echo is suppressed when ``quiet=True``; the logfile is written
+    regardless (best-effort — silently skipped if BASEMENT or the output
+    directory is unavailable).
+    """
+    if not quiet:
+        print(*text)
+    b = getattr(config, 'BASEMENT', None)
+    if b is None:
+        return
+    original = sys.stdout
+    try:
+        logpath = os.path.join(b.outdir, 'logfile_' + b.now + '.log')
+        with open(logpath, 'a') as f:
+            sys.stdout = f
+            print(*text)
+    except OSError:
+        # Some Windows versions choke on the open()/os.path.join() combo;
+        # also covers a missing/unwritable outdir.
+        pass
+    finally:
+        sys.stdout = original
 
 
 # Methods that scipy.optimize.minimize accepts a `bounds` keyword for.
@@ -525,12 +557,12 @@ def optimize(
         with open(os.path.join(outdir, 'optimize_save.json'), 'w') as f:
             json.dump(asdict(result), f, indent=2)
 
-    if not quiet:
-        status = "accepted" if accepted else "rejected ({})".format(reject)
-        print(
-            "optimize[{}]  lnprob: {:.2f} -> {:.2f}  (Δ={:+.2f})  "
-            "nfev={}  {:.1f}s  [{}]".format(
-                method, lnp_0, lnp_best, delta,
-                total_nfev, wallclock, status))
+    status = "accepted" if accepted else "rejected ({})".format(reject)
+    logprint(
+        "optimize[{}]  lnprob: {:.2f} -> {:.2f}  (Δ={:+.2f})  "
+        "nfev={}  {:.1f}s  [{}]".format(
+            method, lnp_0, lnp_best, delta,
+            total_nfev, wallclock, status),
+        quiet=quiet)
 
     return result
