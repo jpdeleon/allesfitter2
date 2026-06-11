@@ -239,7 +239,13 @@ The result is pushed into `BASEMENT.theta_0` only when **all** of these pass:
 
 On reject, `OptimizeResult.reject_reason` records which gate fired; `BASEMENT.theta_0` is **not** mutated; the next `mcmc_fit` runs unchanged. The full result (theta, lnprobs, restart spread, nfev, wallclock, reject reason) is also persisted to `<datadir>/results/optimize_save.json`.
 
-The one-line `optimize[...] lnprob: ... -> ... [accepted/rejected]` summary is routed through `logprint`, so it is appended to the same `<datadir>/results/logfile_<now>.log` as the sampler runs — the warm-start result is captured in the run log even on unattended jobs. `quiet=True` suppresses only the console echo; the logfile is still written.
+`optimize()` reports progress through `logprint`, so the run is visible both on the console and in the same `<datadir>/results/logfile_<now>.log` as the sampler runs:
+
+- a **start** line — `optimize[cmaes] starting: ndim=… n_restarts=… maxfevals=… lnprob_initial=…`,
+- one **per-restart** line — `optimize[cmaes] restart k/N: lnprob=… nfev=… ok=…`,
+- the final **summary** — `optimize[cmaes] lnprob: A -> B (Δ=…) … [accepted/rejected]`.
+
+This means the warm-start is captured in the run log even on unattended jobs, and you can see it is alive during a long global search. `quiet=True` suppresses only the console echo; the logfile is still written. For the full per-generation CMA-ES convergence table, pass `verbose=True` (CMA-ES only) — it streams the `cma` library's own report to the console on top of the `logprint` lines.
 
 ### CMA-ES warm-resume across calls
 

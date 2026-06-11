@@ -327,6 +327,7 @@ def optimize(
     skip_bounds_check: bool = False,
     workers: int = 1,
     quiet: bool = False,
+    verbose: bool = False,
     resume: bool = False,
     **_extra_kwargs,
 ) -> OptimizeResult:
@@ -370,7 +371,13 @@ def optimize(
         Parallel-process workers (currently honoured by
         ``differential_evolution`` only).
     quiet : bool
-        Suppress the one-line summary print at the end.
+        Suppress the console echo of the progress / summary lines. The
+        run logfile (``<outdir>/logfile_<now>.log``) is still written.
+    verbose : bool
+        CMA-ES only. Stream the ``cma`` library's own per-generation
+        convergence table to the console (off by default — the
+        start/per-restart/summary ``logprint`` lines give progress
+        without the full table). Independent of ``quiet``.
     resume : bool
         CMA-ES only. When True, load the pickled strategy state from
         ``<outdir>/optimize_cma_state.pkl`` (saved by a previous call) and
@@ -388,7 +395,7 @@ def optimize(
             'datadir', 'method', 'refine', 'n_restarts', 'sigma0', 'maxfevals',
             'seed', 'save', 'mutate_basement', 'improvement_threshold',
             'consistency_threshold', 'skip_bounds_check', 'workers', 'quiet',
-            'resume',
+            'verbose', 'resume',
         ])
         _bits = []
         for _bad in sorted(_extra_kwargs):
@@ -460,6 +467,12 @@ def optimize(
 
     # Dispatch + per-restart accumulation.
     t0 = _now()
+    logprint(
+        "optimize[{}]  starting: ndim={}  n_restarts={}  maxfevals={}  "
+        "lnprob_initial={:.2f}".format(
+            method, b.ndim, n_restarts,
+            maxfevals if maxfevals is not None else 'default', lnp_0),
+        quiet=quiet)
     restart_results = []
     total_nfev = 0
     any_success = False
@@ -482,7 +495,7 @@ def optimize(
                             else None)
             x_r, nfev_r, ok_r, _resumed = _run_cmaes(
                 x0, bounds, sigma0=sigma0, maxfevals=maxfevals,
-                seed=seed + r, resume_path=_resume_path,
+                seed=seed + r, verbose=verbose, resume_path=_resume_path,
                 save_path=cma_state_path)
             resumed_from_pickle = resumed_from_pickle or _resumed
         else:
@@ -500,6 +513,10 @@ def optimize(
         lnp_r = float(mcmc_lnprob(x_r))
         restart_results.append((x_r, lnp_r))
         total_nfev += nfev_r
+        logprint(
+            "optimize[{}]  restart {}/{}: lnprob={:.2f}  nfev={}  "
+            "ok={}".format(method, r + 1, len(x0_list), lnp_r, nfev_r, ok_r),
+            quiet=quiet)
 
     # Best across restarts.
     restart_lnprobs = [lp for _, lp in restart_results]

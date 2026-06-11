@@ -404,6 +404,29 @@ def test_optimize_summary_lands_in_logfile(datadir):
     assert "optimize[L-BFGS-B]" in logf.read_text()
 
 
+def test_optimize_logs_start_and_per_restart_progress(datadir):
+    optimize(str(datadir), method='L-BFGS-B', refine=False, n_restarts=2,
+             save=False, quiet=True, improvement_threshold=0.0,
+             consistency_threshold=1e30, skip_bounds_check=True)
+    text = _logfile_path(datadir).read_text()
+    # start marker
+    assert "starting: ndim=" in text
+    # one progress line per restart
+    assert "restart 1/2:" in text
+    assert "restart 2/2:" in text
+
+
+def test_optimize_verbose_accepted_for_cmaes(datadir):
+    pytest.importorskip("cma")
+    # verbose=True must be a valid kwarg and not raise; it streams the cma
+    # table to stdout but the run result is unaffected.
+    res = optimize(str(datadir), method='cmaes', refine=False, n_restarts=1,
+                   save=False, quiet=True, verbose=True,
+                   improvement_threshold=0.0, skip_bounds_check=True,
+                   maxfevals=120, seed=13)
+    assert res.success
+
+
 def test_cmaes_missing_dependency_raises_clear_error(datadir, monkeypatch):
     """If `import cma` fails, optimize() should raise an ImportError with
     a guidance message rather than crash deep inside the helper."""
