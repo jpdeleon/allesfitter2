@@ -34,7 +34,7 @@ dependencies = [
     "rebound==3.20.0",
     "loguru==0.7.3",
     "emcee>=3.0.0",
-    "setuptools",
+    "setuptools<81",
     "ellc",
     "limbdark @ git+https://github.com/jpdeleon/limbdark2.git",
 ]
