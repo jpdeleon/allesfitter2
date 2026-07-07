@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import numpy as np
 
-
 TRUE_PERIOD = 3.14159
 TRUE_EPOCH = 2459000.5
 TRUE_COSI = 0.01
@@ -39,7 +38,7 @@ def simulate_lightcurve(time, rr, noise_sigma, rng):
         t_zero=TRUE_EPOCH,
         period=TRUE_PERIOD,
         ldc_1=TRUE_LDC,
-        ld_1='quad',
+        ld_1="quad",
         verbose=False,
     )
     flux = flux + rng.normal(0.0, noise_sigma, size=time.size)
@@ -133,14 +132,36 @@ def common_orbital_rows(fit_orbital=True):
     fast end-to-end tests that only need to recover the per-band rr)."""
     fit = 1 if fit_orbital else 0
     return [
-        {"name": "b_rsuma", "value": TRUE_RSUMA, "fit": fit,
-         "bounds": "uniform 0.01 0.5", "label": "rsuma"},
-        {"name": "b_cosi", "value": TRUE_COSI, "fit": fit,
-         "bounds": "uniform 0 1", "label": "cosi"},
-        {"name": "b_epoch", "value": TRUE_EPOCH, "fit": fit,
-         "bounds": f"uniform {TRUE_EPOCH - 0.05} {TRUE_EPOCH + 0.05}", "label": "epoch", "unit": "BJD"},
-        {"name": "b_period", "value": TRUE_PERIOD, "fit": fit,
-         "bounds": f"uniform {TRUE_PERIOD - 0.01} {TRUE_PERIOD + 0.01}", "label": "period", "unit": "d"},
+        {
+            "name": "b_rsuma",
+            "value": TRUE_RSUMA,
+            "fit": fit,
+            "bounds": "uniform 0.01 0.5",
+            "label": "rsuma",
+        },
+        {
+            "name": "b_cosi",
+            "value": TRUE_COSI,
+            "fit": fit,
+            "bounds": "uniform 0 1",
+            "label": "cosi",
+        },
+        {
+            "name": "b_epoch",
+            "value": TRUE_EPOCH,
+            "fit": fit,
+            "bounds": f"uniform {TRUE_EPOCH - 0.05} {TRUE_EPOCH + 0.05}",
+            "label": "epoch",
+            "unit": "BJD",
+        },
+        {
+            "name": "b_period",
+            "value": TRUE_PERIOD,
+            "fit": fit,
+            "bounds": f"uniform {TRUE_PERIOD - 0.01} {TRUE_PERIOD + 0.01}",
+            "label": "period",
+            "unit": "d",
+        },
         {"name": "b_f_c", "value": 0.0, "fit": 0, "bounds": "uniform -1 1", "label": "f_c"},
         {"name": "b_f_s", "value": 0.0, "fit": 0, "bounds": "uniform -1 1", "label": "f_s"},
     ]
@@ -148,8 +169,13 @@ def common_orbital_rows(fit_orbital=True):
 
 def dilution_rows(inst_phot):
     return [
-        {"name": f"dil_{inst}", "value": 0.0, "fit": 0,
-         "bounds": "uniform -1 1", "label": f"dil_{inst}"}
+        {
+            "name": f"dil_{inst}",
+            "value": 0.0,
+            "fit": 0,
+            "bounds": "uniform -1 1",
+            "label": f"dil_{inst}",
+        }
         for inst in inst_phot
     ]
 
@@ -162,21 +188,41 @@ def err_baseline_rows(inst_phot):
     """
     rows = []
     for inst in inst_phot:
-        rows.append({
-            "name": f"ln_err_flux_{inst}", "value": -7.0, "fit": 0,
-            "bounds": "uniform -15 0", "label": f"ln_err_{inst}",
-        })
-        rows.append({
-            "name": f"baseline_offset_flux_{inst}", "value": 0.0, "fit": 0,
-            "bounds": "uniform -0.05 0.05", "label": f"offset_{inst}",
-        })
+        rows.append(
+            {
+                "name": f"ln_err_flux_{inst}",
+                "value": -7.0,
+                "fit": 0,
+                "bounds": "uniform -15 0",
+                "label": f"ln_err_{inst}",
+            }
+        )
+        rows.append(
+            {
+                "name": f"baseline_offset_flux_{inst}",
+                "value": 0.0,
+                "fit": 0,
+                "bounds": "uniform -0.05 0.05",
+                "label": f"offset_{inst}",
+            }
+        )
     return rows
 
 
 def ldc_rows(suffix):
     return [
-        {"name": f"host_ldc_q1_{suffix}", "value": 0.5, "fit": 1,
-         "bounds": "uniform 0 1", "label": f"q1_{suffix}"},
-        {"name": f"host_ldc_q2_{suffix}", "value": 0.5, "fit": 1,
-         "bounds": "uniform 0 1", "label": f"q2_{suffix}"},
+        {
+            "name": f"host_ldc_q1_{suffix}",
+            "value": 0.5,
+            "fit": 1,
+            "bounds": "uniform 0 1",
+            "label": f"q1_{suffix}",
+        },
+        {
+            "name": f"host_ldc_q2_{suffix}",
+            "value": 0.5,
+            "fit": 1,
+            "bounds": "uniform 0 1",
+            "label": f"q2_{suffix}",
+        },
     ]

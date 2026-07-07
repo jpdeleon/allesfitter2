@@ -48,4 +48,3 @@ Do not track large files locally and in git history. Update .gitignore if needed
 ## Large files
 Ask me permission if there is a need to read a large files even if in auto edit mode.
 The purpose is to save tokens and context length.
-

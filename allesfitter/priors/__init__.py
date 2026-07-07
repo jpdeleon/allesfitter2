@@ -17,4 +17,3 @@ Submodules:
     estimate_noise: Noise estimation utilities.
     simulate_PDF: PDF simulation for error propagation.
 """
-

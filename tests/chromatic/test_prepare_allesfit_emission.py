@@ -17,16 +17,19 @@ Each scenario must:
 
 from __future__ import annotations
 
-import pathlib
-
 import numpy as np
-import pytest
 
 from allesfitter import config
-
 from tests.chromatic._helpers import (
-    NOISE_SIGMA, N_POINTS_PER_INST, RNG_SEED, TRUE_EPOCH, TRUE_PERIOD,
-    TRUE_RR_TESS, phase_sampled_time, simulate_lightcurve, write_data_csv,
+    N_POINTS_PER_INST,
+    NOISE_SIGMA,
+    RNG_SEED,
+    TRUE_EPOCH,
+    TRUE_PERIOD,
+    TRUE_RR_TESS,
+    phase_sampled_time,
+    simulate_lightcurve,
+    write_data_csv,
 )
 
 
@@ -35,10 +38,10 @@ def _emit_settings(datadir, inst_phot, bandpass=None):
     writes when called with -f <inst_phot> [-bp <bandpass>]."""
     lines = [
         "#name,value",
-        f"companions_phot,b",
-        f"companions_rv,",
+        "companions_phot,b",
+        "companions_rv,",
         f"inst_phot,{' '.join(inst_phot)}",
-        f"inst_rv,",
+        "inst_rv,",
         "time_format,BJD_TDB",
         "multiprocess,False",
         "fast_fit,False",
@@ -65,7 +68,7 @@ def _emit_settings(datadir, inst_phot, bandpass=None):
     for inst in inst_phot:
         lines.append(f"host_ld_law_{inst},quad")
         lines.append(f"host_grid_{inst},very_sparse")
-        lines.append(f"t_exp_{inst},0.0014")          # 120s in days
+        lines.append(f"t_exp_{inst},0.0014")  # 120s in days
         lines.append(f"baseline_flux_{inst},sample_GP_Matern32")
         lines.append(f"error_flux_{inst},sample")
     (datadir / "settings.csv").write_text("\n".join(lines) + "\n")
@@ -83,14 +86,16 @@ def _emit_params(datadir, ldc_suffixes, rr_suffixes, inst_phot):
     else:
         for bp in rr_suffixes:
             rows.append(f"b_rr_{bp},0.1,1,uniform 0 0.3,rr_{bp},,")
-    rows.extend([
-        "b_rsuma,0.12,1,uniform 0.01 0.5,rsuma,,",
-        "b_cosi,0.01,1,uniform 0 1,cosi,,",
-        f"b_epoch,{TRUE_EPOCH},1,uniform {TRUE_EPOCH - 0.05} {TRUE_EPOCH + 0.05},epoch,BJD,",
-        f"b_period,{TRUE_PERIOD},1,uniform {TRUE_PERIOD - 0.01} {TRUE_PERIOD + 0.01},period,d,",
-        "b_f_c,0,0,uniform -1 1,f_c,,",
-        "b_f_s,0,0,uniform -1 1,f_s,,",
-    ])
+    rows.extend(
+        [
+            "b_rsuma,0.12,1,uniform 0.01 0.5,rsuma,,",
+            "b_cosi,0.01,1,uniform 0 1,cosi,,",
+            f"b_epoch,{TRUE_EPOCH},1,uniform {TRUE_EPOCH - 0.05} {TRUE_EPOCH + 0.05},epoch,BJD,",
+            f"b_period,{TRUE_PERIOD},1,uniform {TRUE_PERIOD - 0.01} {TRUE_PERIOD + 0.01},period,d,",
+            "b_f_c,0,0,uniform -1 1,f_c,,",
+            "b_f_s,0,0,uniform -1 1,f_s,,",
+        ]
+    )
     for inst in inst_phot:
         rows.append(f"dil_{inst},0,0,uniform -1 1,dil_{inst},,")
     # LDCs keyed by ldc_suffixes (bandpass in chromatic, inst otherwise)
@@ -111,22 +116,26 @@ def _write_data(datadir, inst_phot, rng_seed):
         write_data_csv(datadir / f"{inst}.csv", t, f, e)
 
 
-def _build(tmp_path, name, inst_phot, bandpass, ldc_suffixes, rr_suffixes,
-           rng_seed):
+def _build(tmp_path, name, inst_phot, bandpass, ldc_suffixes, rr_suffixes, rng_seed):
     d = tmp_path / name
     d.mkdir()
     _write_data(d, inst_phot, rng_seed)
     _emit_settings(d, inst_phot, bandpass=bandpass)
-    _emit_params(d, ldc_suffixes=ldc_suffixes, rr_suffixes=rr_suffixes,
-                 inst_phot=inst_phot)
+    _emit_params(d, ldc_suffixes=ldc_suffixes, rr_suffixes=rr_suffixes, inst_phot=inst_phot)
     return d
 
 
 class TestPrepareAllesfitEmission:
     def test_achromatic_no_bp_flag(self, tmp_path):
-        d = _build(tmp_path, "achr", inst_phot=["tess"], bandpass=None,
-                   ldc_suffixes=["tess"], rr_suffixes=[],
-                   rng_seed=RNG_SEED + 110)
+        d = _build(
+            tmp_path,
+            "achr",
+            inst_phot=["tess"],
+            bandpass=None,
+            ldc_suffixes=["tess"],
+            rr_suffixes=[],
+            rng_seed=RNG_SEED + 110,
+        )
         config.init(str(d), quiet=True)
         b = config.BASEMENT
         assert b.settings["chromatic"] is False
@@ -136,11 +145,15 @@ class TestPrepareAllesfitEmission:
         assert "host_ldc_q1_tess" in b.params
 
     def test_chromatic_distinct_bandpasses_inst_names_match(self, tmp_path):
-        d = _build(tmp_path, "chrom_match",
-                   inst_phot=["tess", "kepler"], bandpass="tess kepler",
-                   ldc_suffixes=["tess", "kepler"],
-                   rr_suffixes=["tess", "kepler"],
-                   rng_seed=RNG_SEED + 111)
+        d = _build(
+            tmp_path,
+            "chrom_match",
+            inst_phot=["tess", "kepler"],
+            bandpass="tess kepler",
+            ldc_suffixes=["tess", "kepler"],
+            rr_suffixes=["tess", "kepler"],
+            rng_seed=RNG_SEED + 111,
+        )
         config.init(str(d), quiet=True)
         b = config.BASEMENT
         assert b.settings["chromatic"] is True
@@ -153,17 +166,19 @@ class TestPrepareAllesfitEmission:
         assert "host_ldc_q1_kepler" in b.params
 
     def test_chromatic_distinct_inst_names_vs_bandpasses(self, tmp_path):
-        d = _build(tmp_path, "chrom_distinct",
-                   inst_phot=["tess_pdcsap", "k2sff"],
-                   bandpass="tess k2",
-                   ldc_suffixes=["tess", "k2"],
-                   rr_suffixes=["tess", "k2"],
-                   rng_seed=RNG_SEED + 112)
+        d = _build(
+            tmp_path,
+            "chrom_distinct",
+            inst_phot=["tess_pdcsap", "k2sff"],
+            bandpass="tess k2",
+            ldc_suffixes=["tess", "k2"],
+            rr_suffixes=["tess", "k2"],
+            rng_seed=RNG_SEED + 112,
+        )
         config.init(str(d), quiet=True)
         b = config.BASEMENT
         assert b.settings["chromatic"] is True
-        assert b.settings["bandpass"] == {
-            "tess_pdcsap": "tess", "k2sff": "k2"}
+        assert b.settings["bandpass"] == {"tess_pdcsap": "tess", "k2sff": "k2"}
         # Per-instrument settings keyed by actual inst names — this is the
         # case that, if mis-emitted, would trigger the orphan-suffix
         # validator.
@@ -177,12 +192,15 @@ class TestPrepareAllesfitEmission:
         # The user-reported scenario shape: bandpass='tess tess' with two
         # distinct instruments sharing one bandpass. chromatic=False because
         # only one unique label, but LDC keys are bandpass-suffixed.
-        d = _build(tmp_path, "shared_bp",
-                   inst_phot=["tglc120_s90", "tglc120_s63s64"],
-                   bandpass="tess tess",
-                   ldc_suffixes=["tess"],
-                   rr_suffixes=["tess"],
-                   rng_seed=RNG_SEED + 113)
+        d = _build(
+            tmp_path,
+            "shared_bp",
+            inst_phot=["tglc120_s90", "tglc120_s63s64"],
+            bandpass="tess tess",
+            ldc_suffixes=["tess"],
+            rr_suffixes=["tess"],
+            rng_seed=RNG_SEED + 113,
+        )
         config.init(str(d), quiet=True)
         b = config.BASEMENT
         assert b.settings["chromatic"] is False

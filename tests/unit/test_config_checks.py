@@ -25,7 +25,6 @@ from allesfitter.validation.config_checks import (
     parse_bounds,
 )
 
-
 # ---------------------------------------------------------------------------
 # parse_bounds
 # ---------------------------------------------------------------------------
@@ -310,8 +309,7 @@ def test_per_instrument_binning_non_positive_errors():
 def test_binning_error_wired_into_aggregator(tmp_path):
     d = _write_datadir(
         tmp_path,
-        "#name,value,fit,bounds,label,unit,coupled\n"
-        "b_rr,0.1,1,uniform 0 0.3,rr,,\n",
+        "#name,value,fit,bounds,label,unit,coupled\n" "b_rr,0.1,1,uniform 0 0.3,rr,,\n",
         settings="companions_phot,b\nbinning,-1",
     )
     with pytest.raises(ConfigError) as exc:
@@ -397,8 +395,7 @@ def test_eccentricity_per_companion():
 def test_physical_checks_wired_into_aggregator(tmp_path):
     d = _write_datadir(
         tmp_path,
-        "#name,value,fit,bounds,label,unit,coupled\n"
-        "b_rsuma,1.5,1,uniform 0 5,rsuma,,\n",
+        "#name,value,fit,bounds,label,unit,coupled\n" "b_rsuma,1.5,1,uniform 0 5,rsuma,,\n",
         settings="companions_phot,b",
     )
     with pytest.raises(ConfigError) as exc:

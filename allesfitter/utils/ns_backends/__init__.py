@@ -35,7 +35,6 @@ from typing import Callable, Iterable
 
 import numpy as np
 
-
 __all__ = [
     "NSResults",
     "get_backend",
@@ -55,13 +54,13 @@ KNOWN_BACKENDS = ("dynesty", "ultranest")
 BACKEND_SETTINGS = {
     "dynesty": {
         "relevant": {"ns_nlive", "ns_bound", "ns_sample", "ns_tol", "ns_modus"},
-        "ignored":  {"un_min_ess", "un_max_iters"},
+        "ignored": {"un_min_ess", "un_max_iters"},
     },
     "ultranest": {
         "relevant": {"ns_nlive", "ns_tol", "un_min_ess", "un_max_iters"},
         # ns_modus/ns_bound/ns_sample are dynesty concepts; ultranest is
         # reactive and chooses its own region/sampling strategy.
-        "ignored":  {"ns_modus", "ns_bound", "ns_sample"},
+        "ignored": {"ns_modus", "ns_bound", "ns_sample"},
     },
 }
 
@@ -105,14 +104,12 @@ def validate_settings_for_backend(backend, raw_keys, logprint=print):
     if relevant_but_missing:
         logprint(
             "\n! settings.csv: ns_backend='{}' uses these keys but they are NOT set "
-            "(running on defaults): {}".format(
-                backend, ", ".join(relevant_but_missing)
-            )
+            "(running on defaults): {}".format(backend, ", ".join(relevant_but_missing))
         )
         logprint("  → add explicit rows to settings.csv for reproducible fits.")
 
     if not ignored_but_set and not relevant_but_missing:
-        logprint("\nsettings.csv: all ns_backend='{}' keys explicitly set. ✓".format(backend))
+        logprint(f"\nsettings.csv: all ns_backend='{backend}' keys explicitly set. ✓")
 
 
 class NSResults(dict):
@@ -178,10 +175,10 @@ def get_backend(name: str):
     name = (name or "dynesty").lower()
     if name == "dynesty":
         from . import dynesty_backend as be
+
         return be
     if name == "ultranest":
         from . import ultranest_backend as be
+
         return be
-    raise ValueError(
-        "Unknown ns backend: {!r}. Choose one of {}.".format(name, KNOWN_BACKENDS)
-    )
+    raise ValueError(f"Unknown ns backend: {name!r}. Choose one of {KNOWN_BACKENDS}.")

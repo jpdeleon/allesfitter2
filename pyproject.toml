@@ -117,6 +117,34 @@ ignore = [
     "E741",  # ambiguous var names (l, I) are common in the science code
 ]
 
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401", "E402"]   # re-exports and lazy imports by design
+"*.ipynb" = ["E402", "E701", "E722"]  # notebook cell structure prevents top-level imports
+# Source files with intentional conditional/lazy imports after module-level code
+"allesfitter/basement.py" = ["E402"]
+"allesfitter/computer.py" = ["E402"]
+"allesfitter/deriver.py" = ["E402"]
+"allesfitter/detection/injection_recovery.py" = ["E402"]
+"allesfitter/exoworlds_rdx/lightcurves/gp_decor.py" = ["E402"]
+"allesfitter/exoworlds_rdx/rvs/estimate_jitter.py" = ["E402"]
+"allesfitter/general_output.py" = ["E402"]
+"allesfitter/mcmc.py" = ["E402"]
+"allesfitter/mcmc_output.py" = ["E402"]
+"allesfitter/nested_sampling.py" = ["E402"]
+"allesfitter/nested_sampling_output.py" = ["E402"]
+"allesfitter/optimize.py" = ["E402"]
+"allesfitter/plot_top_down_view.py" = ["E402"]
+"allesfitter/prepare_ttv_fit.py" = ["E402"]
+"allesfitter/spots.py" = ["E402"]
+"allesfitter/utils/colormaputil.py" = ["E402"]
+"allesfitter/v2/classes.py" = ["E402"]
+"allesfitter/v2/defaults.py" = ["E402"]
+"allesfitter/v2/detection/injection_recovery_output.py" = ["E402"]
+"allesfitter/v2/detection/injection_recovery.py" = ["E402"]
+"allesfitter/v2/detection/transit_search.py" = ["E402"]
+"allesfitter/v2/simulate.py" = ["E402"]
+"allesfitter/v2/translator.py" = ["E402"]
+
 # Mypy: start lenient (the codebase is largely untyped). Tighten per-module by
 # adding stricter overrides as type annotations are introduced.
 [tool.mypy]

@@ -1,11 +1,11 @@
-'''
+"""
 Hold the analytic "bump" model for starspot-crossing events.
 
 A planet transiting over a cool starspot momentarily blocks less flux than over
 the quiet photosphere, producing a small localized brightening ("bump") inside
 the transit. This is modeled here as a simple additive Gaussian in time, in
 relative-flux units (mirrors the approach used in timex).
-'''
+"""
 
 import numpy as np
 
@@ -35,4 +35,4 @@ def bump_model(t, tpeak, width, ampl):
     bump : array-like
         The bump flux evaluated at each time point.
     """
-    return ampl * np.exp(-((t - tpeak) ** 2) / (2.0 * width ** 2))
+    return ampl * np.exp(-((t - tpeak) ** 2) / (2.0 * width**2))

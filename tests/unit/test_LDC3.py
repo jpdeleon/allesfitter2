@@ -1,8 +1,7 @@
-import numpy as np
-import pytest
-import math
 import importlib.util
 import os
+
+import numpy as np
 
 
 def import_module_from_path(module_name, file_path):
@@ -15,7 +14,9 @@ def import_module_from_path(module_name, file_path):
 # repo root = three levels up from tests/unit/<this file>
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-LDC3 = import_module_from_path('LDC3', os.path.join(BASE_DIR, 'allesfitter', 'limb_darkening', 'LDC3.py'))
+LDC3 = import_module_from_path(
+    "LDC3", os.path.join(BASE_DIR, "allesfitter", "limb_darkening", "LDC3.py")
+)
 forward = LDC3.forward
 inverse = LDC3.inverse
 criteriatest = LDC3.criteriatest

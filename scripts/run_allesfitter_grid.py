@@ -59,8 +59,8 @@ def extract_logz(run_dir: Path) -> str:
         if f.suffix.lower() not in (".log", ".txt"):
             continue
         m = None
-        for m in LOGZ_RE.finditer(f.read_text(errors="ignore")):  # noqa: B007 - last-match idiom; m is used after the loop
-            pass  # keep last match in file
+        for _m in LOGZ_RE.finditer(f.read_text(errors="ignore")):
+            m = _m  # keep last match in file
         if m:
             best = f"{float(m.group(1)):.2f} +- {float(m.group(2)):.2f}"
     return best
@@ -75,8 +75,9 @@ def run_one(grid_dir: Path, row: dict, sampler: str) -> tuple[str, str]:
     log_path = run_dir / "results" / "driver.log"
     log_path.parent.mkdir(exist_ok=True)
     with log_path.open("w") as log:
-        proc = subprocess.run([sys.executable, "run.py"], cwd=run_dir,
-                              env=env, stdout=log, stderr=subprocess.STDOUT)
+        proc = subprocess.run(
+            [sys.executable, "run.py"], cwd=run_dir, env=env, stdout=log, stderr=subprocess.STDOUT
+        )
     if proc.returncode != 0:
         return "failed", ""
     return "done", extract_logz(run_dir)
@@ -84,15 +85,23 @@ def run_one(grid_dir: Path, row: dict, sampler: str) -> tuple[str, str]:
 
 def main() -> None:
     p = argparse.ArgumentParser(
-        description=__doc__,
-        formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("grid_dir", type=Path, metavar="GRID_DIR",
-                   help="directory holding grid.csv and the run_id subdirs")
-    p.add_argument("--filter", nargs="*", default=[], metavar="KEY=VAL",
-                   help="only run rows matching every KEY=VAL (e.g. chroma=chr)")
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    p.add_argument(
+        "grid_dir",
+        type=Path,
+        metavar="GRID_DIR",
+        help="directory holding grid.csv and the run_id subdirs",
+    )
+    p.add_argument(
+        "--filter",
+        nargs="*",
+        default=[],
+        metavar="KEY=VAL",
+        help="only run rows matching every KEY=VAL (e.g. chroma=chr)",
+    )
     p.add_argument("--sampler", choices=["ns", "mcmc"], default="mcmc")
-    p.add_argument("--all", action="store_true",
-                   help="re-run rows even if already done")
+    p.add_argument("--all", action="store_true", help="re-run rows even if already done")
     p.add_argument("--dry-run", action="store_true")
 
     #::: no arguments at all -> print full help instead of a terse usage error
@@ -107,8 +116,11 @@ def main() -> None:
 
     filters = dict(kv.split("=", 1) for kv in args.filter)
     rows = load_rows(grid_csv)
-    todo = [r for r in rows if matches(r, filters)
-            and (args.all or r["status"] in ("pending", "failed"))]
+    todo = [
+        r
+        for r in rows
+        if matches(r, filters) and (args.all or r["status"] in ("pending", "failed"))
+    ]
 
     if not todo:
         print("nothing to run (check --filter / --all).")
@@ -119,10 +131,10 @@ def main() -> None:
     if args.dry_run:
         return
 
-    print(f"")
+    print("")
     for i, row in enumerate(todo, 1):
         print(f"[{i}/{len(todo)}] {grid_dir / row['run_id']}")
-        print(f"  running … ", end="", flush=True)
+        print("  running … ", end="", flush=True)
         status, logz = run_one(grid_dir, row, args.sampler)
         row["status"], row["logZ"] = status, logz
         print(f"{status}" + (f"  log(Z)={logz}" if logz else ""))

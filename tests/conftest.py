@@ -50,11 +50,11 @@ def limb_darkening_quad():
 @pytest.fixture
 def physical_params():
     return {
-        'rr': 0.1,
-        'rsuma': 0.11,
-        'cosi': 0.1,
-        'f_s': 0.0,
-        'f_c': 0.0,
-        'period': 3.5,
-        'epoch': 2457000.0,
+        "rr": 0.1,
+        "rsuma": 0.11,
+        "cosi": 0.1,
+        "f_s": 0.0,
+        "f_c": 0.0,
+        "period": 3.5,
+        "epoch": 2457000.0,
     }

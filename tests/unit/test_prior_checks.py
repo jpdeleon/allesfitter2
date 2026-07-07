@@ -12,11 +12,9 @@ from the package-level public surface.
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 from allesfitter.validation import validate_gp_priors
 
@@ -37,7 +35,7 @@ def _make_datadir(tmp_path: Path, params: str, settings: str, lc_csvs: dict) -> 
 def _clean_tess_lc_csv(seed: int = 0, n: int = 2000, rms: float = 5e-4) -> str:
     """Synthetic TESS-like LC: 27-day baseline, 120-s cadence, RMS 500 ppm."""
     rng = np.random.default_rng(seed)
-    t = np.linspace(0.0, 27.0, n)            # 27-day TESS sector
+    t = np.linspace(0.0, 27.0, n)  # 27-day TESS sector
     f = 1.0 + rng.normal(0.0, rms, n)
     e = np.full(n, rms)
     return "\n".join(f"{ti},{fi},{ei}" for ti, fi, ei in zip(t, f, e))
@@ -238,7 +236,9 @@ def test_tdur_derived_from_params_csv(tmp_path):
         "baseline_gp_matern32_lnrho_flux_tess,0,1,uniform -5 3,...,,\n"
     )
     d = _make_datadir(
-        tmp_path, params=params_body, settings="inst_phot,tess",
+        tmp_path,
+        params=params_body,
+        settings="inst_phot,tess",
         lc_csvs={"tess.csv": _clean_tess_lc_csv()},
     )
 
@@ -324,8 +324,9 @@ def _sbratio_datadir(tmp_path, *, value, fit, settings):
 def test_secondary_eclipse_on_with_fixed_zero_sbratio_warns(tmp_path):
     from allesfitter.validation import check_secondary_eclipse_sbratio
 
-    d = _sbratio_datadir(tmp_path, value="0.0", fit="0",
-                         settings="inst_phot,tess\nsecondary_eclipse,True")
+    d = _sbratio_datadir(
+        tmp_path, value="0.0", fit="0", settings="inst_phot,tess\nsecondary_eclipse,True"
+    )
     msgs = check_secondary_eclipse_sbratio(d)
     assert len(msgs) == 1
     assert "b_sbratio_tess" in msgs[0] and "no secondary eclipse" in msgs[0]
@@ -336,24 +337,27 @@ def test_secondary_eclipse_on_with_fixed_nonzero_sbratio_allowed(tmp_path):
     setup and must NOT warn even with secondary_eclipse=True."""
     from allesfitter.validation import check_secondary_eclipse_sbratio
 
-    d = _sbratio_datadir(tmp_path, value="0.3", fit="0",
-                         settings="inst_phot,tess\nsecondary_eclipse,True")
+    d = _sbratio_datadir(
+        tmp_path, value="0.3", fit="0", settings="inst_phot,tess\nsecondary_eclipse,True"
+    )
     assert check_secondary_eclipse_sbratio(d) == []
 
 
 def test_secondary_eclipse_on_with_fitted_sbratio_ok(tmp_path):
     from allesfitter.validation import check_secondary_eclipse_sbratio
 
-    d = _sbratio_datadir(tmp_path, value="0.1", fit="1",
-                         settings="inst_phot,tess\nsecondary_eclipse,True")
+    d = _sbratio_datadir(
+        tmp_path, value="0.1", fit="1", settings="inst_phot,tess\nsecondary_eclipse,True"
+    )
     assert check_secondary_eclipse_sbratio(d) == []
 
 
 def test_fitted_sbratio_with_secondary_eclipse_off_warns(tmp_path):
     from allesfitter.validation import check_secondary_eclipse_sbratio
 
-    d = _sbratio_datadir(tmp_path, value="0.1", fit="1",
-                         settings="inst_phot,tess\nsecondary_eclipse,False")
+    d = _sbratio_datadir(
+        tmp_path, value="0.1", fit="1", settings="inst_phot,tess\nsecondary_eclipse,False"
+    )
     msgs = check_secondary_eclipse_sbratio(d)
     assert len(msgs) == 1
     assert "secondary_eclipse is off" in msgs[0]
@@ -362,16 +366,18 @@ def test_fitted_sbratio_with_secondary_eclipse_off_warns(tmp_path):
 def test_secondary_eclipse_off_with_fixed_sbratio_ok(tmp_path):
     from allesfitter.validation import check_secondary_eclipse_sbratio
 
-    d = _sbratio_datadir(tmp_path, value="0.0", fit="0",
-                         settings="inst_phot,tess\nsecondary_eclipse,False")
+    d = _sbratio_datadir(
+        tmp_path, value="0.0", fit="0", settings="inst_phot,tess\nsecondary_eclipse,False"
+    )
     assert check_secondary_eclipse_sbratio(d) == []
 
 
 def test_phase_curve_forces_secondary_eclipse_warning(tmp_path):
     from allesfitter.validation import check_secondary_eclipse_sbratio
 
-    d = _sbratio_datadir(tmp_path, value="0.0", fit="0",
-                         settings="inst_phot,tess\nphase_curve,True")
+    d = _sbratio_datadir(
+        tmp_path, value="0.0", fit="0", settings="inst_phot,tess\nphase_curve,True"
+    )
     msgs = check_secondary_eclipse_sbratio(d)
     assert len(msgs) == 1
     assert "phase_curve=True" in msgs[0]
@@ -380,8 +386,9 @@ def test_phase_curve_forces_secondary_eclipse_warning(tmp_path):
 def test_empty_sbratio_value_treated_as_default_zero(tmp_path):
     from allesfitter.validation import check_secondary_eclipse_sbratio
 
-    d = _sbratio_datadir(tmp_path, value="", fit="0",
-                         settings="inst_phot,tess\nsecondary_eclipse,1")
+    d = _sbratio_datadir(
+        tmp_path, value="", fit="0", settings="inst_phot,tess\nsecondary_eclipse,1"
+    )
     msgs = check_secondary_eclipse_sbratio(d)
     assert len(msgs) == 1
     assert "0 (default)" in msgs[0]
@@ -406,8 +413,9 @@ def test_coupled_sbratio_row_skipped(tmp_path):
 
 
 def test_sbratio_warning_surfaces_through_validate_gp_priors(tmp_path):
-    d = _sbratio_datadir(tmp_path, value="0.0", fit="0",
-                         settings="inst_phot,tess\nsecondary_eclipse,True")
+    d = _sbratio_datadir(
+        tmp_path, value="0.0", fit="0", settings="inst_phot,tess\nsecondary_eclipse,True"
+    )
     msgs = validate_gp_priors(d)
     assert any("b_sbratio_tess" in m for m in msgs)
 
@@ -430,7 +438,8 @@ _BINNING_ORBIT = (
 
 def _binning_datadir(tmp_path, settings_extra):
     return _make_datadir(
-        tmp_path, params=_BINNING_ORBIT,
+        tmp_path,
+        params=_BINNING_ORBIT,
         settings="inst_phot,tess\n" + settings_extra,
         lc_csvs={"tess.csv": _clean_tess_lc_csv()},
     )
@@ -438,12 +447,14 @@ def _binning_datadir(tmp_path, settings_extra):
 
 def test_binning_none_no_warning(tmp_path):
     from allesfitter.validation import check_binning
+
     d = _binning_datadir(tmp_path, "t_exp_tess,0.04")  # no binning set
     assert check_binning(d) == []
 
 
 def test_binning_too_coarse_smears_transit(tmp_path):
     from allesfitter.validation import check_binning
+
     d = _binning_datadir(tmp_path, "binning,0.1\nt_exp_tess,0.1")
     msgs = check_binning(d)
     assert any("smear the transit" in m for m in msgs)
@@ -451,6 +462,7 @@ def test_binning_too_coarse_smears_transit(tmp_path):
 
 def test_binning_too_fine_is_noop(tmp_path):
     from allesfitter.validation import check_binning
+
     d = _binning_datadir(tmp_path, "binning,0.005\nt_exp_tess,0.005")
     msgs = check_binning(d)
     assert any("little or no binning" in m for m in msgs)
@@ -459,6 +471,7 @@ def test_binning_too_fine_is_noop(tmp_path):
 def test_binning_without_t_exp_no_warning(tmp_path):
     """Missing t_exp is fine now — Basement auto-derives t_exp = bin width."""
     from allesfitter.validation import check_binning
+
     d = _binning_datadir(tmp_path, "binning,0.04")  # in-window, no t_exp
     msgs = check_binning(d)
     assert not any("t_exp" in m for m in msgs)
@@ -468,6 +481,7 @@ def test_binning_without_t_exp_no_warning(tmp_path):
 def test_binning_t_exp_mismatch_warns(tmp_path):
     """An explicit t_exp that disagrees with the bin width is flagged."""
     from allesfitter.validation import check_binning
+
     d = _binning_datadir(tmp_path, "binning,0.04\nt_exp_tess,0.01")
     msgs = check_binning(d)
     assert any("differs from the bin width" in m for m in msgs)
@@ -476,12 +490,14 @@ def test_binning_t_exp_mismatch_warns(tmp_path):
 def test_binning_t_exp_matches_no_warning(tmp_path):
     """t_exp equal to the bin width is the recommended setup — no warning."""
     from allesfitter.validation import check_binning
+
     d = _binning_datadir(tmp_path, "binning,0.04\nt_exp_tess,0.04")
     assert not any("t_exp" in m for m in check_binning(d))
 
 
 def test_binning_reasonable_value_no_warning(tmp_path):
     from allesfitter.validation import check_binning
+
     # 0.04 d: > 2x cadence (~0.027), < 0.5x tdur (~0.06), and t_exp configured.
     d = _binning_datadir(tmp_path, "binning,0.04\nt_exp_tess,0.04")
     assert check_binning(d) == []
@@ -490,6 +506,7 @@ def test_binning_reasonable_value_no_warning(tmp_path):
 def test_binning_malformed_or_nonpositive_no_warning(tmp_path):
     """Malformed / <=0 are config_checks ERRORS; the warning layer stays quiet."""
     from allesfitter.validation import check_binning
+
     assert check_binning(_binning_datadir(tmp_path, "binning,abc")) == []
     assert check_binning(_binning_datadir(tmp_path, "binning,-1")) == []
 
@@ -503,6 +520,7 @@ def test_binning_warning_surfaces_through_validate_gp_priors(tmp_path):
 def test_per_instrument_binning_override_warns(tmp_path):
     """A `binning_<inst>` override (no global binning) is judged per instrument."""
     from allesfitter.validation import check_binning
+
     d = _binning_datadir(tmp_path, "binning_tess,0.1\nt_exp_tess,0.1")
     assert any("smear the transit" in m for m in check_binning(d))
 
@@ -510,6 +528,7 @@ def test_per_instrument_binning_override_warns(tmp_path):
 def test_per_instrument_override_disables_global_warning(tmp_path):
     """An empty `binning_<inst>` turns binning off for that inst (no warnings)."""
     from allesfitter.validation import check_binning
+
     # Global binning is risky (smears), but the only instrument overrides it off.
     d = _binning_datadir(tmp_path, "binning,0.1\nbinning_tess,\nt_exp_tess,0.1")
     assert check_binning(d) == []

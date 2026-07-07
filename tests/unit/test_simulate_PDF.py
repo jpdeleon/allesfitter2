@@ -5,13 +5,12 @@ Note: These tests require matplotlib to be properly installed.
 Run with: pytest tests/test_simulate_PDF.py
 """
 
-import numpy as np
-import pytest
 import importlib.util
 import os
 import sys
 from unittest.mock import MagicMock
 
+import numpy as np
 from scipy.stats import skewnorm
 
 
@@ -41,16 +40,16 @@ def _import_simulate_PDF_with_mocked_plotting():
     PDF backend once ``matplotlib`` had been replaced by a MagicMock).
     """
     mocked = {
-        'matplotlib': MagicMock(),
-        'matplotlib.pyplot': MagicMock(),
-        'seaborn': MagicMock(),
+        "matplotlib": MagicMock(),
+        "matplotlib.pyplot": MagicMock(),
+        "seaborn": MagicMock(),
     }
     saved = {name: sys.modules.get(name) for name in mocked}
     sys.modules.update(mocked)
     try:
         return import_module_from_path(
-            'simulate_PDF',
-            os.path.join(BASE_DIR, 'allesfitter', 'priors', 'simulate_PDF.py'),
+            "simulate_PDF",
+            os.path.join(BASE_DIR, "allesfitter", "priors", "simulate_PDF.py"),
         )
     finally:
         for name, original in saved.items():

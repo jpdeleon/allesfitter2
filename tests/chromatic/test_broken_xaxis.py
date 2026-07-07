@@ -43,11 +43,13 @@ class TestDetectTimeGaps:
 
     def test_multi_gap_returns_n_plus_one_segments(self):
         # Three TESS-like sectors separated by ~13-day gaps.
-        t = np.concatenate([
-            np.linspace(0, 27, 100),
-            np.linspace(40, 67, 100),
-            np.linspace(80, 107, 100),
-        ])
+        t = np.concatenate(
+            [
+                np.linspace(0, 27, 100),
+                np.linspace(40, 67, 100),
+                np.linspace(80, 107, 100),
+            ]
+        )
         segs = detect_time_gaps(t, gap_threshold_days=5.0)
         assert len(segs) == 3
 
@@ -71,34 +73,34 @@ class TestDetectTimeGaps:
 class TestBrokenXAxisSubplots:
     def _time_with_two_gaps(self):
         # Three segments: 0-5, 20-25, 50-55.
-        return np.concatenate([
-            np.linspace(0, 5, 50),
-            np.linspace(20, 25, 50),
-            np.linspace(50, 55, 50),
-        ])
+        return np.concatenate(
+            [
+                np.linspace(0, 5, 50),
+                np.linspace(20, 25, 50),
+                np.linspace(50, 55, 50),
+            ]
+        )
 
     def test_returns_n_axes_for_n_segments(self):
         fig = plt.figure(figsize=(10, 3))
         gs = gridspec.GridSpec(1, 1)
-        axes = broken_xaxis_subplots(fig, gs[0], self._time_with_two_gaps(),
-                                      gap_threshold_days=2.0)
+        axes = broken_xaxis_subplots(fig, gs[0], self._time_with_two_gaps(), gap_threshold_days=2.0)
         assert len(axes) == 3
         plt.close(fig)
 
     def test_no_gap_returns_single_axes(self):
         fig = plt.figure(figsize=(6, 3))
         gs = gridspec.GridSpec(1, 1)
-        axes = broken_xaxis_subplots(fig, gs[0], np.linspace(0, 10, 100),
-                                      gap_threshold_days=2.0)
+        axes = broken_xaxis_subplots(fig, gs[0], np.linspace(0, 10, 100), gap_threshold_days=2.0)
         assert len(axes) == 1
         plt.close(fig)
 
     def test_each_axes_xlim_spans_its_segment(self):
         fig = plt.figure()
         gs = gridspec.GridSpec(1, 1)
-        axes = broken_xaxis_subplots(fig, gs[0], self._time_with_two_gaps(),
-                                      gap_threshold_days=2.0,
-                                      edge_pad_frac=0.0)
+        axes = broken_xaxis_subplots(
+            fig, gs[0], self._time_with_two_gaps(), gap_threshold_days=2.0, edge_pad_frac=0.0
+        )
         assert axes[0].get_xlim() == pytest.approx((0.0, 5.0))
         assert axes[1].get_xlim() == pytest.approx((20.0, 25.0))
         assert axes[2].get_xlim() == pytest.approx((50.0, 55.0))
@@ -107,9 +109,9 @@ class TestBrokenXAxisSubplots:
     def test_edge_padding_applied(self):
         fig = plt.figure()
         gs = gridspec.GridSpec(1, 1)
-        axes = broken_xaxis_subplots(fig, gs[0], self._time_with_two_gaps(),
-                                      gap_threshold_days=2.0,
-                                      edge_pad_frac=0.05)
+        axes = broken_xaxis_subplots(
+            fig, gs[0], self._time_with_two_gaps(), gap_threshold_days=2.0, edge_pad_frac=0.05
+        )
         lo, hi = axes[0].get_xlim()
         # Span is 5 days, padding 0.05 → 0.25 d each side.
         assert lo == pytest.approx(-0.25)
@@ -119,8 +121,9 @@ class TestBrokenXAxisSubplots:
     def test_sharey_aligns_y_axis(self):
         fig = plt.figure()
         gs = gridspec.GridSpec(1, 1)
-        axes = broken_xaxis_subplots(fig, gs[0], self._time_with_two_gaps(),
-                                      gap_threshold_days=2.0, sharey=True)
+        axes = broken_xaxis_subplots(
+            fig, gs[0], self._time_with_two_gaps(), gap_threshold_days=2.0, sharey=True
+        )
         axes[0].plot([0, 5], [0.99, 1.01])  # set ylim on first only
         # sharey means later axes get the same ylim
         for ax in axes[1:]:
@@ -130,8 +133,7 @@ class TestBrokenXAxisSubplots:
     def test_interior_spines_hidden(self):
         fig = plt.figure()
         gs = gridspec.GridSpec(1, 1)
-        axes = broken_xaxis_subplots(fig, gs[0], self._time_with_two_gaps(),
-                                      gap_threshold_days=2.0)
+        axes = broken_xaxis_subplots(fig, gs[0], self._time_with_two_gaps(), gap_threshold_days=2.0)
         # Left axes: right spine hidden, left visible.
         assert not axes[0].spines["right"].get_visible()
         assert axes[0].spines["left"].get_visible()
@@ -146,27 +148,31 @@ class TestBrokenXAxisSubplots:
     def test_position_must_be_subplotspec(self):
         fig = plt.figure()
         with pytest.raises(TypeError, match="SubplotSpec"):
-            broken_xaxis_subplots(fig, (0.1, 0.1, 0.8, 0.8),
-                                   np.linspace(0, 10, 50),
-                                   gap_threshold_days=2.0)
+            broken_xaxis_subplots(
+                fig, (0.1, 0.1, 0.8, 0.8), np.linspace(0, 10, 50), gap_threshold_days=2.0
+            )
         plt.close(fig)
 
     def test_invalid_width_mode_raises(self):
         fig = plt.figure()
         gs = gridspec.GridSpec(1, 1)
         with pytest.raises(ValueError, match="width_mode"):
-            broken_xaxis_subplots(fig, gs[0], self._time_with_two_gaps(),
-                                   gap_threshold_days=2.0,
-                                   width_mode="bogus")
+            broken_xaxis_subplots(
+                fig, gs[0], self._time_with_two_gaps(), gap_threshold_days=2.0, width_mode="bogus"
+            )
         plt.close(fig)
 
     def test_proportional_widths_reflect_data_spans(self):
         fig = plt.figure()
         gs = gridspec.GridSpec(1, 1)
         # Spans: 5, 5, 5 → equal → uniform proportional widths.
-        axes = broken_xaxis_subplots(fig, gs[0], self._time_with_two_gaps(),
-                                      gap_threshold_days=2.0,
-                                      width_mode="proportional")
+        axes = broken_xaxis_subplots(
+            fig,
+            gs[0],
+            self._time_with_two_gaps(),
+            gap_threshold_days=2.0,
+            width_mode="proportional",
+        )
         bboxes = [ax.get_position().width for ax in axes]
         for w in bboxes[1:]:
             assert w == pytest.approx(bboxes[0], rel=1e-2)

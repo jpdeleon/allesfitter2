@@ -10,9 +10,7 @@ without hitting the solver again.
 from __future__ import annotations
 
 import json
-import os
 import time
-from pathlib import Path
 
 import pytest
 
@@ -44,7 +42,9 @@ def cache_file(tmp_path, monkeypatch):
 def test_first_call_solves_and_writes_cache(cache_file):
     assert not cache_file.exists()
     alpha, loc, scale = spdf.calculate_skewed_normal_params(
-        median=1.0, lower_err=0.05, upper_err=0.06,
+        median=1.0,
+        lower_err=0.05,
+        upper_err=0.06,
     )
     assert cache_file.exists() and cache_file.stat().st_size > 0
     payload = json.loads(cache_file.read_text())
@@ -57,26 +57,26 @@ def test_first_call_solves_and_writes_cache(cache_file):
 
 def test_second_call_uses_cache_and_bypasses_solver(cache_file, monkeypatch):
     # populate via a normal call
-    spdf.calculate_skewed_normal_params(
-        median=2.5, lower_err=0.1, upper_err=0.15)
+    spdf.calculate_skewed_normal_params(median=2.5, lower_err=0.1, upper_err=0.15)
     # now patch the uncached worker so any call to it would crash
-    calls = {'n': 0}
+    calls = {"n": 0}
+
     def boom(*a, **k):
-        calls['n'] += 1
+        calls["n"] += 1
         raise AssertionError("uncached solver should NOT be called on a hit")
-    monkeypatch.setattr(spdf, '_calculate_skewed_normal_params_uncached', boom)
+
+    monkeypatch.setattr(spdf, "_calculate_skewed_normal_params_uncached", boom)
     # second call with identical inputs hits the cache → solver never runs
-    a, l, s = spdf.calculate_skewed_normal_params(
-        median=2.5, lower_err=0.1, upper_err=0.15)
-    assert calls['n'] == 0
+    a, l, s = spdf.calculate_skewed_normal_params(median=2.5, lower_err=0.1, upper_err=0.15)
+    assert calls["n"] == 0
     assert isinstance(a, float) and isinstance(l, float) and isinstance(s, float)
 
 
 def test_different_inputs_generate_different_keys(cache_file):
     spdf.calculate_skewed_normal_params(1.0, 0.05, 0.06)
-    spdf.calculate_skewed_normal_params(1.0, 0.05, 0.07)   # different upper_err
-    spdf.calculate_skewed_normal_params(1.0, 0.06, 0.06)   # different lower_err
-    spdf.calculate_skewed_normal_params(1.1, 0.05, 0.06)   # different median
+    spdf.calculate_skewed_normal_params(1.0, 0.05, 0.07)  # different upper_err
+    spdf.calculate_skewed_normal_params(1.0, 0.06, 0.06)  # different lower_err
+    spdf.calculate_skewed_normal_params(1.1, 0.05, 0.06)  # different median
     payload = json.loads(cache_file.read_text())
     assert len(payload) == 4
 

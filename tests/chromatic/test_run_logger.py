@@ -11,7 +11,6 @@ These verify the contract of allesfitter.run_logger.log_run / log_event:
 from __future__ import annotations
 
 import json
-import os
 import pathlib
 from typing import Any
 
@@ -33,8 +32,9 @@ def _load(path: pathlib.Path) -> list[dict[str, Any]]:
 
 class TestLogRunHappyPath:
     def test_writes_start_and_end_rows(self, tmp_log, tmp_path):
-        with run_logger.log_run("ns_fit", str(tmp_path), log_path=tmp_log,
-                                announce=False) as run_id:
+        with run_logger.log_run(
+            "ns_fit", str(tmp_path), log_path=tmp_log, announce=False
+        ) as run_id:
             assert isinstance(run_id, str)
             assert len(run_id) == 12
 
@@ -50,8 +50,7 @@ class TestLogRunHappyPath:
         assert end["duration_sec"] >= 0.0
 
     def test_metadata_fields_present(self, tmp_log, tmp_path):
-        with run_logger.log_run("ns_output", str(tmp_path), log_path=tmp_log,
-                                announce=False):
+        with run_logger.log_run("ns_output", str(tmp_path), log_path=tmp_log, announce=False):
             pass
         for row in _load(tmp_log):
             for k in ("timestamp", "pid", "hostname", "user"):
@@ -63,8 +62,7 @@ class TestLogRunHappyPath:
 class TestLogRunFailure:
     def test_exception_recorded_and_reraised(self, tmp_log, tmp_path):
         with pytest.raises(ValueError, match="boom"):
-            with run_logger.log_run("ns_fit", str(tmp_path), log_path=tmp_log,
-                                    announce=False):
+            with run_logger.log_run("ns_fit", str(tmp_path), log_path=tmp_log, announce=False):
                 raise ValueError("boom")
 
         rows = _load(tmp_log)
@@ -93,9 +91,13 @@ class TestLogPathResolution:
 
 class TestExtraFields:
     def test_start_row_merges_extra(self, tmp_log, tmp_path):
-        with run_logger.log_run("ns_fit", str(tmp_path), log_path=tmp_log,
-                                extra={"git_sha": "deadbeef", "n_inst": 4},
-                                announce=False):
+        with run_logger.log_run(
+            "ns_fit",
+            str(tmp_path),
+            log_path=tmp_log,
+            extra={"git_sha": "deadbeef", "n_inst": 4},
+            announce=False,
+        ):
             pass
         rows = _load(tmp_log)
         assert rows[0]["git_sha"] == "deadbeef"
@@ -108,8 +110,7 @@ class TestExtraFields:
 class TestTail:
     def test_tail_returns_most_recent(self, tmp_log, tmp_path):
         for i in range(5):
-            with run_logger.log_run(f"cmd_{i}", str(tmp_path), log_path=tmp_log,
-                                    announce=False):
+            with run_logger.log_run(f"cmd_{i}", str(tmp_path), log_path=tmp_log, announce=False):
                 pass
         # 5 runs → 10 lines; tail(4) returns the last 4 lines.
         out = run_logger.tail(n=4, log_path=tmp_log)
@@ -131,8 +132,7 @@ class TestConcurrentAppendSmoke:
         # never corrupts the file.
         for i in range(50):
             run_logger.log_event(
-                {"event": "start", "command": "ping", "datadir": str(tmp_path),
-                 "i": i},
+                {"event": "start", "command": "ping", "datadir": str(tmp_path), "i": i},
                 log_path=tmp_log,
             )
         rows = _load(tmp_log)

@@ -74,7 +74,6 @@ import traceback
 import uuid
 from pathlib import Path
 
-
 __all__ = [
     "DEFAULT_LOG_PATH",
     "get_log_path",
@@ -136,8 +135,13 @@ def log_event(record: dict, log_path: Path | None = None) -> None:
 
 
 @contextlib.contextmanager
-def log_run(command: str, datadir: str, log_path: Path | None = None,
-            extra: dict | None = None, announce: bool = True):
+def log_run(
+    command: str,
+    datadir: str,
+    log_path: Path | None = None,
+    extra: dict | None = None,
+    announce: bool = True,
+):
     """Context manager that records start/end of an allesfitter command.
 
     Parameters
@@ -194,7 +198,7 @@ def log_run(command: str, datadir: str, log_path: Path | None = None,
                 "datadir": abs_datadir,
                 "status": "failed",
                 "duration_sec": round(time.perf_counter() - t0, 3),
-                "error": "{}: {}".format(type(exc).__name__, exc),
+                "error": f"{type(exc).__name__}: {exc}",
                 "traceback": traceback.format_exc(limit=8),
             },
             log_path=log_path,
@@ -224,7 +228,7 @@ def tail(n: int = 20, log_path: Path | None = None) -> list[dict]:
     path = log_path or get_log_path()
     if not path.exists():
         return []
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         lines = f.readlines()
     out = []
     for raw in lines[-n:]:

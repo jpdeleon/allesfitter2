@@ -9,10 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from allesfitter.nested_sampling_output import write_priors_latex_table
-
 
 _PARAMS_CSV = """#name,value,fit,bounds,label,unit,coupled_with
 b_rr_tess,0.1,1,uniform 0 0.3,$R_p/R_\\star$,,
@@ -84,8 +81,8 @@ def test_units_column_propagated(tmp_path):
     out = tmp_path / "priors.txt"
     write_priors_latex_table(datadir=str(tmp_path), outpath=str(out))
     txt = out.read_text()
-    assert "rel. flux" in txt   # ln_err_flux_tess unit
-    assert " d \\\\" in txt     # b_epoch unit "d"
+    assert "rel. flux" in txt  # ln_err_flux_tess unit
+    assert " d \\\\" in txt  # b_epoch unit "d"
 
 
 def test_unknown_bounds_passed_through(tmp_path):

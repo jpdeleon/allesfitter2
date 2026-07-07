@@ -58,10 +58,20 @@ def two_band_two_inst_datadir(tmp_path):
     write_settings(datadir, inst_phot=["tess", "kepler"], bandpass="tess kepler")
     rows = (
         [
-            {"name": "b_rr_tess", "value": TRUE_RR_TESS, "fit": 1,
-             "bounds": "uniform 0.0 0.3", "label": "rr_tess"},
-            {"name": "b_rr_kepler", "value": TRUE_RR_KEPLER, "fit": 1,
-             "bounds": "uniform 0.0 0.3", "label": "rr_kepler"},
+            {
+                "name": "b_rr_tess",
+                "value": TRUE_RR_TESS,
+                "fit": 1,
+                "bounds": "uniform 0.0 0.3",
+                "label": "rr_tess",
+            },
+            {
+                "name": "b_rr_kepler",
+                "value": TRUE_RR_KEPLER,
+                "fit": 1,
+                "bounds": "uniform 0.0 0.3",
+                "label": "rr_kepler",
+            },
         ]
         + common_orbital_rows()
         + dilution_rows(["tess", "kepler"])
@@ -93,8 +103,13 @@ def one_band_two_inst_datadir(tmp_path):
     # instruments therefore share one rr scalar keyed b_rr_tess.
     rows = (
         [
-            {"name": "b_rr_tess", "value": TRUE_RR_TESS, "fit": 1,
-             "bounds": "uniform 0.0 0.3", "label": "rr_tess"},
+            {
+                "name": "b_rr_tess",
+                "value": TRUE_RR_TESS,
+                "fit": 1,
+                "bounds": "uniform 0.0 0.3",
+                "label": "rr_tess",
+            },
         ]
         + common_orbital_rows()
         + dilution_rows(["tess_pdcsap", "tess_qlp"])
@@ -117,8 +132,13 @@ def achromatic_datadir(tmp_path):
     write_settings(datadir, inst_phot=["tess"], bandpass=None)
     rows = (
         [
-            {"name": "b_rr", "value": TRUE_RR_TESS, "fit": 1,
-             "bounds": "uniform 0.0 0.3", "label": "rr"},
+            {
+                "name": "b_rr",
+                "value": TRUE_RR_TESS,
+                "fit": 1,
+                "bounds": "uniform 0.0 0.3",
+                "label": "rr",
+            },
         ]
         + common_orbital_rows()
         + dilution_rows(["tess"])
@@ -171,27 +191,61 @@ def two_band_e2e_fast_datadir(tmp_path):
         flux, err = simulate_lightcurve(time, rr, NOISE_SIGMA, rng)
         write_data_csv(datadir / f"{inst}.csv", time, flux, err)
     # Fix LDCs in addition to orbitals — only rr_tess/rr_kepler stay free.
-    write_settings(datadir, inst_phot=["tess", "kepler"], bandpass="tess kepler",
-                   extra=["ns_nlive,20", "ns_tol,5.0"])
+    write_settings(
+        datadir,
+        inst_phot=["tess", "kepler"],
+        bandpass="tess kepler",
+        extra=["ns_nlive,20", "ns_tol,5.0"],
+    )
     rows = (
         [
-            {"name": "b_rr_tess", "value": 0.08, "fit": 1,
-             "bounds": "uniform 0.0 0.3", "label": "rr_tess"},
-            {"name": "b_rr_kepler", "value": 0.08, "fit": 1,
-             "bounds": "uniform 0.0 0.3", "label": "rr_kepler"},
+            {
+                "name": "b_rr_tess",
+                "value": 0.08,
+                "fit": 1,
+                "bounds": "uniform 0.0 0.3",
+                "label": "rr_tess",
+            },
+            {
+                "name": "b_rr_kepler",
+                "value": 0.08,
+                "fit": 1,
+                "bounds": "uniform 0.0 0.3",
+                "label": "rr_kepler",
+            },
         ]
         + common_orbital_rows(fit_orbital=False)
         + dilution_rows(["tess", "kepler"])
         + err_baseline_rows(["tess", "kepler"])
         + [
-            {"name": "host_ldc_q1_tess", "value": 0.5, "fit": 0,
-             "bounds": "uniform 0 1", "label": "q1_tess"},
-            {"name": "host_ldc_q2_tess", "value": 0.5, "fit": 0,
-             "bounds": "uniform 0 1", "label": "q2_tess"},
-            {"name": "host_ldc_q1_kepler", "value": 0.5, "fit": 0,
-             "bounds": "uniform 0 1", "label": "q1_kepler"},
-            {"name": "host_ldc_q2_kepler", "value": 0.5, "fit": 0,
-             "bounds": "uniform 0 1", "label": "q2_kepler"},
+            {
+                "name": "host_ldc_q1_tess",
+                "value": 0.5,
+                "fit": 0,
+                "bounds": "uniform 0 1",
+                "label": "q1_tess",
+            },
+            {
+                "name": "host_ldc_q2_tess",
+                "value": 0.5,
+                "fit": 0,
+                "bounds": "uniform 0 1",
+                "label": "q2_tess",
+            },
+            {
+                "name": "host_ldc_q1_kepler",
+                "value": 0.5,
+                "fit": 0,
+                "bounds": "uniform 0 1",
+                "label": "q1_kepler",
+            },
+            {
+                "name": "host_ldc_q2_kepler",
+                "value": 0.5,
+                "fit": 0,
+                "bounds": "uniform 0 1",
+                "label": "q2_kepler",
+            },
         ]
     )
     write_params(datadir / "params.csv", rows=rows)
@@ -208,21 +262,29 @@ def achromatic_e2e_fast_datadir(tmp_path):
     time = phase_sampled_time(n_pts, TRUE_PERIOD, TRUE_EPOCH, rng=rng)
     flux, err = simulate_lightcurve(time, TRUE_RR_TESS, NOISE_SIGMA, rng)
     write_data_csv(datadir / "tess.csv", time, flux, err)
-    write_settings(datadir, inst_phot=["tess"], bandpass=None,
-                   extra=["ns_nlive,20", "ns_tol,5.0"])
+    write_settings(datadir, inst_phot=["tess"], bandpass=None, extra=["ns_nlive,20", "ns_tol,5.0"])
     rows = (
         [
-            {"name": "b_rr", "value": 0.08, "fit": 1,
-             "bounds": "uniform 0.0 0.3", "label": "rr"},
+            {"name": "b_rr", "value": 0.08, "fit": 1, "bounds": "uniform 0.0 0.3", "label": "rr"},
         ]
         + common_orbital_rows(fit_orbital=False)
         + dilution_rows(["tess"])
         + err_baseline_rows(["tess"])
         + [
-            {"name": "host_ldc_q1_tess", "value": 0.5, "fit": 0,
-             "bounds": "uniform 0 1", "label": "q1_tess"},
-            {"name": "host_ldc_q2_tess", "value": 0.5, "fit": 0,
-             "bounds": "uniform 0 1", "label": "q2_tess"},
+            {
+                "name": "host_ldc_q1_tess",
+                "value": 0.5,
+                "fit": 0,
+                "bounds": "uniform 0 1",
+                "label": "q1_tess",
+            },
+            {
+                "name": "host_ldc_q2_tess",
+                "value": 0.5,
+                "fit": 0,
+                "bounds": "uniform 0 1",
+                "label": "q2_tess",
+            },
         ]
     )
     write_params(datadir / "params.csv", rows=rows)

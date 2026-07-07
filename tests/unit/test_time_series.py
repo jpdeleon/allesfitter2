@@ -3,12 +3,12 @@ import pytest
 from astropy.time import Time
 
 from allesfitter.time_series import (
+    binning,
     clean,
-    sort,
+    mask_regions,
     sigma_clip,
     slide_clip,
-    binning,
-    mask_regions,
+    sort,
 )
 
 try:
@@ -103,9 +103,7 @@ class TestSigmaClip:
         assert nan_count >= 2
 
     def test_sigma_clip_return_mask(self, sample_time, sample_flux):
-        result = sigma_clip(
-            sample_time, sample_flux, low=4, high=4, return_mask=True
-        )
+        result = sigma_clip(sample_time, sample_flux, low=4, high=4, return_mask=True)
         assert isinstance(result, tuple)
         assert len(result) == 4
 

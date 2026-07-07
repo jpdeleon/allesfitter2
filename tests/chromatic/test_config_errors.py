@@ -10,22 +10,37 @@ from __future__ import annotations
 import pytest
 
 from allesfitter import config
-
 from tests.chromatic._helpers import (
     TRUE_RR_KEPLER,
     TRUE_RR_TESS,
+)
+from tests.chromatic._helpers import (
     common_orbital_rows as _common_orbital_rows,
+)
+from tests.chromatic._helpers import (
     dilution_rows as _dilution_rows,
+)
+from tests.chromatic._helpers import (
     ldc_rows as _ldc_rows,
 )
 
 
 def _chromatic_rr_rows():
     return [
-        {"name": "b_rr_tess", "value": TRUE_RR_TESS, "fit": 1,
-         "bounds": "uniform 0 0.3", "label": "rr_tess"},
-        {"name": "b_rr_kepler", "value": TRUE_RR_KEPLER, "fit": 1,
-         "bounds": "uniform 0 0.3", "label": "rr_kepler"},
+        {
+            "name": "b_rr_tess",
+            "value": TRUE_RR_TESS,
+            "fit": 1,
+            "bounds": "uniform 0 0.3",
+            "label": "rr_tess",
+        },
+        {
+            "name": "b_rr_kepler",
+            "value": TRUE_RR_KEPLER,
+            "fit": 1,
+            "bounds": "uniform 0 0.3",
+            "label": "rr_kepler",
+        },
     ]
 
 
@@ -54,8 +69,13 @@ class TestBandpassCountMismatch:
             inst_phot=["tess"],
             bandpass="tess kepler",
             params_rows=[
-                {"name": "b_rr_tess", "value": TRUE_RR_TESS, "fit": 1,
-                 "bounds": "uniform 0 0.3", "label": "rr_tess"},
+                {
+                    "name": "b_rr_tess",
+                    "value": TRUE_RR_TESS,
+                    "fit": 1,
+                    "bounds": "uniform 0 0.3",
+                    "label": "rr_tess",
+                },
             ]
             + _common_orbital_rows()
             + _dilution_rows(["tess"])
@@ -74,8 +94,15 @@ class TestDuplicateRows:
         # silent foot-gun, so we raise.
         rows = (
             _chromatic_rr_rows()
-            + [{"name": "b_rr_tess", "value": 0.20, "fit": 1,
-                "bounds": "uniform 0 0.3", "label": "rr_dup"}]
+            + [
+                {
+                    "name": "b_rr_tess",
+                    "value": 0.20,
+                    "fit": 1,
+                    "bounds": "uniform 0 0.3",
+                    "label": "rr_dup",
+                }
+            ]
             + _common_orbital_rows()
             + _dilution_rows(["tess", "kepler"])
             + _ldc_rows("tess")
@@ -94,8 +121,16 @@ class TestDuplicateRows:
         rows = (
             _chromatic_rr_rows()
             + _common_orbital_rows()
-            + [{"name": "b_period", "value": 5.0, "fit": 1,
-                "bounds": "uniform 4 6", "label": "period_dup", "unit": "d"}]
+            + [
+                {
+                    "name": "b_period",
+                    "value": 5.0,
+                    "fit": 1,
+                    "bounds": "uniform 4 6",
+                    "label": "period_dup",
+                    "unit": "d",
+                }
+            ]
             + _dilution_rows(["tess", "kepler"])
             + _ldc_rows("tess")
             + _ldc_rows("kepler")
@@ -117,10 +152,24 @@ class TestUnknownBandpass:
     def test_typo_in_rr_suffix_raises(self, make_datadir):
         # User types b_rr_tes (missing s) — must surface, not silently ignore.
         rows = (
-            [{"name": "b_rr_tes", "value": TRUE_RR_TESS, "fit": 1,
-              "bounds": "uniform 0 0.3", "label": "rr_typo"}]
-            + [{"name": "b_rr_kepler", "value": TRUE_RR_KEPLER, "fit": 1,
-               "bounds": "uniform 0 0.3", "label": "rr_kepler"}]
+            [
+                {
+                    "name": "b_rr_tes",
+                    "value": TRUE_RR_TESS,
+                    "fit": 1,
+                    "bounds": "uniform 0 0.3",
+                    "label": "rr_typo",
+                }
+            ]
+            + [
+                {
+                    "name": "b_rr_kepler",
+                    "value": TRUE_RR_KEPLER,
+                    "fit": 1,
+                    "bounds": "uniform 0 0.3",
+                    "label": "rr_kepler",
+                }
+            ]
             + _common_orbital_rows()
             + _dilution_rows(["tess", "kepler"])
             + _ldc_rows("tess")
@@ -138,8 +187,15 @@ class TestUnknownBandpass:
     def test_extra_unknown_bandpass_rr_row_raises(self, make_datadir):
         rows = (
             _chromatic_rr_rows()
-            + [{"name": "b_rr_johnson", "value": 0.12, "fit": 1,
-                "bounds": "uniform 0 0.3", "label": "rr_extra"}]
+            + [
+                {
+                    "name": "b_rr_johnson",
+                    "value": 0.12,
+                    "fit": 1,
+                    "bounds": "uniform 0 0.3",
+                    "label": "rr_extra",
+                }
+            ]
             + _common_orbital_rows()
             + _dilution_rows(["tess", "kepler"])
             + _ldc_rows("tess")
@@ -166,9 +222,17 @@ class TestChromaticParamsShapeMismatch:
         # params.csv has b_rr but no b_rr_<bp> at all → would silently
         # fall back to b_rr for every band before this check existed.
         from tests.chromatic._helpers import TRUE_RR_TESS
+
         rows = (
-            [{"name": "b_rr", "value": TRUE_RR_TESS, "fit": 1,
-              "bounds": "uniform 0 0.3", "label": "rr"}]
+            [
+                {
+                    "name": "b_rr",
+                    "value": TRUE_RR_TESS,
+                    "fit": 1,
+                    "bounds": "uniform 0 0.3",
+                    "label": "rr",
+                }
+            ]
             + _common_orbital_rows()
             + _dilution_rows(["tess", "kepler"])
             + _ldc_rows("tess")
@@ -187,8 +251,15 @@ class TestChromaticParamsShapeMismatch:
         # b_rr_tess given, b_rr_kepler missing — would silently default the
         # missing key to None and fall back to nonexistent b_rr.
         rows = (
-            [{"name": "b_rr_tess", "value": TRUE_RR_TESS, "fit": 1,
-              "bounds": "uniform 0 0.3", "label": "rr_tess"}]
+            [
+                {
+                    "name": "b_rr_tess",
+                    "value": TRUE_RR_TESS,
+                    "fit": 1,
+                    "bounds": "uniform 0 0.3",
+                    "label": "rr_tess",
+                }
+            ]
             + _common_orbital_rows()
             + _dilution_rows(["tess", "kepler"])
             + _ldc_rows("tess")
@@ -209,10 +280,20 @@ class TestChromaticParamsShapeMismatch:
         # valid chromatic.
         rows = (
             [
-                {"name": "b_rr", "value": TRUE_RR_TESS, "fit": 1,
-                 "bounds": "uniform 0 0.3", "label": "rr"},
-                {"name": "b_rr_tess", "value": TRUE_RR_TESS, "fit": 1,
-                 "bounds": "uniform 0 0.3", "label": "rr_tess"},
+                {
+                    "name": "b_rr",
+                    "value": TRUE_RR_TESS,
+                    "fit": 1,
+                    "bounds": "uniform 0 0.3",
+                    "label": "rr",
+                },
+                {
+                    "name": "b_rr_tess",
+                    "value": TRUE_RR_TESS,
+                    "fit": 1,
+                    "bounds": "uniform 0 0.3",
+                    "label": "rr_tess",
+                },
             ]
             + _common_orbital_rows()
             + _dilution_rows(["tess", "kepler"])
@@ -270,14 +351,37 @@ class TestOrphanPerInstSettings:
         # host_ldc_q1/q2 take effect (no longer a silent failure).
         insts = ["tglc120_s90", "tglc120_s63s64"]
         rows = (
-            [{"name": "b_rr_tess", "value": TRUE_RR_TESS, "fit": 1,
-              "bounds": "uniform 0 0.3", "label": "rr_tess"}]
+            [
+                {
+                    "name": "b_rr_tess",
+                    "value": TRUE_RR_TESS,
+                    "fit": 1,
+                    "bounds": "uniform 0 0.3",
+                    "label": "rr_tess",
+                }
+            ]
             + _common_orbital_rows()
             + _dilution_rows(insts)
-            + [{"name": f"ln_err_flux_{i}", "value": -7.0, "fit": 0,
-                "bounds": "uniform -15 0", "label": f"ln_err_{i}"} for i in insts]
-            + [{"name": f"baseline_offset_flux_{i}", "value": 0.0, "fit": 0,
-                "bounds": "uniform -0.05 0.05", "label": f"offset_{i}"} for i in insts]
+            + [
+                {
+                    "name": f"ln_err_flux_{i}",
+                    "value": -7.0,
+                    "fit": 0,
+                    "bounds": "uniform -15 0",
+                    "label": f"ln_err_{i}",
+                }
+                for i in insts
+            ]
+            + [
+                {
+                    "name": f"baseline_offset_flux_{i}",
+                    "value": 0.0,
+                    "fit": 0,
+                    "bounds": "uniform -0.05 0.05",
+                    "label": f"offset_{i}",
+                }
+                for i in insts
+            ]
             + _ldc_rows("tess")
         )
         datadir = make_datadir(
@@ -299,14 +403,37 @@ class TestOrphanPerInstSettings:
         # must name the affected instruments and call out the confusion.
         insts = ["tglc120_s90", "tglc120_s63s64"]
         rows = (
-            [{"name": "b_rr_tess", "value": TRUE_RR_TESS, "fit": 1,
-              "bounds": "uniform 0 0.3", "label": "rr_tess"}]
+            [
+                {
+                    "name": "b_rr_tess",
+                    "value": TRUE_RR_TESS,
+                    "fit": 1,
+                    "bounds": "uniform 0 0.3",
+                    "label": "rr_tess",
+                }
+            ]
             + _common_orbital_rows()
             + _dilution_rows(insts)
-            + [{"name": f"ln_err_flux_{i}", "value": -7.0, "fit": 0,
-                "bounds": "uniform -15 0", "label": f"ln_err_{i}"} for i in insts]
-            + [{"name": f"baseline_offset_flux_{i}", "value": 0.0, "fit": 0,
-                "bounds": "uniform -0.05 0.05", "label": f"offset_{i}"} for i in insts]
+            + [
+                {
+                    "name": f"ln_err_flux_{i}",
+                    "value": -7.0,
+                    "fit": 0,
+                    "bounds": "uniform -15 0",
+                    "label": f"ln_err_{i}",
+                }
+                for i in insts
+            ]
+            + [
+                {
+                    "name": f"baseline_offset_flux_{i}",
+                    "value": 0.0,
+                    "fit": 0,
+                    "bounds": "uniform -0.05 0.05",
+                    "label": f"offset_{i}",
+                }
+                for i in insts
+            ]
             + _ldc_rows("tess")
         )
         datadir = make_datadir(
@@ -329,19 +456,43 @@ class TestOrphanPerInstSettings:
         # zero effect on the transit shape.
         insts = ["tess"]
         rows = (
-            [{"name": "b_rr", "value": TRUE_RR_TESS, "fit": 1,
-              "bounds": "uniform 0 0.3", "label": "rr"}]
+            [
+                {
+                    "name": "b_rr",
+                    "value": TRUE_RR_TESS,
+                    "fit": 1,
+                    "bounds": "uniform 0 0.3",
+                    "label": "rr",
+                }
+            ]
             + _common_orbital_rows()
             + _dilution_rows(insts)
-            + [{"name": f"ln_err_flux_{i}", "value": -7.0, "fit": 0,
-                "bounds": "uniform -15 0", "label": f"ln_err_{i}"} for i in insts]
-            + [{"name": f"baseline_offset_flux_{i}", "value": 0.0, "fit": 0,
-                "bounds": "uniform -0.05 0.05", "label": f"offset_{i}"} for i in insts]
+            + [
+                {
+                    "name": f"ln_err_flux_{i}",
+                    "value": -7.0,
+                    "fit": 0,
+                    "bounds": "uniform -15 0",
+                    "label": f"ln_err_{i}",
+                }
+                for i in insts
+            ]
+            + [
+                {
+                    "name": f"baseline_offset_flux_{i}",
+                    "value": 0.0,
+                    "fit": 0,
+                    "bounds": "uniform -0.05 0.05",
+                    "label": f"offset_{i}",
+                }
+                for i in insts
+            ]
             + _ldc_rows("tess")
         )
         # make_datadir's write_settings auto-emits host_ld_law_<inst>,quad —
         # write the project manually here so the host_ld_law row is missing.
         import pathlib
+
         datadir = make_datadir(
             "default_quad",
             inst_phot=insts,
@@ -351,7 +502,8 @@ class TestOrphanPerInstSettings:
         # Strip the host_ld_law row to test the *default* code path.
         settings_path = pathlib.Path(datadir) / "settings.csv"
         kept = [
-            line for line in settings_path.read_text().splitlines()
+            line
+            for line in settings_path.read_text().splitlines()
             if not line.startswith("host_ld_law_")
         ]
         settings_path.write_text("\n".join(kept) + "\n")
@@ -365,17 +517,41 @@ class TestOrphanPerInstSettings:
         # must not override an explicit 'none'.
         insts = ["tess"]
         rows = (
-            [{"name": "b_rr", "value": TRUE_RR_TESS, "fit": 1,
-              "bounds": "uniform 0 0.3", "label": "rr"}]
+            [
+                {
+                    "name": "b_rr",
+                    "value": TRUE_RR_TESS,
+                    "fit": 1,
+                    "bounds": "uniform 0 0.3",
+                    "label": "rr",
+                }
+            ]
             + _common_orbital_rows()
             + _dilution_rows(insts)
-            + [{"name": f"ln_err_flux_{i}", "value": -7.0, "fit": 0,
-                "bounds": "uniform -15 0", "label": f"ln_err_{i}"} for i in insts]
-            + [{"name": f"baseline_offset_flux_{i}", "value": 0.0, "fit": 0,
-                "bounds": "uniform -0.05 0.05", "label": f"offset_{i}"} for i in insts]
+            + [
+                {
+                    "name": f"ln_err_flux_{i}",
+                    "value": -7.0,
+                    "fit": 0,
+                    "bounds": "uniform -15 0",
+                    "label": f"ln_err_{i}",
+                }
+                for i in insts
+            ]
+            + [
+                {
+                    "name": f"baseline_offset_flux_{i}",
+                    "value": 0.0,
+                    "fit": 0,
+                    "bounds": "uniform -0.05 0.05",
+                    "label": f"offset_{i}",
+                }
+                for i in insts
+            ]
             + _ldc_rows("tess")
         )
         import pathlib
+
         datadir = make_datadir(
             "explicit_none",
             inst_phot=insts,
@@ -398,14 +574,37 @@ class TestOrphanPerInstSettings:
         # name, config.init succeeds. This locks the validator from over-firing.
         insts = ["tglc120_s90", "tglc120_s63s64"]
         rows = (
-            [{"name": "b_rr_tess", "value": TRUE_RR_TESS, "fit": 1,
-              "bounds": "uniform 0 0.3", "label": "rr_tess"}]
+            [
+                {
+                    "name": "b_rr_tess",
+                    "value": TRUE_RR_TESS,
+                    "fit": 1,
+                    "bounds": "uniform 0 0.3",
+                    "label": "rr_tess",
+                }
+            ]
             + _common_orbital_rows()
             + _dilution_rows(insts)
-            + [{"name": f"ln_err_flux_{i}", "value": -7.0, "fit": 0,
-                "bounds": "uniform -15 0", "label": f"ln_err_{i}"} for i in insts]
-            + [{"name": f"baseline_offset_flux_{i}", "value": 0.0, "fit": 0,
-                "bounds": "uniform -0.05 0.05", "label": f"offset_{i}"} for i in insts]
+            + [
+                {
+                    "name": f"ln_err_flux_{i}",
+                    "value": -7.0,
+                    "fit": 0,
+                    "bounds": "uniform -15 0",
+                    "label": f"ln_err_{i}",
+                }
+                for i in insts
+            ]
+            + [
+                {
+                    "name": f"baseline_offset_flux_{i}",
+                    "value": 0.0,
+                    "fit": 0,
+                    "bounds": "uniform -0.05 0.05",
+                    "label": f"offset_{i}",
+                }
+                for i in insts
+            ]
             + _ldc_rows("tess")
         )
         datadir = make_datadir(

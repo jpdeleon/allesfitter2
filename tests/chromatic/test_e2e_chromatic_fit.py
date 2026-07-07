@@ -25,7 +25,6 @@ import pytest
 import allesfitter
 from allesfitter import config
 
-
 pytestmark = pytest.mark.slow
 
 
@@ -61,21 +60,18 @@ def test_ns_recovers_per_band_rr(two_band_e2e_fast_datadir, truth):
     assert samples.shape[1] == len(fitkeys)
     assert np.isfinite(logz)
 
-    medians = {
-        k: _weighted_quantile(samples[:, i], weights, 0.5)
-        for i, k in enumerate(fitkeys)
-    }
+    medians = {k: _weighted_quantile(samples[:, i], weights, 0.5) for i, k in enumerate(fitkeys)}
     assert "b_rr_tess" in medians and "b_rr_kepler" in medians
     assert "b_rr" not in medians, "achromatic key should not appear in chromatic fit"
 
     # NS recovers each band's injected rr within a generous tolerance.
     # SNR floor at NOISE_SIGMA=5e-4, 80 pts → per-rr uncertainty ~few e-3.
-    assert abs(medians["b_rr_tess"] - truth["rr_tess"]) < 0.02, (
-        f"rr_tess median {medians['b_rr_tess']} drifted from truth {truth['rr_tess']}"
-    )
-    assert abs(medians["b_rr_kepler"] - truth["rr_kepler"]) < 0.02, (
-        f"rr_kepler median {medians['b_rr_kepler']} drifted from truth {truth['rr_kepler']}"
-    )
+    assert (
+        abs(medians["b_rr_tess"] - truth["rr_tess"]) < 0.02
+    ), f"rr_tess median {medians['b_rr_tess']} drifted from truth {truth['rr_tess']}"
+    assert (
+        abs(medians["b_rr_kepler"] - truth["rr_kepler"]) < 0.02
+    ), f"rr_kepler median {medians['b_rr_kepler']} drifted from truth {truth['rr_kepler']}"
 
 
 # --------------------------------------------------------------------------- #
@@ -91,8 +87,5 @@ def test_ns_achromatic_backcompat_runs_end_to_end(achromatic_e2e_fast_datadir, t
 
     samples, weights, logz = _load_posterior(datadir)
     assert np.isfinite(logz)
-    medians = {
-        k: _weighted_quantile(samples[:, i], weights, 0.5)
-        for i, k in enumerate(fitkeys)
-    }
+    medians = {k: _weighted_quantile(samples[:, i], weights, 0.5) for i, k in enumerate(fitkeys)}
     assert abs(medians["b_rr"] - truth["rr_tess"]) < 0.02

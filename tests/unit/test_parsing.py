@@ -15,7 +15,6 @@ from allesfitter.validation.parsing import (
     read_settings,
 )
 
-
 # ---------------------------------------------------------------------------
 # read_csv_rows
 # ---------------------------------------------------------------------------
@@ -28,12 +27,7 @@ def test_read_csv_rows_returns_empty_for_missing_file(tmp_path):
 def test_read_csv_rows_skips_blanks_and_comments_and_strips(tmp_path):
     p = tmp_path / "data.csv"
     p.write_text(
-        "# a comment\n"
-        "\n"
-        "  a , 1 , uniform 0 1 \n"
-        "   \n"
-        "#another comment\n"
-        "b,2\n"
+        "# a comment\n" "\n" "  a , 1 , uniform 0 1 \n" "   \n" "#another comment\n" "b,2\n"
     )
 
     rows = read_csv_rows(p)
@@ -101,8 +95,8 @@ def test_parse_bounds_unknown_keyword():
 
 
 def test_parse_bounds_bad_arity_or_numbers():
-    assert parse_bounds("uniform 0") == ("__bad__", ())          # wrong arity
-    assert parse_bounds("uniform 0 abc") == ("__bad__", ())      # non-numeric
+    assert parse_bounds("uniform 0") == ("__bad__", ())  # wrong arity
+    assert parse_bounds("uniform 0 abc") == ("__bad__", ())  # non-numeric
 
 
 # ---------------------------------------------------------------------------

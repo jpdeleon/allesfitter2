@@ -48,16 +48,12 @@ def test_loader_legacy_3col(tmp_path):
 
 def test_loader_legacy_4col(tmp_path):
     p = tmp_path / "lc.csv"
-    p.write_text(
-        "0.0,1.0,0.001,1.21\n"
-        "1.0,1.001,0.001,1.22\n"
-        "2.0,0.999,0.001,1.23\n"
-    )
+    p.write_text("0.0,1.0,0.001,1.21\n" "1.0,1.001,0.001,1.22\n" "2.0,0.999,0.001,1.23\n")
     time, primary, primary_err, custom_series, covs = _load_inst_csv(str(p))
     # Legacy positional layout: 4th column → custom_series alias only,
     # no named-covariates dict (user never declared a name).
-    assert 'custom_series' in covs
-    np.testing.assert_array_equal(covs['custom_series'], [1.21, 1.22, 1.23])
+    assert "custom_series" in covs
+    np.testing.assert_array_equal(covs["custom_series"], [1.21, 1.22, 1.23])
     np.testing.assert_array_equal(custom_series, [1.21, 1.22, 1.23])
 
 
@@ -70,13 +66,13 @@ def test_loader_header_named_covariates(tmp_path):
         "2.0,0.999,0.001,1.23,1.47,252.0\n"
     )
     time, primary, primary_err, custom_series, covs = _load_inst_csv(str(p))
-    assert set(covs.keys()) == {'airmass', 'fwhm', 'sky', 'custom_series'}
-    np.testing.assert_array_equal(covs['airmass'], [1.21, 1.22, 1.23])
-    np.testing.assert_array_equal(covs['fwhm'], [1.45, 1.46, 1.47])
-    np.testing.assert_array_equal(covs['sky'], [250.0, 251.0, 252.0])
+    assert set(covs.keys()) == {"airmass", "fwhm", "sky", "custom_series"}
+    np.testing.assert_array_equal(covs["airmass"], [1.21, 1.22, 1.23])
+    np.testing.assert_array_equal(covs["fwhm"], [1.45, 1.46, 1.47])
+    np.testing.assert_array_equal(covs["sky"], [250.0, 251.0, 252.0])
     # Backward-compat: first ancillary column is also reachable as
     # 'custom_series' so existing `_against,custom_series` still works.
-    np.testing.assert_array_equal(covs['custom_series'], [1.21, 1.22, 1.23])
+    np.testing.assert_array_equal(covs["custom_series"], [1.21, 1.22, 1.23])
     np.testing.assert_array_equal(custom_series, [1.21, 1.22, 1.23])
 
 
@@ -85,14 +81,12 @@ def test_loader_ignores_unrelated_hash_comment(tmp_path):
     header (no `time,flux,flux_err` schema tokens)."""
     p = tmp_path / "lc.csv"
     p.write_text(
-        "# This is a comment, not a header line\n"
-        "0.0,1.0,0.001,1.21\n"
-        "1.0,1.001,0.001,1.22\n"
+        "# This is a comment, not a header line\n" "0.0,1.0,0.001,1.21\n" "1.0,1.001,0.001,1.22\n"
     )
     time, primary, primary_err, custom_series, covs = _load_inst_csv(str(p))
     # No header → legacy 4-col positional behaviour.
-    assert 'airmass' not in covs
-    np.testing.assert_array_equal(covs['custom_series'], [1.21, 1.22])
+    assert "airmass" not in covs
+    np.testing.assert_array_equal(covs["custom_series"], [1.21, 1.22])
 
 
 # ---------------------------------------------------------------------------
@@ -119,7 +113,7 @@ def _params_csv() -> str:
     )
 
 
-def _settings_csv(against='time') -> str:
+def _settings_csv(against="time") -> str:
     return (
         "#name,value\n"
         "companions_phot,b\n"
@@ -161,7 +155,7 @@ def _write_lc(path: Path, with_airmass: bool, with_header: bool):
     return t, flux, err, airmass
 
 
-def _build_datadir(tmp_path, against='time', with_airmass=True, with_header=True):
+def _build_datadir(tmp_path, against="time", with_airmass=True, with_header=True):
     d = tmp_path / "data"
     d.mkdir()
     (d / "results").mkdir()
@@ -172,7 +166,7 @@ def _build_datadir(tmp_path, against='time', with_airmass=True, with_header=True
 
 
 def test_unknown_covariate_raises_actionable_message(tmp_path):
-    d = _build_datadir(tmp_path, against='airmass', with_airmass=False, with_header=False)
+    d = _build_datadir(tmp_path, against="airmass", with_airmass=False, with_header=False)
     with pytest.raises(ValueError, match="has no column named 'airmass'"):
         Basement(str(d), quiet=True)
 
@@ -199,11 +193,11 @@ def test_basement_rejects_inconsistent_companion(tmp_path):
 
 
 def test_basement_loads_covariate_axis_into_data(tmp_path):
-    d = _build_datadir(tmp_path, against='airmass', with_airmass=True, with_header=True)
+    d = _build_datadir(tmp_path, against="airmass", with_airmass=True, with_header=True)
     b = Basement(str(d), quiet=True)
-    assert 'covariates' in b.data['lco']
-    assert 'airmass' in b.data['lco']['covariates']
-    assert len(b.data['lco']['covariates']['airmass']) == len(b.data['lco']['time'])
+    assert "covariates" in b.data["lco"]
+    assert "airmass" in b.data["lco"]["covariates"]
+    assert len(b.data["lco"]["covariates"]["airmass"]) == len(b.data["lco"]["time"])
 
 
 def test_hybrid_poly_against_airmass_matches_polyfit(tmp_path):
@@ -217,24 +211,27 @@ def test_hybrid_poly_against_airmass_matches_polyfit(tmp_path):
     # axis. Then assert the fitted baseline matches np.polyfit on the
     # covariate.
     (d / "params.csv").write_text(_params_csv())
-    settings = _settings_csv(against='airmass').replace(
-        'baseline_flux_lco,sample_linear', 'baseline_flux_lco,hybrid_poly_1')
+    settings = _settings_csv(against="airmass").replace(
+        "baseline_flux_lco,sample_linear", "baseline_flux_lco,hybrid_poly_1"
+    )
     (d / "settings.csv").write_text(settings)
     t, flux, err, airmass = _write_lc(d / "lco.csv", with_airmass=True, with_header=True)
 
     b = Basement(str(d), quiet=True)
     from allesfitter.computer import calculate_baseline, update_params
+
     config.BASEMENT = b
     params = update_params(np.array(b.theta_0, dtype=float))
-    bl = calculate_baseline(params, 'lco', 'flux',
-                            model=np.ones_like(flux), yerr_w=err)
+    bl = calculate_baseline(params, "lco", "flux", model=np.ones_like(flux), yerr_w=err)
     # Expected baseline = linear polyfit of (airmass, flux - 1) ≈ -0.01*(airmass-1)
     pf = np.polyfit(airmass, flux - 1.0, 1)
     expected = np.polyval(pf, airmass)
     # hybrid_poly internally rescales x → [0,1]; check that the fitted
     # baseline tracks the polyfit shape within a few mmag.
-    assert np.allclose(bl - bl.mean(), expected - expected.mean(), atol=2e-3), \
-        (bl[:5], expected[:5])
+    assert np.allclose(bl - bl.mean(), expected - expected.mean(), atol=2e-3), (
+        bl[:5],
+        expected[:5],
+    )
 
 
 def test_gp_against_unsorted_covariate_runs(tmp_path):
@@ -249,9 +246,9 @@ def test_gp_against_unsorted_covariate_runs(tmp_path):
         "baseline_gp_matern32_lnrho_flux_lco, 0,1,uniform -1 3,,,\n"
     )
     (d / "params.csv").write_text(p)
-    settings = _settings_csv(against='airmass').replace(
-        'baseline_flux_lco,sample_linear',
-        'baseline_flux_lco,sample_GP_Matern32')
+    settings = _settings_csv(against="airmass").replace(
+        "baseline_flux_lco,sample_linear", "baseline_flux_lco,sample_GP_Matern32"
+    )
     (d / "settings.csv").write_text(settings)
     # Write a CSV whose airmass column is intentionally non-monotone
     # (oscillates). Time is sorted; airmass is not.
@@ -263,8 +260,7 @@ def test_gp_against_unsorted_covariate_runs(tmp_path):
     err = np.full(n, 1e-3)
     lines = ["#time,flux,flux_err,airmass"]
     for i in range(n):
-        lines.append(
-            f"{t[i]:.10f},{flux[i]:.10f},{err[i]:.10f},{airmass[i]:.6f}")
+        lines.append(f"{t[i]:.10f},{flux[i]:.10f},{err[i]:.10f},{airmass[i]:.6f}")
     (d / "lco.csv").write_text("\n".join(lines) + "\n")
 
     b = Basement(str(d), quiet=True)

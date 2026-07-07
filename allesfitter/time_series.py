@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Created on Wed Dec 16 17:15:26 2020
 
@@ -14,7 +13,6 @@ Twitter: m_n_guenther
 Web: www.mnguenther.com
 """
 
-from __future__ import print_function, division, absolute_import
 
 #::: modules
 import numpy as np
@@ -30,15 +28,21 @@ except ImportError:
     flatten = None
 
 #::: my modules
-from .exoworlds_rdx.lightcurves.lightcurve_tools import rebin_err
-
 #::: plotting settings
 import seaborn as sns
-sns.set(context='paper', style='ticks', palette='deep', font='sans-serif', font_scale=1.5, color_codes=True)
-sns.set_style({"xtick.direction": "in","ytick.direction": "in"})
-sns.set_context(rc={'lines.markeredgewidth': 1})
 
+from .exoworlds_rdx.lightcurves.lightcurve_tools import rebin_err
 
+sns.set(
+    context="paper",
+    style="ticks",
+    palette="deep",
+    font="sans-serif",
+    font_scale=1.5,
+    color_codes=True,
+)
+sns.set_style({"xtick.direction": "in", "ytick.direction": "in"})
+sns.set_context(rc={"lines.markeredgewidth": 1})
 
 
 ###############################################################################
@@ -61,7 +65,7 @@ def clean(time, y, y_err=None):
     Returns
     -------
     Cleaned time, y, and y_err (shorter arrays!)
-    
+
     Explanation
     -----------
     The input might be of a mixutre of types, such as list, np.ndarray, or np.ma.core.MaskedArray.
@@ -72,7 +76,7 @@ def clean(time, y, y_err=None):
     Tested on the following example:
         input:
             time = np.linspace(1,6,6)
-            flux = np.ma.array([1,2,3,4,np.nan,np.inf], 
+            flux = np.ma.array([1,2,3,4,np.nan,np.inf],
                                mask=[True,True,False,False,False,False])
             flux_err = None
         returns:
@@ -88,16 +92,15 @@ def clean(time, y, y_err=None):
     time = np.ma.array(time)
     y = np.ma.array(y)
     if y_err is None:
-        mask = np.ma.masked_invalid(time*y).mask
+        mask = np.ma.masked_invalid(time * y).mask
     else:
         y_err = np.ma.array(y_err)
-        mask = np.ma.masked_invalid(time*y*y_err).mask
+        mask = np.ma.masked_invalid(time * y * y_err).mask
         y_err = np.array(y_err[~mask])
     time = np.array(time[~mask])
     y = np.array(y[~mask])
-        
+
     return time, y, y_err
-        
 
 
 ###############################################################################
@@ -125,9 +128,8 @@ def sort(time, y, y_err=None):
     y = y[ind_sort]
     if y_err is not None:
         y_err = y_err[ind_sort]
-        
-    return time, y, y_err
 
+    return time, y, y_err
 
 
 ###############################################################################
@@ -154,20 +156,23 @@ def sigma_clip(time, y, low=4, high=4, return_mask=False):
     -------
     Clipped y (outliers replaced with NaN).
     """
-    y2 = sigma_clip_(np.ma.masked_invalid(y), sigma_lower=low, sigma_upper=high) #astropy wants masked arrays
+    y2 = sigma_clip_(
+        np.ma.masked_invalid(y), sigma_lower=low, sigma_upper=high
+    )  # astropy wants masked arrays
     mask = y2.mask
-    y2 = np.array(y2.filled(np.nan)) #use NaN instead of masked arrays, because masked arrays drive me crazy
-    
+    y2 = np.array(
+        y2.filled(np.nan)
+    )  # use NaN instead of masked arrays, because masked arrays drive me crazy
+
     if not return_mask:
         return y2
-    
-    else: 
+
+    else:
         with np.testing.suppress_warnings() as sup:
             sup.filter(UserWarning)
             mask_upper = (y > np.nanmedian(y2)) * mask
             mask_lower = (y < np.nanmedian(y2)) * mask
         return y2, mask, mask_upper, mask_lower
-
 
 
 ###############################################################################
@@ -202,18 +207,19 @@ def slide_clip(time, y, window_length=1, low=4, high=4, return_mask=False):
             "slide_clip requires the optional 'wotan' package. "
             "Install it with `pip install wotan` (or `uv pip install wotan`)."
         )
-    y_flat = flatten(time, y, method='biweight', window_length=window_length)
-    y2, mask, mask_upper, mask_lower = sigma_clip(time, y_flat, low=low, high=high, return_mask=True)
-    y3 = 1*y
+    y_flat = flatten(time, y, method="biweight", window_length=window_length)
+    y2, mask, mask_upper, mask_lower = sigma_clip(
+        time, y_flat, low=low, high=high, return_mask=True
+    )
+    y3 = 1 * y
     y3[mask] = np.nan
-    
+
     if not return_mask:
         return y3
-    
+
     else:
         return y3, mask, mask_upper, mask_lower
-    
-    
+
 
 ###############################################################################
 #::: binning
@@ -241,11 +247,11 @@ def binning(time, y, y_err=None, dt=None):
     """
     time, y, y_err = clean(time, y, y_err)
     if dt is not None:
-        return rebin_err(time, y, y_err, dt=dt, 
-                         ferr_type='medsig', ferr_style='sem', sigmaclip=True)[0:3]
+        return rebin_err(
+            time, y, y_err, dt=dt, ferr_type="medsig", ferr_style="sem", sigmaclip=True
+        )[0:3]
     else:
         return time, y, y_err
-
 
 
 ###############################################################################
@@ -254,7 +260,7 @@ def binning(time, y, y_err=None, dt=None):
 def mask_regions(time, y, bad_regions=None):
     """
     Mask regions by filling y and y_err with NaN for those selected times.
-    
+
     Parameters
     ----------
     time : array of flaot
@@ -264,19 +270,19 @@ def mask_regions(time, y, bad_regions=None):
     y_err : array of float or None, optional
         Error of the data. The default is None.
     bad_regions : list or None, optional
-        List of tuples like [(start0,end0),(start1,end1),...], 
-        where any (start,end) are the start and end points of bad data bad_regions. 
+        List of tuples like [(start0,end0),(start1,end1),...],
+        where any (start,end) are the start and end points of bad data bad_regions.
         The default is None.
 
     Returns
     -------
     Masked time, y, and y_err (bad_regions of y and y_err replaced with NaN)
     """
-    y2 = 1.*y
-    
+    y2 = 1.0 * y
+
     if bad_regions is not None:
         for bad_region in bad_regions:
-            ind_bad = np.where((time>=bad_region[0]) & (time<=bad_region[1]))[0]
+            ind_bad = np.where((time >= bad_region[0]) & (time <= bad_region[1]))[0]
             y2[ind_bad] = np.nan
-    
+
     return y2

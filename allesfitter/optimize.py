@@ -17,14 +17,12 @@ The acceptance gates (improvement, bounds, multistart consistency) make
 beat the user's hand-tuned ``theta_0``, BASEMENT is left untouched.
 """
 
-from __future__ import print_function, division, absolute_import
-
 import json
 import os
 import pickle
 import sys
 import warnings
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from time import time as _now
 from typing import Any
 
@@ -32,7 +30,7 @@ import numpy as np
 from scipy import optimize as scipy_opt
 
 # Filename for the pickled CMA-ES strategy state used by resume=True.
-_CMA_STATE_FILENAME = 'optimize_cma_state.pkl'
+_CMA_STATE_FILENAME = "optimize_cma_state.pkl"
 
 from . import config
 from .mcmc import mcmc_lnprob
@@ -52,13 +50,13 @@ def logprint(*text: Any, quiet: bool = False) -> None:
     """
     if not quiet:
         print(*text)
-    b = getattr(config, 'BASEMENT', None)
+    b = getattr(config, "BASEMENT", None)
     if b is None:
         return
     original = sys.stdout
     try:
-        logpath = os.path.join(b.outdir, 'logfile_' + b.now + '.log')
-        with open(logpath, 'a') as f:
+        logpath = os.path.join(b.outdir, "logfile_" + b.now + ".log")
+        with open(logpath, "a") as f:
             sys.stdout = f
             print(*text)
     except OSError:
@@ -70,14 +68,15 @@ def logprint(*text: Any, quiet: bool = False) -> None:
 
 
 # Methods that scipy.optimize.minimize accepts a `bounds` keyword for.
-_LOCAL_METHODS = ('L-BFGS-B', 'Powell', 'TNC', 'SLSQP', 'trust-constr')
+_LOCAL_METHODS = ("L-BFGS-B", "Powell", "TNC", "SLSQP", "trust-constr")
 # Global methods we wrap explicitly.
-_GLOBAL_METHODS = ('cmaes', 'dual_annealing', 'differential_evolution')
+_GLOBAL_METHODS = ("cmaes", "dual_annealing", "differential_evolution")
 
 
 @dataclass
 class OptimizeResult:
     """Lightweight, JSON-serialisable summary of an optimize() run."""
+
     method: str
     accepted: bool
     success: bool
@@ -107,17 +106,15 @@ def _extract_bounds(basement, normal_sigma_clip: float = 5.0):
     bounds = []
     for b in basement.bounds:
         kind = b[0]
-        if kind == 'uniform':
+        if kind == "uniform":
             bounds.append((float(b[1]), float(b[2])))
-        elif kind == 'trunc_normal':
+        elif kind == "trunc_normal":
             bounds.append((float(b[3]), float(b[4])))
-        elif kind == 'normal':
+        elif kind == "normal":
             mu, sigma = float(b[1]), float(b[2])
-            bounds.append((mu - normal_sigma_clip * sigma,
-                           mu + normal_sigma_clip * sigma))
+            bounds.append((mu - normal_sigma_clip * sigma, mu + normal_sigma_clip * sigma))
         else:
-            raise ValueError(
-                "optimize: unsupported prior kind '{}' for fitkey".format(kind))
+            raise ValueError(f"optimize: unsupported prior kind '{kind}' for fitkey")
     return bounds
 
 
@@ -169,26 +166,34 @@ def _default_sigma0(theta_0, bounds, basement):
 def _run_local(method, x0, bounds, maxiter=None, options=None):
     opts = dict(options or {})
     if maxiter is not None:
-        opts.setdefault('maxiter', int(maxiter))
-    res = scipy_opt.minimize(_objective, x0, method=method,
-                             bounds=bounds, options=opts)
+        opts.setdefault("maxiter", int(maxiter))
+    res = scipy_opt.minimize(_objective, x0, method=method, bounds=bounds, options=opts)
     return np.asarray(res.x, dtype=float), int(res.nfev), bool(res.success)
 
 
 def _run_differential_evolution(x0, bounds, maxiter=None, seed=None, workers=1):
     res = scipy_opt.differential_evolution(
-        _objective, bounds=bounds, init='sobol', x0=x0,
+        _objective,
+        bounds=bounds,
+        init="sobol",
+        x0=x0,
         maxiter=int(maxiter) if maxiter else 100,
-        seed=seed, polish=False, workers=workers, updating='deferred',
+        seed=seed,
+        polish=False,
+        workers=workers,
+        updating="deferred",
     )
     return np.asarray(res.x, dtype=float), int(res.nfev), bool(res.success)
 
 
 def _run_dual_annealing(x0, bounds, maxiter=None, seed=None):
     res = scipy_opt.dual_annealing(
-        _objective, bounds=bounds, x0=x0,
+        _objective,
+        bounds=bounds,
+        x0=x0,
         maxiter=int(maxiter) if maxiter else 1000,
-        seed=seed, no_local_search=False,
+        seed=seed,
+        no_local_search=False,
     )
     return np.asarray(res.x, dtype=float), int(res.nfev), bool(res.success)
 
@@ -198,15 +203,15 @@ def _load_cma_state(path, ndim, bounds):
     it matches the current problem dimensions. Returns the strategy or
     raises ValueError on mismatch.
     """
-    with open(path, 'rb') as f:
+    with open(path, "rb") as f:
         es, meta = pickle.load(f)
-    if int(meta.get('ndim', -1)) != int(ndim):
+    if int(meta.get("ndim", -1)) != int(ndim):
         raise ValueError(
             "optimize: resume=True but saved CMA-ES state at '{p}' was for "
             "ndim={saved}, current fit has ndim={now}. Delete the file or "
-            "set resume=False.".format(p=path, saved=meta.get('ndim'), now=ndim)
+            "set resume=False.".format(p=path, saved=meta.get("ndim"), now=ndim)
         )
-    saved_bounds = meta.get('bounds')
+    saved_bounds = meta.get("bounds")
     if saved_bounds is not None:
         # Tolerate tiny float-repr drift but flag real changes.
         try:
@@ -215,7 +220,7 @@ def _load_cma_state(path, ndim, bounds):
             if sb.shape != cb.shape or not np.allclose(sb, cb, atol=1e-12):
                 raise ValueError(
                     "optimize: resume=True but bounds in saved state differ "
-                    "from current bounds. Delete '{p}' or set resume=False.".format(p=path)
+                    f"from current bounds. Delete '{path}' or set resume=False."
                 )
         except ValueError:
             raise
@@ -226,14 +231,15 @@ def _load_cma_state(path, ndim, bounds):
 
 def _save_cma_state(path, es, ndim, bounds):
     """Pickle (strategy, metadata) to `path` for a future resume=True."""
-    meta = {'ndim': int(ndim), 'bounds': [list(b) for b in bounds]}
-    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
-    with open(path, 'wb') as f:
+    meta = {"ndim": int(ndim), "bounds": [list(b) for b in bounds]}
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "wb") as f:
         pickle.dump((es, meta), f, protocol=pickle.HIGHEST_PROTOCOL)
 
 
-def _run_cmaes(x0, bounds, sigma0, maxfevals=None, seed=None, verbose=False,
-               resume_path=None, save_path=None):
+def _run_cmaes(
+    x0, bounds, sigma0, maxfevals=None, seed=None, verbose=False, resume_path=None, save_path=None
+):
     """Run CMA-ES; optionally resume from a pickled state.
 
     Parameters
@@ -260,14 +266,14 @@ def _run_cmaes(x0, bounds, sigma0, maxfevals=None, seed=None, verbose=False,
     if resume_path and os.path.exists(resume_path):
         # Caller already validated ndim/bounds via _load_cma_state when it
         # decided whether to resume; we just unpickle here.
-        with open(resume_path, 'rb') as f:
+        with open(resume_path, "rb") as f:
             es, _meta = pickle.load(f)
         resumed = True
         # If the user passed a maxfevals budget for THIS call, extend the
         # strategy's option so es.optimize() runs that many more evals.
         if maxfevals is not None:
             try:
-                es.opts.set({'maxfevals': int(es.countevals) + int(maxfevals)})
+                es.opts.set({"maxfevals": int(es.countevals) + int(maxfevals)})
             except Exception:
                 pass
 
@@ -275,12 +281,12 @@ def _run_cmaes(x0, bounds, sigma0, maxfevals=None, seed=None, verbose=False,
         lo = [b[0] for b in bounds]
         hi = [b[1] for b in bounds]
         opts = {
-            'bounds': [lo, hi],
-            'verbose': 0 if not verbose else 1,
-            'seed': seed if seed is not None else np.random.randint(1, 2**31 - 1),
+            "bounds": [lo, hi],
+            "verbose": 0 if not verbose else 1,
+            "seed": seed if seed is not None else np.random.randint(1, 2**31 - 1),
         }
         if maxfevals is not None:
-            opts['maxfevals'] = int(maxfevals)
+            opts["maxfevals"] = int(maxfevals)
         es = cma.CMAEvolutionStrategy(list(x0), float(sigma0), opts)
 
     es.optimize(_objective)
@@ -288,17 +294,19 @@ def _run_cmaes(x0, bounds, sigma0, maxfevals=None, seed=None, verbose=False,
     if save_path:
         _save_cma_state(save_path, es, ndim=len(bounds), bounds=bounds)
 
-    return (np.asarray(es.result.xbest, dtype=float),
-            int(es.result.evaluations),
-            bool(es.result.xbest is not None),
-            resumed)
+    return (
+        np.asarray(es.result.xbest, dtype=float),
+        int(es.result.evaluations),
+        bool(es.result.xbest is not None),
+        resumed,
+    )
 
 
 def _refine(theta, bounds, maxiter=30):
     """L-BFGS-B finite-diff refinement within `maxiter` steps. Catches and
     returns the input theta unchanged if the refinement fails."""
     try:
-        x, nfev, _ = _run_local('L-BFGS-B', theta, bounds, maxiter=maxiter)
+        x, nfev, _ = _run_local("L-BFGS-B", theta, bounds, maxiter=maxiter)
         # only accept the refinement if it didn't regress
         if _objective(x) < _objective(theta):
             return x, nfev
@@ -314,7 +322,7 @@ def _refine(theta, bounds, maxiter=30):
 
 def optimize(
     datadir: str,
-    method: str = 'cmaes',
+    method: str = "cmaes",
     refine: bool = True,
     n_restarts: int = 1,
     sigma0: float = None,
@@ -391,30 +399,45 @@ def optimize(
     """
     if _extra_kwargs:
         import difflib as _difflib
-        _valid_keys = sorted([
-            'datadir', 'method', 'refine', 'n_restarts', 'sigma0', 'maxfevals',
-            'seed', 'save', 'mutate_basement', 'improvement_threshold',
-            'consistency_threshold', 'skip_bounds_check', 'workers', 'quiet',
-            'verbose', 'resume',
-        ])
+
+        _valid_keys = sorted(
+            [
+                "datadir",
+                "method",
+                "refine",
+                "n_restarts",
+                "sigma0",
+                "maxfevals",
+                "seed",
+                "save",
+                "mutate_basement",
+                "improvement_threshold",
+                "consistency_threshold",
+                "skip_bounds_check",
+                "workers",
+                "quiet",
+                "verbose",
+                "resume",
+            ]
+        )
         _bits = []
         for _bad in sorted(_extra_kwargs):
-            _close = _difflib.get_close_matches(
-                _bad, _valid_keys, n=2, cutoff=0.6)
+            _close = _difflib.get_close_matches(_bad, _valid_keys, n=2, cutoff=0.6)
             _bits.append(
-                "{!r} (did you mean {}?)".format(
-                    _bad, ' or '.join(repr(c) for c in _close))
-                if _close else "{!r}".format(_bad)
+                "{!r} (did you mean {}?)".format(_bad, " or ".join(repr(c) for c in _close))
+                if _close
+                else f"{_bad!r}"
             )
         raise TypeError(
             "optimize() got unexpected keyword argument(s): "
             + ", ".join(_bits)
-            + ".  Valid keyword arguments: {}.".format(_valid_keys)
+            + f".  Valid keyword arguments: {_valid_keys}."
         )
 
     # Bootstrap BASEMENT if the caller hasn't already done so.
-    if getattr(config, 'BASEMENT', None) is None \
-            or os.path.abspath(config.BASEMENT.datadir) != os.path.abspath(datadir):
+    if getattr(config, "BASEMENT", None) is None or os.path.abspath(
+        config.BASEMENT.datadir
+    ) != os.path.abspath(datadir):
         config.init(datadir)
     b = config.BASEMENT
     theta_0 = np.array(b.theta_0, dtype=float)
@@ -423,25 +446,28 @@ def optimize(
         improvement_threshold = 0.5 * b.ndim
 
     # Compute pickle path early so we can validate on resume and write on save.
-    outdir = getattr(b, 'outdir', os.path.join(datadir, 'results'))
+    outdir = getattr(b, "outdir", os.path.join(datadir, "results"))
     cma_state_path = os.path.join(outdir, _CMA_STATE_FILENAME)
 
     if resume:
-        if method != 'cmaes':
+        if method != "cmaes":
             raise ValueError(
                 "optimize: resume=True is only meaningful for method='cmaes' "
                 "(scipy minimize / DE / dual_annealing don't expose resumable "
-                "state). Got method={!r}.".format(method))
+                f"state). Got method={method!r}."
+            )
         if n_restarts != 1:
             raise ValueError(
-                "optimize: resume=True is incompatible with n_restarts={n} "
+                f"optimize: resume=True is incompatible with n_restarts={n_restarts} "
                 "(resume continues one trajectory; restarts mean N "
-                "trajectories). Use n_restarts=1 or resume=False.".format(
-                    n=n_restarts))
+                "trajectories). Use n_restarts=1 or resume=False."
+            )
         if not os.path.exists(cma_state_path):
             warnings.warn(
-                "optimize: resume=True but '{p}' does not exist; falling "
-                "back to a fresh CMA-ES start.".format(p=cma_state_path))
+                f"optimize: resume=True but '{cma_state_path}' does not exist; falling "
+                "back to a fresh CMA-ES start.",
+                stacklevel=2,
+            )
         else:
             # Validate metadata up-front so we fail before burning CPU.
             _load_cma_state(cma_state_path, ndim=b.ndim, bounds=bounds)
@@ -450,7 +476,8 @@ def optimize(
     if not np.isfinite(lnp_0):
         raise ValueError(
             "optimize: initial theta_0 has non-finite lnprob "
-            "({}); fix params.csv before optimizing.".format(lnp_0))
+            f"({lnp_0}); fix params.csv before optimizing."
+        )
 
     rng = np.random.default_rng(seed)
 
@@ -458,11 +485,10 @@ def optimize(
     x0_list = [theta_0]
     for _ in range(max(0, n_restarts - 1)):
         u = rng.random(b.ndim)
-        x0 = np.array([lo + u_i * (hi - lo)
-                       for u_i, (lo, hi) in zip(u, bounds)])
+        x0 = np.array([lo + u_i * (hi - lo) for u_i, (lo, hi) in zip(u, bounds)])
         x0_list.append(x0)
 
-    if sigma0 is None and method == 'cmaes':
+    if sigma0 is None and method == "cmaes":
         sigma0 = _default_sigma0(theta_0, bounds, b)
 
     # Dispatch + per-restart accumulation.
@@ -470,9 +496,10 @@ def optimize(
     logprint(
         "optimize[{}]  starting: ndim={}  n_restarts={}  maxfevals={}  "
         "lnprob_initial={:.2f}".format(
-            method, b.ndim, n_restarts,
-            maxfevals if maxfevals is not None else 'default', lnp_0),
-        quiet=quiet)
+            method, b.ndim, n_restarts, maxfevals if maxfevals is not None else "default", lnp_0
+        ),
+        quiet=quiet,
+    )
     restart_results = []
     total_nfev = 0
     any_success = False
@@ -480,28 +507,33 @@ def optimize(
     for r, x0 in enumerate(x0_list):
         if method in _LOCAL_METHODS:
             x_r, nfev_r, ok_r = _run_local(method, x0, bounds, maxiter=maxfevals)
-        elif method == 'differential_evolution':
+        elif method == "differential_evolution":
             x_r, nfev_r, ok_r = _run_differential_evolution(
-                x0, bounds, maxiter=maxfevals, seed=seed + r, workers=workers)
-        elif method == 'dual_annealing':
-            x_r, nfev_r, ok_r = _run_dual_annealing(
-                x0, bounds, maxiter=maxfevals, seed=seed + r)
-        elif method == 'cmaes':
+                x0, bounds, maxiter=maxfevals, seed=seed + r, workers=workers
+            )
+        elif method == "dual_annealing":
+            x_r, nfev_r, ok_r = _run_dual_annealing(x0, bounds, maxiter=maxfevals, seed=seed + r)
+        elif method == "cmaes":
             # Resume only for the first restart (and only if requested);
             # always overwrite the saved state with the final strategy.
-            _resume_path = (cma_state_path
-                            if (resume and r == 0
-                                and os.path.exists(cma_state_path))
-                            else None)
+            _resume_path = (
+                cma_state_path if (resume and r == 0 and os.path.exists(cma_state_path)) else None
+            )
             x_r, nfev_r, ok_r, _resumed = _run_cmaes(
-                x0, bounds, sigma0=sigma0, maxfevals=maxfevals,
-                seed=seed + r, verbose=verbose, resume_path=_resume_path,
-                save_path=cma_state_path)
+                x0,
+                bounds,
+                sigma0=sigma0,
+                maxfevals=maxfevals,
+                seed=seed + r,
+                verbose=verbose,
+                resume_path=_resume_path,
+                save_path=cma_state_path,
+            )
             resumed_from_pickle = resumed_from_pickle or _resumed
         else:
             raise ValueError(
-                "optimize: unknown method '{}'. Choose from {} or {}.".format(
-                    method, _LOCAL_METHODS, _GLOBAL_METHODS))
+                f"optimize: unknown method '{method}'. Choose from {_LOCAL_METHODS} or {_GLOBAL_METHODS}."
+            )
         any_success = any_success or ok_r
 
         if refine and method in _GLOBAL_METHODS:
@@ -514,9 +546,10 @@ def optimize(
         restart_results.append((x_r, lnp_r))
         total_nfev += nfev_r
         logprint(
-            "optimize[{}]  restart {}/{}: lnprob={:.2f}  nfev={}  "
-            "ok={}".format(method, r + 1, len(x0_list), lnp_r, nfev_r, ok_r),
-            quiet=quiet)
+            f"optimize[{method}]  restart {r + 1}/{len(x0_list)}: lnprob={lnp_r:.2f}  nfev={nfev_r}  "
+            f"ok={ok_r}",
+            quiet=quiet,
+        )
 
     # Best across restarts.
     restart_lnprobs = [lp for _, lp in restart_results]
@@ -530,19 +563,18 @@ def optimize(
     if not np.isfinite(lnp_best):
         reject = "lnprob_opt is non-finite"
     elif delta < improvement_threshold:
-        reject = (
-            "delta_lnprob={:.2f} < improvement_threshold={:.2f}"
-            .format(delta, improvement_threshold))
+        reject = f"delta_lnprob={delta:.2f} < improvement_threshold={improvement_threshold:.2f}"
     elif (not skip_bounds_check) and _on_bounds(theta_best, bounds):
-        reject = ("theta_opt sits on a prior bound — pass "
-                  "skip_bounds_check=True if this is physically expected")
+        reject = (
+            "theta_opt sits on a prior bound — pass "
+            "skip_bounds_check=True if this is physically expected"
+        )
     elif n_restarts > 1:
         finite_lps = [lp for lp in restart_lnprobs if np.isfinite(lp)]
         if len(finite_lps) >= 2:
             spread = max(finite_lps) - min(finite_lps)
             if spread > consistency_threshold:
-                reject = ("multistart spread {:.2f} > consistency_threshold {:.2f}"
-                          .format(spread, consistency_threshold))
+                reject = f"multistart spread {spread:.2f} > consistency_threshold {consistency_threshold:.2f}"
 
     accepted = (reject == "") and any_success
 
@@ -571,15 +603,14 @@ def optimize(
 
     if save:
         os.makedirs(outdir, exist_ok=True)
-        with open(os.path.join(outdir, 'optimize_save.json'), 'w') as f:
+        with open(os.path.join(outdir, "optimize_save.json"), "w") as f:
             json.dump(asdict(result), f, indent=2)
 
-    status = "accepted" if accepted else "rejected ({})".format(reject)
+    status = "accepted" if accepted else f"rejected ({reject})"
     logprint(
-        "optimize[{}]  lnprob: {:.2f} -> {:.2f}  (Δ={:+.2f})  "
-        "nfev={}  {:.1f}s  [{}]".format(
-            method, lnp_0, lnp_best, delta,
-            total_nfev, wallclock, status),
-        quiet=quiet)
+        f"optimize[{method}]  lnprob: {lnp_0:.2f} -> {lnp_best:.2f}  (Δ={delta:+.2f})  "
+        f"nfev={total_nfev}  {wallclock:.1f}s  [{status}]",
+        quiet=quiet,
+    )
 
     return result

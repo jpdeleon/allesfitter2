@@ -26,7 +26,6 @@ import pytest
 
 try:
     import allesfitter  # noqa: F401
-    from allesfitter import config
     from allesfitter.basement import Basement
 except Exception:
     pytest.skip("allesfitter not importable", allow_module_level=True)
@@ -119,14 +118,15 @@ def _settings(insts, bandpasses, chromatic_value=None) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _make_datadir(tmp_path: Path, insts=_INSTS, bandpasses=_BANDS,
-                  params_kind='achromatic', chromatic_value=None) -> Path:
+def _make_datadir(
+    tmp_path: Path, insts=_INSTS, bandpasses=_BANDS, params_kind="achromatic", chromatic_value=None
+) -> Path:
     d = tmp_path / "data"
     d.mkdir()
     (d / "results").mkdir()
-    if params_kind == 'achromatic':
+    if params_kind == "achromatic":
         (d / "params.csv").write_text(_achromatic_params(insts))
-    elif params_kind == 'chromatic':
+    elif params_kind == "chromatic":
         (d / "params.csv").write_text(_chromatic_params(insts, bandpasses))
     else:
         raise ValueError(params_kind)
@@ -144,10 +144,9 @@ def _make_datadir(tmp_path: Path, insts=_INSTS, bandpasses=_BANDS,
 def test_explicit_chromatic_false_overrides_auto_detect(tmp_path):
     """Multi-label bandpass + chromatic,False → achromatic, get_bandpass
     returns None for every instrument."""
-    d = _make_datadir(tmp_path, params_kind='achromatic',
-                      chromatic_value='False')
+    d = _make_datadir(tmp_path, params_kind="achromatic", chromatic_value="False")
     b = Basement(str(d), quiet=True)
-    assert b.settings['chromatic'] is False
+    assert b.settings["chromatic"] is False
     for inst in _INSTS:
         assert b.get_bandpass(inst) is None, inst
 
@@ -160,8 +159,7 @@ def test_explicit_chromatic_false_overrides_auto_detect(tmp_path):
 def test_chromatic_false_keeps_ldc_keys_per_bandpass(tmp_path):
     """LDC keys must remain per-bandpass under chromatic,False — limb
     darkening depends on wavelength, not on the rr-naming convention."""
-    d = _make_datadir(tmp_path, params_kind='achromatic',
-                      chromatic_value='False')
+    d = _make_datadir(tmp_path, params_kind="achromatic", chromatic_value="False")
     # _achromatic_params() writes per-inst LDC rows; for this test we
     # need per-bandpass rows. Overwrite params.csv with a mixed layout.
     body = (
@@ -185,27 +183,26 @@ def test_chromatic_false_keeps_ldc_keys_per_bandpass(tmp_path):
     b = Basement(str(d), quiet=True)
     keys = list(map(str, b.fitkeys))
     # rr collapsed to achromatic (the chromatic,False override applies to rr)
-    assert 'b_rr' in keys
+    assert "b_rr" in keys
     # LDC keys are still per-bandpass, not per-inst
     for bp in _BANDS:
-        assert 'host_ldc_q1_'+bp in keys, (bp, [k for k in keys if 'ldc' in k])
-        assert 'host_ldc_q2_'+bp in keys
+        assert "host_ldc_q1_" + bp in keys, (bp, [k for k in keys if "ldc" in k])
+        assert "host_ldc_q2_" + bp in keys
     for inst in _INSTS:
-        assert 'host_ldc_q1_'+inst not in keys, inst
+        assert "host_ldc_q1_" + inst not in keys, inst
     # get_ldc_bandpass bypasses the chromatic flag
-    assert b.get_ldc_bandpass('muscat_g') == 'g'
+    assert b.get_ldc_bandpass("muscat_g") == "g"
     # get_bandpass still respects the override (rr-naming behaviour)
-    assert b.get_bandpass('muscat_g') is None
+    assert b.get_bandpass("muscat_g") is None
 
 
 def test_chromatic_false_forces_achromatic_rr_key(tmp_path):
-    d = _make_datadir(tmp_path, params_kind='achromatic',
-                      chromatic_value='False')
+    d = _make_datadir(tmp_path, params_kind="achromatic", chromatic_value="False")
     b = Basement(str(d), quiet=True)
     keys = list(map(str, b.fitkeys))
-    assert 'b_rr' in keys, keys
+    assert "b_rr" in keys, keys
     for bp in _BANDS:
-        assert 'b_rr_'+bp not in keys, (bp, keys)
+        assert "b_rr_" + bp not in keys, (bp, keys)
 
 
 # ---------------------------------------------------------------------------
@@ -214,8 +211,7 @@ def test_chromatic_false_forces_achromatic_rr_key(tmp_path):
 
 
 def test_chromatic_false_forbids_per_band_rr_rows(tmp_path):
-    d = _make_datadir(tmp_path, params_kind='chromatic',
-                      chromatic_value='False')
+    d = _make_datadir(tmp_path, params_kind="chromatic", chromatic_value="False")
     with pytest.raises(ValueError, match="chromatic,False"):
         Basement(str(d), quiet=True)
 
@@ -234,12 +230,12 @@ def test_chromatic_true_when_user_explicit(tmp_path):
     d.mkdir()
     (d / "results").mkdir()
     (d / "params.csv").write_text(_chromatic_params(insts, bandpasses))
-    (d / "settings.csv").write_text(_settings(insts, bandpasses, chromatic_value='True'))
+    (d / "settings.csv").write_text(_settings(insts, bandpasses, chromatic_value="True"))
     (d / "muscat_g.csv").write_text(_lc_csv(seed=0))
     b = Basement(str(d), quiet=True)
-    assert b.settings['chromatic'] is True
+    assert b.settings["chromatic"] is True
     # chromatic naming kicks in for the single inst
-    assert b.get_bandpass('muscat_g') == 'g'
+    assert b.get_bandpass("muscat_g") == "g"
 
 
 # ---------------------------------------------------------------------------
@@ -257,30 +253,27 @@ def test_chromatic_value_robust_to_lowercase_and_int(tmp_path):
     expected=False → achromatic params, expected=True → chromatic params.
     """
     for raw_value, expected in [
-        ('false', False),
-        ('FALSE', False),
-        ('0', False),
-        ('no', False),       # set_bool defaults to False for unknown
-        ('true', True),
-        ('TRUE', True),
-        ('1', True),
+        ("false", False),
+        ("FALSE", False),
+        ("0", False),
+        ("no", False),  # set_bool defaults to False for unknown
+        ("true", True),
+        ("TRUE", True),
+        ("1", True),
     ]:
         sub = tmp_path / raw_value
         sub.mkdir()
-        kind = 'chromatic' if expected else 'achromatic'
-        d = _make_datadir(sub, params_kind=kind,
-                          chromatic_value=raw_value)
+        kind = "chromatic" if expected else "achromatic"
+        d = _make_datadir(sub, params_kind=kind, chromatic_value=raw_value)
         b = Basement(str(d), quiet=True)
-        assert b.settings['chromatic'] is expected, (raw_value, expected,
-                                                      b.settings['chromatic'])
+        assert b.settings["chromatic"] is expected, (raw_value, expected, b.settings["chromatic"])
 
 
 def test_no_chromatic_setting_preserves_legacy_autodetect(tmp_path):
     """Omit the chromatic key entirely → bandpass-uniqueness auto-detect
     runs as before (4-band MuSCAT → chromatic=True)."""
-    d = _make_datadir(tmp_path, params_kind='chromatic',
-                      chromatic_value=None)
+    d = _make_datadir(tmp_path, params_kind="chromatic", chromatic_value=None)
     b = Basement(str(d), quiet=True)
-    assert b.settings['chromatic'] is True
+    assert b.settings["chromatic"] is True
     # And the achromatic-override branch must NOT have fired:
-    assert b.get_bandpass('muscat_g') == 'g'
+    assert b.get_bandpass("muscat_g") == "g"

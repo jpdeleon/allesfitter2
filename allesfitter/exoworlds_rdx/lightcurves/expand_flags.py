@@ -1,5 +1,4 @@
 #!/usr/bin/env python2
-# -*- coding: utf-8 -*-
 """
 Created on Thu Oct 11 19:51:37 2018
 
@@ -14,22 +13,20 @@ Twitter: m_n_guenther
 Web: www.mnguenther.com
 """
 
-from __future__ import print_function, division, absolute_import
 
 #::: modules
 import numpy as np
-
-
 
 
 ###############################################################################
 #::: expand flags
 ###############################################################################
 def expand_flags(flag, n=4):
-    maskleft = np.where(flag>0)[0]
-    flag_new = np.zeros(len(flag),dtype=bool)
-    for i in range(-n,n+1):
-        thismask = maskleft+i
+    maskleft = np.where(flag > 0)[0]
+    flag_new = np.zeros(len(flag), dtype=bool)
+    for i in range(-n, n + 1):
+        thismask = maskleft + i
         for t in thismask:
-            if t<len(flag_new): flag_new[t] = 1
+            if t < len(flag_new):
+                flag_new[t] = 1
     return flag_new

@@ -11,78 +11,87 @@ tansu.daylan@gmail.com
 www.tansudaylan.com
 """
 
-import numpy as np
-import scipy
-import os, datetime, sys
+import datetime
 
+import astropy
 import matplotlib.pyplot as plt
-from tdpy.util import summgene 
+import numpy as np
+from tdpy.util import summgene
 
 import allesfitter
 import allesfitter.postprocessing.plot_viol
 from allesfitter import config
 
-import astropy
 
-class gdatstrt(object):
+class gdatstrt:
 
     def __init__(self):
         self.boollockmodi = False
         pass
-    
+
     def __setattr__(self, attr, valu):
-        super(gdatstrt, self).__setattr__(attr, valu)
+        super().__setattr__(attr, valu)
 
 
-def plot(gdat, indxstar, indxpara=None, strgtype='evol'):
-    
+def plot(gdat, indxstar, indxpara=None, strgtype="evol"):
+
     if indxstar.size == 1:
-        strg = gdat.liststrgstar[indxstar[0]] + '_'
+        gdat.liststrgstar[indxstar[0]] + "_"
     else:
-        strg = ''
-    
-    print('strgtype')
+        pass
+
+    print("strgtype")
     print(strgtype)
-    
+
     listticklabl = []
-    if strgtype == 'epocevol':
+    if strgtype == "epocevol":
         chanlist = [[[] for m in gdat.indxstar] for i in gdat.indxruns]
         xpos = np.array(gdat.listyear)
         for i in gdat.indxruns:
             for m in indxstar:
                 chanlist[i][m] = [gdat.timejwst[k][i][m] for k in gdat.indxyear]
         for k in gdat.indxyear:
-            listticklabl.append('%s' % str(gdat.listyear[k]))
+            listticklabl.append(f"{str(gdat.listyear[k])}")
     else:
         chanlist = []
         numbxdat = gdat.numbruns * indxstar.size
-        xpos = 0.6 * (np.arange(numbxdat) + 1.)
+        xpos = 0.6 * (np.arange(numbxdat) + 1.0)
 
         for i in gdat.indxruns:
             for m in indxstar:
-                if strgtype == 'jwstcomp':
+                if strgtype == "jwstcomp":
                     chanlist.append(gdat.timejwst[1][i][m])
-                if strgtype == 'paracomp':
+                if strgtype == "paracomp":
                     for k in indxpara:
-                        chanlist.append((gdat.listobjtalle[i][m].posterior_params[gdat.liststrgparaconc[k]] - \
-                            np.mean(gdat.listobjtalle[i][m].posterior_params[gdat.liststrgparaconc[k]])) * 24. * 60.)
-                    
-                if strgtype == 'paracomp' or strgtype == 'jwstcomp':
-                    ticklabl = '%s, %s' % (gdat.liststrgstar[m], gdat.liststrgruns[i])
+                        chanlist.append(
+                            (
+                                gdat.listobjtalle[i][m].posterior_params[gdat.liststrgparaconc[k]]
+                                - np.mean(
+                                    gdat.listobjtalle[i][m].posterior_params[
+                                        gdat.liststrgparaconc[k]
+                                    ]
+                                )
+                            )
+                            * 24.0
+                            * 60.0
+                        )
+
+                if strgtype == "paracomp" or strgtype == "jwstcomp":
+                    ticklabl = f"{gdat.liststrgstar[m]}, {gdat.liststrgruns[i]}"
                     listticklabl.append(ticklabl)
                 else:
-                    ticklabl = '%s, %s' % (gdat.liststrgstar[m], gdat.liststrgruns[i])
+                    ticklabl = f"{gdat.liststrgstar[m]}, {gdat.liststrgruns[i]}"
                     listticklabl.append(ticklabl)
-                
+
         if xpos.size != len(listticklabl):
-            raise Exception('')
-        
-    print('xpos')
+            raise Exception("")
+
+    print("xpos")
     summgene(xpos)
-    print('chanlist')
+    print("chanlist")
     print(chanlist)
     figr, axis = plt.subplots(figsize=(5, 4))
-    if strgtype != 'epocevol':
+    if strgtype != "epocevol":
         axis.violinplot(chanlist, xpos, showmedians=True, showextrema=False)
     else:
         for i in gdat.indxruns:
@@ -90,50 +99,50 @@ def plot(gdat, indxstar, indxpara=None, strgtype='evol'):
                 axis.violinplot(chanlist[i][m], xpos, showmedians=True, showextrema=False)
 
     axis.set_xticks(xpos)
-    if strgtype == 'jwstcomp':
-        axis.set_ylabel('Transit time residual in 2023 [min]')
+    if strgtype == "jwstcomp":
+        axis.set_ylabel("Transit time residual in 2023 [min]")
         strgbase = strgtype
 
-    if strgtype == 'paracomp':
-        if gdat.liststrgparaconc[indxpara] == 'b_period':
-            axis.set_ylabel('P [min]')
+    if strgtype == "paracomp":
+        if gdat.liststrgparaconc[indxpara] == "b_period":
+            axis.set_ylabel("P [min]")
         else:
             labl = gdat.listlablparaconc[indxpara[0]]
             axis.set_ylabel(labl)
-        strgbase = '%04d' % indxpara
-    
-    if strgtype == 'epocevol':
-        axis.set_xlabel('Year')
-        axis.set_ylabel('Transit time residual [min]')
+        strgbase = f"{indxpara:04d}"
+
+    if strgtype == "epocevol":
+        axis.set_xlabel("Year")
+        axis.set_ylabel("Transit time residual [min]")
         strgbase = strgtype
-    
-    path = gdat.pathimag + 'viol_%s.%s' % (strgbase, gdat.strgplotextn)
+
+    path = gdat.pathimag + f"viol_{strgbase}.{gdat.strgplotextn}"
     axis.set_xticklabels(listticklabl)
     plt.tight_layout()
-    print('Writing to %s...' % path)
+    print(f"Writing to {path}...")
     print()
     figr.savefig(path)
     plt.close()
-    
+
 
 def plot_viol(pathbase, liststrgstar, liststrgruns, lablstrgruns, pathimag, pvalthrs=1e-3):
 
-    strgtimestmp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    print('allesfitter postprocessing violin plot started at %s...' % strgtimestmp)
-    
+    strgtimestmp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    print(f"allesfitter postprocessing violin plot started at {strgtimestmp}...")
+
     # construct global object
     gdat = gdatstrt()
-    
+
     # copy unnamed inputs to the global object
-    #for attr, valu in locals().iter():
+    # for attr, valu in locals().iter():
     for attr, valu in locals().items():
-        if '__' not in attr and attr != 'gdat':
+        if "__" not in attr and attr != "gdat":
             setattr(gdat, attr, valu)
 
     # runs to be compared for each star
     gdat.numbruns = len(liststrgruns)
     gdat.indxruns = np.arange(gdat.numbruns)
-    
+
     gdat.pathimag = pathimag
     gdat.liststrgstar = liststrgstar
 
@@ -142,7 +151,7 @@ def plot_viol(pathbase, liststrgstar, liststrgruns, lablstrgruns, pathimag, pval
     gdat.indxstar = np.arange(numbstar)
 
     # plotting
-    gdat.strgplotextn = 'png'
+    gdat.strgplotextn = "png"
 
     # read parameter keys, labels and posterior from allesfitter output
     liststrgpara = [[] for i in gdat.indxruns]
@@ -150,16 +159,18 @@ def plot_viol(pathbase, liststrgstar, liststrgruns, lablstrgruns, pathimag, pval
     gdat.listobjtalle = [[[] for m in gdat.indxstar] for i in gdat.indxruns]
     for i in gdat.indxruns:
         for m in gdat.indxstar:
-            pathalle = pathbase + '%s/allesfits/allesfit_%s/' % (gdat.liststrgstar[m], gdat.liststrgruns[i])
-            print('Reading from %s...' % pathalle)
+            pathalle = (
+                pathbase + f"{gdat.liststrgstar[m]}/allesfits/allesfit_{gdat.liststrgruns[i]}/"
+            )
+            print(f"Reading from {pathalle}...")
             config.init(pathalle)
             liststrgpara[i] = np.array(config.BASEMENT.fitkeys)
             listlablpara[i] = np.array(config.BASEMENT.fitlabels)
             # read the chain
-            print('pathalle')
+            print("pathalle")
             print(pathalle)
             gdat.listobjtalle[i][m] = allesfitter.allesclass(pathalle)
-    
+
     # concatenate the keys, labels from different runs
     gdat.liststrgparaconc = np.concatenate(liststrgpara)
     gdat.liststrgparaconc = np.unique(gdat.liststrgparaconc)
@@ -167,62 +178,59 @@ def plot_viol(pathbase, liststrgstar, liststrgruns, lablstrgruns, pathimag, pval
     for k, strgparaconc in enumerate(gdat.liststrgparaconc):
         for i, _strgruns in enumerate(liststrgruns):
             if strgparaconc in liststrgpara[i]:
-                gdat.listlablparaconc[k] = listlablpara[i][np.where(liststrgpara[i] == strgparaconc)[0][0]]
-    
+                gdat.listlablparaconc[k] = listlablpara[i][
+                    np.where(liststrgpara[i] == strgparaconc)[0][0]
+                ]
+
     gdat.numbparaconc = len(gdat.liststrgparaconc)
     gdat.indxparaconc = np.arange(gdat.numbparaconc)
     for k, strgpara in enumerate(gdat.liststrgparaconc):
         booltemp = True
         for i in gdat.indxruns:
-            if not strgpara in liststrgpara[i]:
+            if strgpara not in liststrgpara[i]:
                 booltemp = False
         if not booltemp:
             continue
-        
+
         ## violin plot
         ## mid-transit time prediction
-        plot(gdat, gdat.indxstar, indxpara=np.array([k]), strgtype='paracomp')
-        ## per-star 
-        #for m in gdat.indxstar:
+        plot(gdat, gdat.indxstar, indxpara=np.array([k]), strgtype="paracomp")
+        ## per-star
+        # for m in gdat.indxstar:
         #    plot(gdat, indxstar=np.array([m]), indxpara=k, strgtype='paracomp')
-        
+
     # calculate the future evolution of epoch
     gdat.listyear = [2021, 2023, 2025]
     numbyear = len(gdat.listyear)
     gdat.indxyear = np.arange(numbyear)
     gdat.timejwst = [[[[] for m in gdat.indxstar] for i in gdat.indxruns] for k in gdat.indxyear]
     for k, year in enumerate(gdat.listyear):
-        epocjwst = astropy.time.Time('%d-01-01 00:00:00' % year, format='iso').jd
+        epocjwst = astropy.time.Time(f"{year}-01-01 00:00:00", format="iso").jd
         for i in gdat.indxruns:
             for m in gdat.indxstar:
-                epoc = gdat.listobjtalle[i][m].posterior_params['b_epoch']
-                peri = gdat.listobjtalle[i][m].posterior_params['b_period']
+                epoc = gdat.listobjtalle[i][m].posterior_params["b_epoch"]
+                peri = gdat.listobjtalle[i][m].posterior_params["b_period"]
                 indxtran = (epocjwst - epoc) / peri
                 indxtran = np.mean(np.rint(indxtran))
                 if indxtran.size != np.unique(indxtran).size:
-                    raise Exception('')
+                    raise Exception("")
                 gdat.timejwst[k][i][m] = epoc + peri * indxtran
                 gdat.timejwst[k][i][m] -= np.mean(gdat.timejwst[k][i][m])
-                gdat.timejwst[k][i][m] *= 24. * 60.
-    
+                gdat.timejwst[k][i][m] *= 24.0 * 60.0
+
     listfigr = []
     listaxis = []
 
     # temporal evolution of mid-transit time prediction
-    plot(gdat, gdat.indxstar, strgtype='epocevol')
-    ## per-star 
-    #for m in gdat.indxstar:
+    plot(gdat, gdat.indxstar, strgtype="epocevol")
+    ## per-star
+    # for m in gdat.indxstar:
     #    plot(gdat, indxstar=np.array([m]), strgtype='epocevol')
-    
+
     ## mid-transit time prediction
-    plot(gdat, gdat.indxstar, strgtype='jwstcomp')
-    ## per-star 
-    #for m in gdat.indxstar:
+    plot(gdat, gdat.indxstar, strgtype="jwstcomp")
+    ## per-star
+    # for m in gdat.indxstar:
     #    plot(gdat, indxstar=np.array([m]), strgtype='jwstcomp')
-    
+
     return listfigr, listaxis
-
-
-    
-
-

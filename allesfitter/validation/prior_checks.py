@@ -54,13 +54,13 @@ GP_LNSIGMA_PREFIX = "baseline_gp_matern32_lnsigma_flux_"
 GP_LNRHO_PREFIX = "baseline_gp_matern32_lnrho_flux_"
 LN_ERR_PREFIX = "ln_err_flux_"
 
-_AMPL_REL_FLUX_LIMIT = 0.05            # σ_GP > 5% is transit-territory
-_AMPL_VS_RMS_RATIO = 100.0             # σ_GP > 100× RMS dominates the noise
-_LN_ERR_REL_FLUX_LIMIT = 0.10          # noise > 10% rel flux is suspicious
-_RHO_MIN_CADENCES = 2.0                # ρ should span at least 2 cadences
-_RHO_VS_TDUR_RATIO = 0.5               # ρ should exceed half tdur
-_BINNING_VS_CADENCE_RATIO = 2.0        # binning below this × cadence is ~a no-op
-_BINNING_VS_TDUR_RATIO = 0.5           # binning above this × tdur smears the transit
+_AMPL_REL_FLUX_LIMIT = 0.05  # σ_GP > 5% is transit-territory
+_AMPL_VS_RMS_RATIO = 100.0  # σ_GP > 100× RMS dominates the noise
+_LN_ERR_REL_FLUX_LIMIT = 0.10  # noise > 10% rel flux is suspicious
+_RHO_MIN_CADENCES = 2.0  # ρ should span at least 2 cadences
+_RHO_VS_TDUR_RATIO = 0.5  # ρ should exceed half tdur
+_BINNING_VS_CADENCE_RATIO = 2.0  # binning below this × cadence is ~a no-op
+_BINNING_VS_TDUR_RATIO = 0.5  # binning above this × tdur smears the transit
 
 
 def _settings_inst_phot(datadir):
@@ -129,7 +129,10 @@ def transit_duration_days(per, rsuma, cosi, k):
     Returns NaN when inputs are non-positive, when sin(i) collapses to 0,
     or when the chord is imaginary (grazing / non-transiting geometries).
     """
-    per = float(per); rsuma = float(rsuma); cosi = float(cosi); k = float(k)
+    per = float(per)
+    rsuma = float(rsuma)
+    cosi = float(cosi)
+    k = float(k)
     if not (per > 0 and rsuma > 0 and 0.0 <= abs(cosi) <= 1.0 and k > 0):
         return float("nan")
     sini = math.sqrt(max(1.0 - cosi * cosi, 0.0))
@@ -248,17 +251,21 @@ def check_secondary_eclipse_sbratio(datadir) -> list[str]:
                     if sec
                     else "phase_curve=True (forces secondary_eclipse)"
                 )
-                msgs.append(_w(
-                    f"{name}: {trigger} but the surface brightness ratio is fixed "
-                    f"at {value or '0 (default)'} (fit=0) — no secondary eclipse "
-                    f"will be modelled. Set fit=1, or fix it at a known non-zero value."
-                ))
+                msgs.append(
+                    _w(
+                        f"{name}: {trigger} but the surface brightness ratio is fixed "
+                        f"at {value or '0 (default)'} (fit=0) — no secondary eclipse "
+                        f"will be modelled. Set fit=1, or fix it at a known non-zero value."
+                    )
+                )
         elif fit == "1":
-            msgs.append(_w(
-                f"{name}: fitted (fit=1) but secondary_eclipse is off — the surface "
-                f"brightness ratio is sampled with no secondary eclipse model. "
-                f"Enable secondary_eclipse, or fix it (fit=0)."
-            ))
+            msgs.append(
+                _w(
+                    f"{name}: fitted (fit=1) but secondary_eclipse is off — the surface "
+                    f"brightness ratio is sampled with no secondary eclipse model. "
+                    f"Enable secondary_eclipse, or fix it (fit=0)."
+                )
+            )
     return msgs
 
 
@@ -320,24 +327,30 @@ def check_binning(datadir) -> list[str]:
             continue
 
         #::: 1) transit smearing (per effective width; de-duplicated across insts)
-        if (tdur_days is not None
-                and binning > _BINNING_VS_TDUR_RATIO * tdur_days
-                and binning not in seen_smear):
+        if (
+            tdur_days is not None
+            and binning > _BINNING_VS_TDUR_RATIO * tdur_days
+            and binning not in seen_smear
+        ):
             seen_smear.add(binning)
-            msgs.append(_w(
-                f"binning={binning:g} d > {_BINNING_VS_TDUR_RATIO:.0%} of the shortest "
-                f"transit duration (~{tdur_days:.4f} d) — binning may smear the transit."
-            ))
+            msgs.append(
+                _w(
+                    f"binning={binning:g} d > {_BINNING_VS_TDUR_RATIO:.0%} of the shortest "
+                    f"transit duration (~{tdur_days:.4f} d) — binning may smear the transit."
+                )
+            )
 
         #::: 2) native cadence (no-op if finer than the data)
         t, _f = _load_inst_data(datadir, inst)
         if t is not None:
             cad = _cadence(t)
             if math.isfinite(cad) and binning < _BINNING_VS_CADENCE_RATIO * cad:
-                msgs.append(_w(
-                    f"binning={binning:g} d < {_BINNING_VS_CADENCE_RATIO:.0f}× the native "
-                    f"cadence of '{inst}' ({cad:.5f} d) — little or no binning will occur."
-                ))
+                msgs.append(
+                    _w(
+                        f"binning={binning:g} d < {_BINNING_VS_CADENCE_RATIO:.0f}× the native "
+                        f"cadence of '{inst}' ({cad:.5f} d) — little or no binning will occur."
+                    )
+                )
 
         #::: 3) explicit t_exp that disagrees with the bin width. A missing
         #::: t_exp is fine — Basement auto-sets t_exp_<inst> = bin width — so
@@ -350,14 +363,15 @@ def check_binning(datadir) -> list[str]:
                     t_exp_val = float(tokens[0])
                 except ValueError:
                     t_exp_val = None
-                if (t_exp_val is not None
-                        and abs(t_exp_val - binning) > 1e-9 * max(1.0, binning)):
-                    msgs.append(_w(
-                        f"binning={binning:g} d is set for '{inst}' but t_exp_{inst}"
-                        f"={t_exp_val:g} d differs from the bin width; binned points "
-                        f"integrate over the bin width, so t_exp_{inst} usually "
-                        f"equals it. Remove t_exp_{inst} to auto-match the binning."
-                    ))
+                if t_exp_val is not None and abs(t_exp_val - binning) > 1e-9 * max(1.0, binning):
+                    msgs.append(
+                        _w(
+                            f"binning={binning:g} d is set for '{inst}' but t_exp_{inst}"
+                            f"={t_exp_val:g} d differs from the bin width; binned points "
+                            f"integrate over the bin width, so t_exp_{inst} usually "
+                            f"equals it. Remove t_exp_{inst} to auto-match the binning."
+                        )
+                    )
 
     return msgs
 
@@ -394,19 +408,23 @@ def check_radius_ratio(datadir) -> list[str]:
         if len(row) >= 2:
             try:
                 if float(row[1]) > 1.0:
-                    msgs.append(_w(
-                        f"{name}: initial value {float(row[1]):g} > 1 — companion "
-                        f"radius exceeds the host's; unusual for a transiting planet."
-                    ))
+                    msgs.append(
+                        _w(
+                            f"{name}: initial value {float(row[1]):g} > 1 — companion "
+                            f"radius exceeds the host's; unusual for a transiting planet."
+                        )
+                    )
             except (TypeError, ValueError):
                 pass
         if len(row) >= 4 and row[2] == "1":
             bnds = parse_uniform_bounds(row[3])
             if bnds is not None and bnds[1] > 1.0:
-                msgs.append(_w(
-                    f"{name}: uniform prior upper bound {bnds[1]:g} > 1 — allows "
-                    f"a companion larger than the host."
-                ))
+                msgs.append(
+                    _w(
+                        f"{name}: uniform prior upper bound {bnds[1]:g} > 1 — allows "
+                        f"a companion larger than the host."
+                    )
+                )
     return msgs
 
 
@@ -427,10 +445,12 @@ def check_spin_orbit_angle(datadir) -> list[str]:
             except (TypeError, ValueError):
                 continue
             if not (-180.0 <= val <= 180.0):
-                msgs.append(_w(
-                    f"{name}: initial value {val:g} deg is outside [-180, 180] — "
-                    f"check units/sign of the projected spin-orbit angle."
-                ))
+                msgs.append(
+                    _w(
+                        f"{name}: initial value {val:g} deg is outside [-180, 180] — "
+                        f"check units/sign of the projected spin-orbit angle."
+                    )
+                )
     return msgs
 
 
@@ -461,11 +481,13 @@ def check_transit_geometry(datadir) -> list[str]:
             continue
         b = abs(cosi) * (1.0 + k) / rsuma
         if b > 1.0 + k:
-            msgs.append(_w(
-                f"companion '{companion}': initial impact parameter "
-                f"b=cosi*(1+k)/rsuma={b:g} > 1+k={1.0 + k:g} — the companion "
-                f"does not transit with these initial values (no eclipse modelled)."
-            ))
+            msgs.append(
+                _w(
+                    f"companion '{companion}': initial impact parameter "
+                    f"b=cosi*(1+k)/rsuma={b:g} > 1+k={1.0 + k:g} — the companion "
+                    f"does not transit with these initial values (no eclipse modelled)."
+                )
+            )
     return msgs
 
 
@@ -514,11 +536,9 @@ def validate_gp_priors(
     if tdur_hours_by_companion is None:
         tdur_hours_by_companion = transit_duration_hours_by_companion(datadir)
     if tdur_hours_by_companion:
-        tdur_days = float(np.median(
-            [t / 24.0 for t in tdur_hours_by_companion.values() if t]
-        ))
+        tdur_days = float(np.median([t / 24.0 for t in tdur_hours_by_companion.values() if t]))
     else:
-        tdur_days = 0.1   # ~2.4 h fallback when no orbital row could be parsed
+        tdur_days = 0.1  # ~2.4 h fallback when no orbital row could be parsed
 
     for row in params_rows:
         if len(row) < 4:
@@ -532,56 +552,68 @@ def validate_gp_priors(
         if name.startswith(LN_ERR_PREFIX):
             sigma_hi = math.exp(hi)
             if sigma_hi > _LN_ERR_REL_FLUX_LIMIT:
-                msgs.append(_w(
-                    f"{name}: upper bound exp({hi}) ≈ {sigma_hi:.3f} "
-                    f"> {_LN_ERR_REL_FLUX_LIMIT:.0%} relative flux — review noise prior."
-                ))
+                msgs.append(
+                    _w(
+                        f"{name}: upper bound exp({hi}) ≈ {sigma_hi:.3f} "
+                        f"> {_LN_ERR_REL_FLUX_LIMIT:.0%} relative flux — review noise prior."
+                    )
+                )
             continue
 
         if name.startswith(GP_LNSIGMA_PREFIX):
-            inst = name[len(GP_LNSIGMA_PREFIX):]
+            inst = name[len(GP_LNSIGMA_PREFIX) :]
             sigma_hi = math.exp(hi)
             if sigma_hi > _AMPL_REL_FLUX_LIMIT:
-                msgs.append(_w(
-                    f"{name}: upper bound exp({hi}) ≈ {sigma_hi:.3f} > "
-                    f"{_AMPL_REL_FLUX_LIMIT:.0%} relative flux — GP may absorb the transit."
-                ))
+                msgs.append(
+                    _w(
+                        f"{name}: upper bound exp({hi}) ≈ {sigma_hi:.3f} > "
+                        f"{_AMPL_REL_FLUX_LIMIT:.0%} relative flux — GP may absorb the transit."
+                    )
+                )
             _t, f = data_cache.get(inst, (None, None))
             if f is not None:
                 rms = _per_cadence_rms(f)
                 if math.isfinite(rms) and sigma_hi > _AMPL_VS_RMS_RATIO * rms:
-                    msgs.append(_w(
-                        f"{name}: upper bound exp({hi}) ≈ {sigma_hi:.3f} > "
-                        f"{_AMPL_VS_RMS_RATIO:.0f}× per-cadence RMS ({rms:.1e}) "
-                        f"— GP can dominate the noise floor."
-                    ))
+                    msgs.append(
+                        _w(
+                            f"{name}: upper bound exp({hi}) ≈ {sigma_hi:.3f} > "
+                            f"{_AMPL_VS_RMS_RATIO:.0f}× per-cadence RMS ({rms:.1e}) "
+                            f"— GP can dominate the noise floor."
+                        )
+                    )
             continue
 
         if name.startswith(GP_LNRHO_PREFIX):
-            inst = name[len(GP_LNRHO_PREFIX):]
+            inst = name[len(GP_LNRHO_PREFIX) :]
             rho_lo, rho_hi = math.exp(lo), math.exp(hi)
             t, _f = data_cache.get(inst, (None, None))
             if t is not None:
                 cad = _cadence(t)
                 base = _baseline_span(t)
                 if math.isfinite(cad) and rho_lo < _RHO_MIN_CADENCES * cad:
-                    msgs.append(_w(
-                        f"{name}: lower bound exp({lo}) ≈ {rho_lo:.4f} d < "
-                        f"{_RHO_MIN_CADENCES:.0f}× cadence ({cad:.4f} d) "
-                        f"— GP could fit individual cadences."
-                    ))
+                    msgs.append(
+                        _w(
+                            f"{name}: lower bound exp({lo}) ≈ {rho_lo:.4f} d < "
+                            f"{_RHO_MIN_CADENCES:.0f}× cadence ({cad:.4f} d) "
+                            f"— GP could fit individual cadences."
+                        )
+                    )
                 if math.isfinite(base) and rho_hi > base:
-                    msgs.append(_w(
-                        f"{name}: upper bound exp({hi}) ≈ {rho_hi:.3f} d > "
-                        f"observation baseline ({base:.3f} d) — degenerate "
-                        f"with baseline slope."
-                    ))
+                    msgs.append(
+                        _w(
+                            f"{name}: upper bound exp({hi}) ≈ {rho_hi:.3f} d > "
+                            f"observation baseline ({base:.3f} d) — degenerate "
+                            f"with baseline slope."
+                        )
+                    )
             if rho_lo < _RHO_VS_TDUR_RATIO * tdur_days:
-                msgs.append(_w(
-                    f"{name}: lower bound exp({lo}) ≈ {rho_lo:.4f} d < "
-                    f"{_RHO_VS_TDUR_RATIO:.0%}× transit duration "
-                    f"(~{tdur_days:.4f} d) — GP could fit the transit shape."
-                ))
+                msgs.append(
+                    _w(
+                        f"{name}: lower bound exp({lo}) ≈ {rho_lo:.4f} d < "
+                        f"{_RHO_VS_TDUR_RATIO:.0%}× transit duration "
+                        f"(~{tdur_days:.4f} d) — GP could fit the transit shape."
+                    )
+                )
             continue
 
     # Non-GP heuristic: secondary_eclipse ⇔ surface-brightness-ratio consistency.

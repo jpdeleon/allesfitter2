@@ -1,8 +1,8 @@
 # TODO
 
-## 
+##
 
-## Differentiate sampler results output directory 
+## Differentiate sampler results output directory
 Adopt a convention e.g. mcmc_results vs ns_results
 applicable if both mcmc and nested sampling were run on the same model.
 
@@ -14,11 +14,11 @@ Faster function evaluation might be achieved by vectorizing certain operations,
 or using numba JIT similar to pytransit.
 
 ## Iterative outlier clipping
-Implement an iterative outlier clipping during optimization step and before mcmc samplgin, 
+Implement an iterative outlier clipping during optimization step and before mcmc samplgin,
 similar to the example in exoplanet:
 https://gallery.exoplanet.codes/tutorials/lc-multi/#the-probabilistic-model
 
-## Show prior samples 
+## Show prior samples
 Add an argument in show_initial_guess() to plot n=50 priors samples.
 This is similar to prior_predictive check in pymc.
 This might be reasonable only when priors in params.csv are very tight.

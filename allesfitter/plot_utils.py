@@ -44,9 +44,8 @@ already line up vertically across the breaks.
 
 from __future__ import annotations
 
-import numpy as np
 import matplotlib.gridspec as _gridspec
-
+import numpy as np
 
 __all__ = ["broken_xaxis_subplots", "detect_time_gaps"]
 
@@ -96,18 +95,25 @@ def _draw_break_marks(axes, size):
         if i < n - 1:
             tr = ax.transAxes
             ax.plot((1 - size, 1 + size), (-size, +size), transform=tr, **kw)
-            ax.plot((1 - size, 1 + size), (1 - size, 1 + size),
-                    transform=tr, **kw)
+            ax.plot((1 - size, 1 + size), (1 - size, 1 + size), transform=tr, **kw)
         if i > 0:
             tr = ax.transAxes
             ax.plot((-size, +size), (1 - size, 1 + size), transform=tr, **kw)
             ax.plot((-size, +size), (-size, +size), transform=tr, **kw)
 
 
-def broken_xaxis_subplots(fig, position, time, *, gap_threshold_days=2.0,
-                          hspace=0.05, break_mark_size=0.015,
-                          edge_pad_frac=0.01, sharey=True,
-                          width_mode="uniform"):
+def broken_xaxis_subplots(
+    fig,
+    position,
+    time,
+    *,
+    gap_threshold_days=2.0,
+    hspace=0.05,
+    break_mark_size=0.015,
+    edge_pad_frac=0.01,
+    sharey=True,
+    width_mode="uniform",
+):
     """Create sub-Axes for a broken x-axis layout based on gaps in ``time``.
 
     Inspects ``time`` for consecutive samples separated by more than
@@ -155,8 +161,7 @@ def broken_xaxis_subplots(fig, position, time, *, gap_threshold_days=2.0,
     """
     if not isinstance(position, _gridspec.SubplotSpec):
         raise TypeError(
-            "`position` must be a SubplotSpec (e.g. gs[i, j]); got "
-            f"{type(position).__name__}"
+            "`position` must be a SubplotSpec (e.g. gs[i, j]); got " f"{type(position).__name__}"
         )
 
     segments = detect_time_gaps(time, gap_threshold_days)
@@ -173,14 +178,14 @@ def broken_xaxis_subplots(fig, position, time, *, gap_threshold_days=2.0,
     elif width_mode == "proportional":
         width_ratios = list(np.maximum(spans, np.median(spans) * 1e-3))
     else:
-        raise ValueError(
-            f"width_mode must be 'uniform' or 'proportional', got "
-            f"{width_mode!r}"
-        )
+        raise ValueError(f"width_mode must be 'uniform' or 'proportional', got " f"{width_mode!r}")
 
     sub_gs = _gridspec.GridSpecFromSubplotSpec(
-        1, n_seg, subplot_spec=position,
-        wspace=hspace, width_ratios=width_ratios,
+        1,
+        n_seg,
+        subplot_spec=position,
+        wspace=hspace,
+        width_ratios=width_ratios,
     )
 
     axes = []

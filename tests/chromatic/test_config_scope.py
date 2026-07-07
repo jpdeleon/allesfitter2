@@ -18,7 +18,6 @@ import pytest
 
 from allesfitter import config
 
-
 # Orbital params that must NEVER appear with a _<inst> or _<bandpass> suffix
 GLOBAL_ORBITAL_KEYS = (
     "b_period",
@@ -96,11 +95,14 @@ class TestKeyHelpers:
 # Global orbital params are single-keyed
 # --------------------------------------------------------------------------- #
 class TestGlobalOrbitalScope:
-    @pytest.mark.parametrize("fixture_name", [
-        "two_band_two_inst_datadir",
-        "one_band_two_inst_datadir",
-        "achromatic_datadir",
-    ])
+    @pytest.mark.parametrize(
+        "fixture_name",
+        [
+            "two_band_two_inst_datadir",
+            "one_band_two_inst_datadir",
+            "achromatic_datadir",
+        ],
+    )
     def test_orbital_params_single_keyed(self, request, fixture_name):
         datadir = request.getfixturevalue(fixture_name)
         config.init(str(datadir), quiet=True)
@@ -109,9 +111,9 @@ class TestGlobalOrbitalScope:
             assert key in params, f"{key} missing from params"
             # No _<inst> or _<bp> variants should exist
             siblings = [k for k in params if k.startswith(key + "_")]
-            assert siblings == [], (
-                f"{key} must be globally shared, but found scoped siblings: {siblings}"
-            )
+            assert (
+                siblings == []
+            ), f"{key} must be globally shared, but found scoped siblings: {siblings}"
 
 
 # --------------------------------------------------------------------------- #
@@ -152,7 +154,9 @@ class TestLDCScope:
             assert f"host_ldc_q1_{bp}" in params
             assert f"host_ldc_q2_{bp}" in params
 
-    def test_chromatic_ldc_scalar_suffixes_only_match_known_bandpasses(self, two_band_two_inst_datadir):
+    def test_chromatic_ldc_scalar_suffixes_only_match_known_bandpasses(
+        self, two_band_two_inst_datadir
+    ):
         # basement.validate() defaults q1..q4 (and u1..u4) for each bandpass to
         # None when absent — so there are more keys than the ones the user
         # supplied. The contract we pin is that every host_ldc_q* / host_ldc_u*
@@ -171,8 +175,7 @@ class TestLDCScope:
             assert len(tail) == 4, f"unexpected LDC key shape: {k}"
             suffix = tail[3]
             assert suffix in known_bands, (
-                f"LDC key {k!r} suffix {suffix!r} is not a known bandpass "
-                f"{sorted(known_bands)}"
+                f"LDC key {k!r} suffix {suffix!r} is not a known bandpass " f"{sorted(known_bands)}"
             )
         # And the user-supplied q1/q2 must still be there for both bands.
         for bp in known_bands:

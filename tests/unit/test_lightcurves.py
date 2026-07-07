@@ -1,17 +1,16 @@
 import numpy as np
-import pytest
 
 from allesfitter.lightcurves import (
-    mask_ranges,
-    get_first_epoch,
-    get_epoch_occ,
-    get_Rhost_over_a,
-    get_ecc_esinw_ecosw,
-    impact_parameters_smart,
     eclipse_width_smart,
+    get_ecc_esinw_ecosw,
+    get_epoch_occ,
+    get_first_epoch,
+    get_Rhost_over_a,
+    impact_parameters_smart,
     index_eclipses_smart,
-    translate_limb_darkening_from_u_to_q,
+    mask_ranges,
     translate_limb_darkening_from_q_to_u,
+    translate_limb_darkening_from_u_to_q,
 )
 
 
@@ -125,7 +124,7 @@ class TestGetEccEsinwEcosw:
         f_s = 0.3
         f_c = 0.4
         ecc, esinw, ecosw = get_ecc_esinw_ecosw(f_s, f_c)
-        expected_ecc = f_s ** 2 + f_c ** 2
+        expected_ecc = f_s**2 + f_c**2
         assert abs(ecc - expected_ecc) < 1e-10
         assert esinw > 0
         assert ecosw > 0
@@ -160,9 +159,7 @@ class TestImpactParametersSmart:
 
 class TestEclipseWidthSmart:
     def test_returns_two_values(self):
-        result = eclipse_width_smart(
-            period=3.5, rr=0.1, rsuma=0.11, cosi=0.1, f_s=0.0, f_c=0.0
-        )
+        result = eclipse_width_smart(period=3.5, rr=0.1, rsuma=0.11, cosi=0.1, f_s=0.0, f_c=0.0)
         width_1, width_2 = result
         assert isinstance(width_1, (int, float, np.floating))
         assert isinstance(width_2, (int, float, np.floating))

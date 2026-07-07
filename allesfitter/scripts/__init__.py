@@ -5,6 +5,7 @@ from pathlib import Path
 _scripts_dir = Path(__file__).parent.parent.parent / "scripts"
 script_path = _scripts_dir / "prepare_allesfit.py"
 
+
 def prepare_allesfit():
     sys.path.insert(0, str(script_path.parent))
     runpy.run_path(str(script_path), run_name="__main__")

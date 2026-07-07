@@ -27,16 +27,30 @@ from tests.chromatic._helpers import (
     ldc_rows,
 )
 
-
 # celerite SHOTerm params for the shared flux GP (fixed; values just need to
 # yield a valid positive-definite kernel).
 SHO_PARAM_ROWS = [
-    {"name": "stellar_var_gp_sho_lnS0_flux", "value": -12.0, "fit": 0,
-     "bounds": "uniform -30 0", "label": "lnS0"},
-    {"name": "stellar_var_gp_sho_lnQ_flux", "value": 0.0, "fit": 0,
-     "bounds": "uniform -5 5", "label": "lnQ"},
-    {"name": "stellar_var_gp_sho_lnomega0_flux", "value": 0.0, "fit": 0,
-     "bounds": "uniform -5 5", "label": "lnomega0"},
+    {
+        "name": "stellar_var_gp_sho_lnS0_flux",
+        "value": -12.0,
+        "fit": 0,
+        "bounds": "uniform -30 0",
+        "label": "lnS0",
+    },
+    {
+        "name": "stellar_var_gp_sho_lnQ_flux",
+        "value": 0.0,
+        "fit": 0,
+        "bounds": "uniform -5 5",
+        "label": "lnQ",
+    },
+    {
+        "name": "stellar_var_gp_sho_lnomega0_flux",
+        "value": 0.0,
+        "fit": 0,
+        "bounds": "uniform -5 5",
+        "label": "lnomega0",
+    },
 ]
 
 
@@ -45,8 +59,15 @@ def two_inst_stellar_var_datadir(make_datadir):
     """Achromatic config with two photometric instruments sharing a SHO GP."""
     insts = ["tess", "kepler"]
     rows = (
-        [{"name": "b_rr", "value": TRUE_RR_TESS, "fit": 1,
-          "bounds": "uniform 0.0 0.3", "label": "rr"}]
+        [
+            {
+                "name": "b_rr",
+                "value": TRUE_RR_TESS,
+                "fit": 1,
+                "bounds": "uniform 0.0 0.3",
+                "label": "rr",
+            }
+        ]
         + common_orbital_rows(fit_orbital=False)
         + dilution_rows(insts)
         + err_baseline_rows(insts)
@@ -99,6 +120,5 @@ def test_all_instruments_stellar_var_matches_merged_length(
     sv = np.asarray(calculate_stellar_var(params, "all", "flux"))
     assert sv.shape == (n_merged,)
     assert n_merged == sum(
-        len(config.BASEMENT.data[i]["time"])
-        for i in config.BASEMENT.settings["inst_phot"]
+        len(config.BASEMENT.data[i]["time"]) for i in config.BASEMENT.settings["inst_phot"]
     )

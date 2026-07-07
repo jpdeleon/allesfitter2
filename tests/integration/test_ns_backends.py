@@ -21,7 +21,6 @@ focused on the backend contract.
 from __future__ import annotations
 
 import json
-import os
 import pickle
 import time
 from copy import deepcopy
@@ -38,7 +37,6 @@ from allesfitter.utils.ns_backends import (
     get_backend,
     validate_settings_for_backend,
 )
-
 
 # ---------------------------------------------------------------------------
 # Synthetic 2D Gaussian — used by the slow consistency/speed tests.
@@ -92,8 +90,10 @@ def test_ultranest_safe_loglike_floors_nonfinite():
     finite values through untouched."""
     pytest.importorskip("ultranest")
     from allesfitter.utils.ns_backends.ultranest_backend import (
-        _safe_loglike, _NONFINITE_LOGL_FLOOR,
+        _NONFINITE_LOGL_FLOOR,
+        _safe_loglike,
     )
+
     raw_neginf = _safe_loglike(lambda t: float("-inf"))
     raw_posinf = _safe_loglike(lambda t: float("inf"))
     raw_nan = _safe_loglike(lambda t: float("nan"))
@@ -157,16 +157,21 @@ def test_NSResults_pickleable_and_deepcopy():
 
 def test_validator_flags_ignored_keys_for_dynesty():
     logs = []
-    raw = {"ns_nlive", "ns_bound", "ns_sample", "ns_tol", "ns_modus",
-           "un_min_ess"}  # un_min_ess is irrelevant under dynesty
+    raw = {
+        "ns_nlive",
+        "ns_bound",
+        "ns_sample",
+        "ns_tol",
+        "ns_modus",
+        "un_min_ess",
+    }  # un_min_ess is irrelevant under dynesty
     validate_settings_for_backend("dynesty", raw, logprint=logs.append)
     assert any("IGNORED" in m and "un_min_ess" in m for m in logs), logs
 
 
 def test_validator_flags_ignored_keys_for_ultranest():
     logs = []
-    raw = {"ns_nlive", "ns_tol", "ns_modus", "ns_bound", "ns_sample",
-           "un_min_ess", "un_max_iters"}
+    raw = {"ns_nlive", "ns_tol", "ns_modus", "ns_bound", "ns_sample", "un_min_ess", "un_max_iters"}
     validate_settings_for_backend("ultranest", raw, logprint=logs.append)
     # dynesty-only keys are ignored under ultranest
     assert any("IGNORED" in m and "ns_modus" in m for m in logs), logs
@@ -180,7 +185,7 @@ def test_validator_flags_missing_relevant_keys():
     validate_settings_for_backend("dynesty", raw, logprint=logs.append)
     msg = "\n".join(logs)
     for k in ("ns_bound", "ns_sample", "ns_tol", "ns_modus"):
-        assert k in msg, "missing-key warning should mention {}".format(k)
+        assert k in msg, f"missing-key warning should mention {k}"
 
 
 def test_validator_quiet_when_fully_explicit():
@@ -204,8 +209,7 @@ def test_build_results_required_keys():
         fitkeys=["x", "y"],
         wall_time_sec=0.0,
     )
-    required = {"backend", "samples", "logwt", "logz", "logzerr",
-                "fitkeys", "wall_time_sec", "raw"}
+    required = {"backend", "samples", "logwt", "logz", "logzerr", "fitkeys", "wall_time_sec", "raw"}
     assert required.issubset(set(r.keys()))
 
 
@@ -218,7 +222,9 @@ def test_build_results_required_keys():
 def test_dynesty_backend_recovers_2d_gaussian(tmp_path):
     be = get_backend("dynesty")
     r = be.run(
-        _loglike, _prior_transform, ndim=2,
+        _loglike,
+        _prior_transform,
+        ndim=2,
         settings=_baseline_settings(),
         param_names=["x", "y"],
         outdir=str(tmp_path),
@@ -234,7 +240,9 @@ def test_ultranest_backend_recovers_2d_gaussian(tmp_path):
     pytest.importorskip("ultranest")
     be = get_backend("ultranest")
     r = be.run(
-        _loglike, _prior_transform, ndim=2,
+        _loglike,
+        _prior_transform,
+        ndim=2,
         settings=_baseline_settings(),
         param_names=["x", "y"],
         outdir=str(tmp_path),
@@ -252,7 +260,9 @@ def test_ultranest_clamps_huge_dlogz_and_warns(tmp_path):
     settings = _baseline_settings()
     settings["ns_tol"] = 100.0  # dynesty-static-mode default, nonsensical for ultranest
     r = get_backend("ultranest").run(
-        _loglike, _prior_transform, ndim=2,
+        _loglike,
+        _prior_transform,
+        ndim=2,
         settings=settings,
         param_names=["x", "y"],
         outdir=str(tmp_path),
@@ -279,7 +289,9 @@ def test_ultranest_recovers_from_truncated_h5_store(tmp_path):
 
     logs = []
     r = get_backend("ultranest").run(
-        _loglike, _prior_transform, ndim=2,
+        _loglike,
+        _prior_transform,
+        ndim=2,
         settings=_baseline_settings(),
         param_names=["x", "y"],
         outdir=str(tmp_path),
@@ -307,7 +319,9 @@ def test_dynesty_vs_ultranest_consistency_and_speed(tmp_path):
 
     t0 = time.perf_counter()
     r_dyn = get_backend("dynesty").run(
-        _loglike, _prior_transform, ndim=2,
+        _loglike,
+        _prior_transform,
+        ndim=2,
         settings=_baseline_settings(),
         param_names=["x", "y"],
         outdir=str(out_dyn),
@@ -316,7 +330,9 @@ def test_dynesty_vs_ultranest_consistency_and_speed(tmp_path):
 
     t0 = time.perf_counter()
     r_un = get_backend("ultranest").run(
-        _loglike, _prior_transform, ndim=2,
+        _loglike,
+        _prior_transform,
+        ndim=2,
         settings=_baseline_settings(),
         param_names=["x", "y"],
         outdir=str(out_un),
@@ -327,30 +343,33 @@ def test_dynesty_vs_ultranest_consistency_and_speed(tmp_path):
     mu_un = _posterior_means(r_un)
     sigma = np.maximum(_posterior_stds(r_dyn), _posterior_stds(r_un))
     diff = np.abs(mu_dyn - mu_un)
-    assert np.all(diff < 3 * sigma), (
-        "Posterior means disagree: |Δ|={} > 3σ={}".format(diff, 3 * sigma)
-    )
+    assert np.all(diff < 3 * sigma), f"Posterior means disagree: |Δ|={diff} > 3σ={3 * sigma}"
 
     logz_dyn = _final(r_dyn["logz"])
     logz_un = _final(r_un["logz"])
     logzerr_max = max(_final(r_dyn["logzerr"]), _final(r_un["logzerr"]))
     assert abs(logz_dyn - logz_un) < 5 * logzerr_max, (
         "logZ disagrees beyond combined uncertainty: "
-        "dyn={}, un={}, max_err={}".format(logz_dyn, logz_un, logzerr_max)
+        f"dyn={logz_dyn}, un={logz_un}, max_err={logzerr_max}"
     )
 
     # _artifacts lives under tests/ (one level up from tests/integration/)
     artifact_dir = Path(__file__).resolve().parents[1] / "_artifacts"
     artifact_dir.mkdir(exist_ok=True)
-    (artifact_dir / "ns_backend_speed.json").write_text(json.dumps({
-        "dynesty_wall_time_sec": t_dyn,
-        "ultranest_wall_time_sec": t_un,
-        "dynesty_logz": logz_dyn,
-        "ultranest_logz": logz_un,
-        "delta_logz": logz_dyn - logz_un,
-        "posterior_means_dyn": mu_dyn.tolist(),
-        "posterior_means_un": mu_un.tolist(),
-    }, indent=2))
+    (artifact_dir / "ns_backend_speed.json").write_text(
+        json.dumps(
+            {
+                "dynesty_wall_time_sec": t_dyn,
+                "ultranest_wall_time_sec": t_un,
+                "dynesty_logz": logz_dyn,
+                "ultranest_logz": logz_un,
+                "delta_logz": logz_dyn - logz_un,
+                "posterior_means_dyn": mu_dyn.tolist(),
+                "posterior_means_un": mu_un.tolist(),
+            },
+            indent=2,
+        )
+    )
 
 
 # ---------------------------------------------------------------------------

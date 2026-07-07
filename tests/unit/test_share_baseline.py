@@ -19,8 +19,6 @@ to confirm the per-iteration alias hook fires.
 
 from __future__ import annotations
 
-import os
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -33,7 +31,7 @@ import pytest
 try:
     import allesfitter  # noqa: F401
     from allesfitter import config
-    from allesfitter.basement import Basement, BASELINE_GP_HYPER_PREFIXES
+    from allesfitter.basement import Basement
 except Exception:
     pytest.skip(
         "allesfitter or its dependencies are not importable",
@@ -182,12 +180,8 @@ def test_parse_share_groups_multiple(tmp_path):
     for k, inst in enumerate(insts):
         (d / f"{inst}.csv").write_text(_lc_csv(seed=k))
     b = Basement(str(d), quiet=True)
-    assert b.settings["baseline_share_flux_groups"] == [
-        ["m1_g", "m1_r"], ["m2_g", "m2_r"]
-    ]
-    assert b.settings["baseline_share_flux_followers_of"] == {
-        "m1_g": ["m1_r"], "m2_g": ["m2_r"]
-    }
+    assert b.settings["baseline_share_flux_groups"] == [["m1_g", "m1_r"], ["m2_g", "m2_r"]]
+    assert b.settings["baseline_share_flux_followers_of"] == {"m1_g": ["m1_r"], "m2_g": ["m2_r"]}
 
 
 # ---------------------------------------------------------------------------
@@ -235,8 +229,8 @@ def test_explicit_follower_rows_marked_fit_zero(tmp_path):
     (d / "results").mkdir(exist_ok=True)
     body = (
         _params_csv(_INSTS, gp_insts=[_INSTS[0]])
-        + f"baseline_gp_matern32_lnsigma_flux_muscat_r,-5,0,uniform -10 -3,,,baseline_gp_matern32_lnsigma_flux_muscat_g\n"
-        + f"baseline_gp_matern32_lnrho_flux_muscat_r,0,0,uniform -1 3,,,baseline_gp_matern32_lnrho_flux_muscat_g\n"
+        + "baseline_gp_matern32_lnsigma_flux_muscat_r,-5,0,uniform -10 -3,,,baseline_gp_matern32_lnsigma_flux_muscat_g\n"
+        + "baseline_gp_matern32_lnrho_flux_muscat_r,0,0,uniform -1 3,,,baseline_gp_matern32_lnrho_flux_muscat_g\n"
     )
     (d / "params.csv").write_text(body)
     (d / "settings.csv").write_text(_settings_csv(_INSTS, share_value=":".join(_INSTS)))
@@ -255,6 +249,7 @@ def test_update_params_aliases_follower_to_leader(tmp_path):
     """update_params() must propagate the leader's *current* theta value
     into every follower entry — not the stale value from load time."""
     from allesfitter.computer import update_params
+
     b = _make_basement(
         tmp_path,
         share_value=":".join(_INSTS),
@@ -307,6 +302,7 @@ def test_conflicting_follower_row_raises(tmp_path):
 
 def test_stack_and_sort_singleton_is_identity():
     from allesfitter.computer import _stack_and_sort
+
     x = np.array([1.0, 2.0, 3.0])
     y = np.array([10.0, 20.0, 30.0])
     e = np.array([0.1, 0.2, 0.3])
@@ -317,13 +313,11 @@ def test_stack_and_sort_singleton_is_identity():
 
 def test_stack_and_sort_breaks_ties():
     from allesfitter.computer import _stack_and_sort
+
     # Four bands with identical time grids (MuSCAT-style simultaneous
     # photometry) — every t in [0,1] appears 4 times.
     t = np.linspace(0.0, 1.0, 10)
-    parts = [
-        (t.copy(), np.full_like(t, k + 1.0), np.full_like(t, 0.1))
-        for k in range(4)
-    ]
+    parts = [(t.copy(), np.full_like(t, k + 1.0), np.full_like(t, 0.1)) for k in range(4)]
     x, y, e = _stack_and_sort(parts)
     # Strictly sorted, no duplicates
     assert np.all(np.diff(x) > 0), "stack_and_sort did not produce strictly sorted x"
@@ -331,8 +325,7 @@ def test_stack_and_sort_breaks_ties():
     assert len(x) == 4 * len(t)
     # Values are within one ULP of the original timestamp cluster
     # (we nudged duplicates by np.nextafter, which is <1e-12 for t ~1)
-    assert np.allclose(x, np.sort(np.concatenate([p[0] for p in parts])),
-                       atol=1e-9), x
+    assert np.allclose(x, np.sort(np.concatenate([p[0] for p in parts])), atol=1e-9), x
 
 
 # ---------------------------------------------------------------------------
@@ -508,6 +501,7 @@ def test_mcmc_chromatic_rr_pdf_emitted(tmp_path):
     """plot_chromatic_rr_histogram with prefix='mcmc' must write
     `<outdir>/mcmc_chromatic_rr_<companion>.pdf`."""
     from allesfitter.nested_sampling_output import plot_chromatic_rr_histogram
+
     datadir = _make_chromatic_datadir(tmp_path)
     config.init(str(datadir))
     b = config.BASEMENT
@@ -515,9 +509,7 @@ def test_mcmc_chromatic_rr_pdf_emitted(tmp_path):
 
     # Build a synthetic (Nsamples, ndim) posterior around theta_0.
     rng = np.random.default_rng(0)
-    samples = np.array(b.theta_0)[None, :] + rng.normal(
-        0, 1e-3, size=(200, b.ndim)
-    )
+    samples = np.array(b.theta_0)[None, :] + rng.normal(0, 1e-3, size=(200, b.ndim))
 
     plot_chromatic_rr_histogram(samples, prefix="mcmc")
     out = Path(b.outdir) / "mcmc_chromatic_rr_b.pdf"
@@ -529,14 +521,13 @@ def test_ns_chromatic_rr_default_prefix_unchanged(tmp_path):
     """Calling without an explicit prefix must keep emitting the legacy
     `ns_chromatic_rr_<companion>.pdf` filename (NS backward compat)."""
     from allesfitter.nested_sampling_output import plot_chromatic_rr_histogram
+
     datadir = _make_chromatic_datadir(tmp_path)
     config.init(str(datadir))
     b = config.BASEMENT
 
     rng = np.random.default_rng(1)
-    samples = np.array(b.theta_0)[None, :] + rng.normal(
-        0, 1e-3, size=(200, b.ndim)
-    )
+    samples = np.array(b.theta_0)[None, :] + rng.normal(0, 1e-3, size=(200, b.ndim))
 
     plot_chromatic_rr_histogram(samples)  # default prefix='ns'
     out = Path(b.outdir) / "ns_chromatic_rr_b.pdf"
@@ -552,14 +543,18 @@ def test_ns_chromatic_rr_default_prefix_unchanged(tmp_path):
 
 def test_filter_nuisance_keeps_when_ndim_small():
     from allesfitter.nested_sampling_output import _filter_nuisance_for_corner
-    fitkeys = np.array(['b_rr', 'b_cosi', 'baseline_offset_flux_a',
-                        'ln_err_flux_a'])
+
+    fitkeys = np.array(["b_rr", "b_cosi", "baseline_offset_flux_a", "ln_err_flux_a"])
     samples = np.random.default_rng(0).normal(0, 1, size=(50, 4))
     labels = list(fitkeys)
     truths = np.zeros(4)
     # threshold=10 > ndim=4 → no filtering
     out_keys, out_s, out_lab, out_t, dropped = _filter_nuisance_for_corner(
-        fitkeys, samples, labels, truths, threshold=10,
+        fitkeys,
+        samples,
+        labels,
+        truths,
+        threshold=10,
     )
     assert dropped == []
     assert out_s.shape == samples.shape
@@ -568,27 +563,42 @@ def test_filter_nuisance_keeps_when_ndim_small():
 
 def test_filter_nuisance_drops_baseline_and_error():
     from allesfitter.nested_sampling_output import _filter_nuisance_for_corner
-    fitkeys = np.array([
-        'b_rr_g', 'b_rr_r', 'b_rr_i', 'b_rr_z',
-        'b_rsuma', 'b_cosi', 'b_epoch', 'b_period',
-        'host_ldc_q1_g', 'host_ldc_q1_r',
-        'baseline_gp_matern32_lnsigma_flux_a',
-        'baseline_gp_matern32_lnrho_flux_a',
-        'baseline_offset_flux_a',
-        'ln_err_flux_a',
-        'ln_jitter_rv_a',
-        'stellar_var_gp_matern32_lnsigma_flux',
-    ])
+
+    fitkeys = np.array(
+        [
+            "b_rr_g",
+            "b_rr_r",
+            "b_rr_i",
+            "b_rr_z",
+            "b_rsuma",
+            "b_cosi",
+            "b_epoch",
+            "b_period",
+            "host_ldc_q1_g",
+            "host_ldc_q1_r",
+            "baseline_gp_matern32_lnsigma_flux_a",
+            "baseline_gp_matern32_lnrho_flux_a",
+            "baseline_offset_flux_a",
+            "ln_err_flux_a",
+            "ln_jitter_rv_a",
+            "stellar_var_gp_matern32_lnsigma_flux",
+        ]
+    )
     samples = np.random.default_rng(1).normal(0, 1, size=(50, len(fitkeys)))
     labels = list(fitkeys)
     truths = np.arange(len(fitkeys), dtype=float)
     out_keys, out_s, out_lab, out_t, dropped = _filter_nuisance_for_corner(
-        fitkeys, samples, labels, truths, threshold=5,
+        fitkeys,
+        samples,
+        labels,
+        truths,
+        threshold=5,
     )
     # 6 nuisance rows expected to be dropped
     assert len(dropped) == 6
-    assert all(k.startswith(('baseline_', 'ln_err_', 'ln_jitter_',
-                              'stellar_var_gp_')) for k in dropped), dropped
+    assert all(
+        k.startswith(("baseline_", "ln_err_", "ln_jitter_", "stellar_var_gp_")) for k in dropped
+    ), dropped
     # 10 science rows kept (b_rr_*, b_rsuma, b_cosi, b_epoch, b_period,
     # host_ldc_q1_g, host_ldc_q1_r)
     assert out_s.shape == (50, 10)
@@ -598,9 +608,18 @@ def test_filter_nuisance_drops_baseline_and_error():
 
 def test_corner_nuisance_mask_matches_documented_prefixes():
     from allesfitter.nested_sampling_output import _corner_nuisance_mask
-    keys = np.array(['b_rr', 'baseline_offset_flux_a',
-                     'ln_err_flux_a', 'ln_jitter_rv_a',
-                     'stellar_var_gp_sho_lnS0_flux', 'dil_a', 'host_ldc_q1_a'])
+
+    keys = np.array(
+        [
+            "b_rr",
+            "baseline_offset_flux_a",
+            "ln_err_flux_a",
+            "ln_jitter_rv_a",
+            "stellar_var_gp_sho_lnS0_flux",
+            "dil_a",
+            "host_ldc_q1_a",
+        ]
+    )
     mask = _corner_nuisance_mask(keys)
     # b_rr, dil_a, host_ldc_q1_a should be kept (dil is physical-ish)
     assert mask.tolist() == [True, False, False, False, False, True, True]
@@ -622,6 +641,7 @@ def test_single_member_group_matches_legacy_lnlike(tmp_path):
     # Use the singleton-group leader's theta_0 in both cases.
     config.BASEMENT = b_legacy
     from allesfitter.computer import update_params as up
+
     params_legacy = up(np.array(b_legacy.theta_0, dtype=float))
     ll_legacy = calculate_lnlike_total(params_legacy)
 

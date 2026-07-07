@@ -32,7 +32,7 @@ from tests.chromatic._helpers import (
     write_settings,
 )
 
-_FAST_FIT_WIDTH = 8.0 / 24.0   # Basement default transit half-window source
+_FAST_FIT_WIDTH = 8.0 / 24.0  # Basement default transit half-window source
 _SPAN_PERIODS = 4
 _N_RAW = 2000
 
@@ -46,13 +46,17 @@ def reset_basement():
     config.BASEMENT = None
 
 
-def _mask_datadir(tmp_path, *, mask_transit=None, fit_rr=False,
-                  with_covariate=False, extra_settings=None):
+def _mask_datadir(
+    tmp_path, *, mask_transit=None, fit_rr=False, with_covariate=False, extra_settings=None
+):
     d = tmp_path / "mask_dd"
     d.mkdir()
     # dense, uniform cadence spanning several transits centred on TRUE_EPOCH
-    t = TRUE_EPOCH - 0.5 * _SPAN_PERIODS * TRUE_PERIOD + np.linspace(
-        0.0, _SPAN_PERIODS * TRUE_PERIOD, _N_RAW)
+    t = (
+        TRUE_EPOCH
+        - 0.5 * _SPAN_PERIODS * TRUE_PERIOD
+        + np.linspace(0.0, _SPAN_PERIODS * TRUE_PERIOD, _N_RAW)
+    )
     rng = np.random.default_rng(0)
     flux = 1.0 + rng.normal(0.0, 5e-4, _N_RAW)
     err = np.full(_N_RAW, 5e-4)
@@ -71,8 +75,15 @@ def _mask_datadir(tmp_path, *, mask_transit=None, fit_rr=False,
         extra.append(f"mask_transit,{mask_transit}")
     write_settings(d, inst_phot=["tess"], bandpass=None, extra=extra)
     rows = (
-        [{"name": "b_rr", "value": TRUE_RR_TESS, "fit": 1 if fit_rr else 0,
-          "bounds": "uniform 0 0.3", "label": "rr"}]
+        [
+            {
+                "name": "b_rr",
+                "value": TRUE_RR_TESS,
+                "fit": 1 if fit_rr else 0,
+                "bounds": "uniform 0 0.3",
+                "label": "rr",
+            }
+        ]
         + common_orbital_rows(fit_orbital=False)  # all transit params fixed
         + dilution_rows(["tess"])
         + err_baseline_rows(["tess"])
@@ -144,8 +155,9 @@ def test_mask_transit_with_free_transit_param_raises(tmp_path):
 def test_mask_transit_with_fast_fit_raises(tmp_path):
     from allesfitter import config
 
-    d = _mask_datadir(tmp_path, mask_transit="True",
-                      extra_settings=["fast_fit,True", "fast_fit_width,0.3"])
+    d = _mask_datadir(
+        tmp_path, mask_transit="True", extra_settings=["fast_fit,True", "fast_fit_width,0.3"]
+    )
     # write_settings already emits fast_fit,False; the extra row appears later
     # and wins (later keys overwrite earlier ones in the settings dict).
     with pytest.raises(ValueError) as exc:

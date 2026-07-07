@@ -52,6 +52,7 @@ except Exception as exc:  # pragma: no cover - depends on optional deps
 # helpers
 # ---------------------------------------------------------------------------
 
+
 def _params_csv_text() -> str:
     """A minimal params.csv carrying the rows the helpers rewrite."""
     return (
@@ -75,6 +76,7 @@ def _synthetic_lightcurve(n=500, cadence_days=2.0 / 1440.0, rms=1e-3, seed=0):
 # ---------------------------------------------------------------------------
 # 1) segment-label / mission-word formatting (drives filenames + headers)
 # ---------------------------------------------------------------------------
+
 
 def test_parse_segment_label_returns_last_token_as_str():
     assert prep._parse_segment_label("TESS Sector 82") == "82"
@@ -107,6 +109,7 @@ def test_segment_word_per_mission_singular_and_plural():
 # 2) default physics-informed prior bounds (substituted into params.csv)
 # ---------------------------------------------------------------------------
 
+
 def test_default_prior_bounds_typical_planet():
     out = prep._default_prior_bounds(rprs_max=0.12, rsuma_min=0.02, rsuma_max=0.15)
     # rr_upper = ceil(0.12*10)/10 + 0.05 = 0.2 + 0.05 = 0.25
@@ -120,15 +123,16 @@ def test_default_prior_bounds_typical_planet():
 def test_default_prior_bounds_are_clamped():
     # Brown-dwarf-deep, grazing, ultra-short-period extreme inputs must clamp.
     out = prep._default_prior_bounds(rprs_max=0.9, rsuma_min=1e-9, rsuma_max=0.9)
-    assert out["rr_upper"] == 0.5          # capped at brown-dwarf regime
+    assert out["rr_upper"] == 0.5  # capped at brown-dwarf regime
     assert out["rsuma_lo"] == pytest.approx(1e-3)  # floored
-    assert out["rsuma_hi"] == 0.5          # capped
-    assert out["cosi_max"] == 1.0          # hard-bounded at 1
+    assert out["rsuma_hi"] == 0.5  # capped
+    assert out["cosi_max"] == 1.0  # hard-bounded at 1
 
 
 # ---------------------------------------------------------------------------
 # 3) dataset-aware GP / noise bounds
 # ---------------------------------------------------------------------------
+
 
 def test_dataset_aware_gp_bounds_returns_none_for_short_series():
     assert prep._dataset_aware_gp_bounds([0, 1, 2], [1, 1, 1], tdur_days=0.1) is None
@@ -163,6 +167,7 @@ def test_dataset_aware_gp_bounds_invariants():
 # ---------------------------------------------------------------------------
 # 4) _update_params_gp_bounds rewrites the right rows in params.csv
 # ---------------------------------------------------------------------------
+
 
 def test_update_params_gp_bounds_rewrites_matching_rows(tmp_path):
     p = tmp_path / "params.csv"
@@ -211,6 +216,7 @@ def test_update_params_gp_bounds_handles_missing_file(tmp_path):
 # 5) _inject_dilution_normal_prior prepends a commented normal-prior twin
 # ---------------------------------------------------------------------------
 
+
 def test_inject_dilution_normal_prior_inserts_commented_row(tmp_path):
     p = tmp_path / "params.csv"
     p.write_text(_params_csv_text())
@@ -242,6 +248,7 @@ def test_inject_dilution_normal_prior_returns_false_without_match(tmp_path):
 # ---------------------------------------------------------------------------
 # 6) _write_spoc_contamination: CROWDSAP -> dilution report file
 # ---------------------------------------------------------------------------
+
 
 def test_write_spoc_contamination_single_segment(tmp_path):
     out = tmp_path / "tess_contamination.txt"
@@ -305,7 +312,8 @@ def test_percentile_3sig_safe_empty_returns_fallback_and_warns():
     log = _CapLogger()
     fb = (1e-3, 0.1, 0.25)
     out = prep._percentile_3sig_safe(
-        np.array([]), fallback=fb, label="(R*+Rp)/a", planet="b", logger=log)
+        np.array([]), fallback=fb, label="(R*+Rp)/a", planet="b", logger=log
+    )
     assert out == fb
     assert len(log.warnings) == 1 and "could not derive" in log.warnings[0]
 
@@ -314,7 +322,8 @@ def test_percentile_3sig_safe_all_nan_returns_fallback():
     log = _CapLogger()
     fb = (1e-3, 0.1, 0.25)
     out = prep._percentile_3sig_safe(
-        np.full(100, np.nan), fallback=fb, label="x", planet="c", logger=log)
+        np.full(100, np.nan), fallback=fb, label="x", planet="c", logger=log
+    )
     assert out == fb
     assert log.warnings  # warned
 
@@ -323,7 +332,8 @@ def test_percentile_3sig_safe_valid_samples_compute_percentiles():
     log = _CapLogger()
     samples = np.linspace(0.05, 0.15, 1000)
     lo, mid, hi = prep._percentile_3sig_safe(
-        samples, fallback=(1e-3, 0.1, 0.25), label="x", planet="b", logger=log)
+        samples, fallback=(1e-3, 0.1, 0.25), label="x", planet="b", logger=log
+    )
     assert lo < mid < hi
     assert mid == pytest.approx(0.1, abs=1e-3)
     assert log.warnings == []  # no fallback used

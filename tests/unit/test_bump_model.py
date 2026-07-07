@@ -164,16 +164,16 @@ def test_flux_subfct_bumps_multiple_bumps_sum():
     xx = np.linspace(99.0, 101.0, 4001)
     params = {
         "dil_tess": 0.0,
-        "bump_tpeak_1": 99.5, "bump_width_1": 0.02, "bump_ampl_tess_1": 0.003,
-        "bump_tpeak_2": 100.5, "bump_width_2": 0.02, "bump_ampl_tess_2": 0.005,
+        "bump_tpeak_1": 99.5,
+        "bump_width_1": 0.02,
+        "bump_ampl_tess_1": 0.003,
+        "bump_tpeak_2": 100.5,
+        "bump_width_2": 0.02,
+        "bump_ampl_tess_2": 0.005,
     }
     out = computer.flux_subfct_bumps(params, "tess", "b", xx=xx, settings={"N_bumps_tess": 2})
 
-    expected = (
-        1.0
-        + bump_model(xx, 99.5, 0.02, 0.003)
-        + bump_model(xx, 100.5, 0.02, 0.005)
-    )
+    expected = 1.0 + bump_model(xx, 99.5, 0.02, 0.003) + bump_model(xx, 100.5, 0.02, 0.005)
     assert np.allclose(out, expected)
 
 
@@ -281,13 +281,29 @@ def _bump_datadir(tmp_path):
         + err_baseline_rows(["tess"])
         + ldc_rows("tess")
         + [
-            {"name": "bump_tpeak_1", "value": _BUMP_TPEAK, "fit": 0,
-             "bounds": f"uniform {_BUMP_TPEAK - 0.1} {_BUMP_TPEAK + 0.1}",
-             "label": "bump_tpeak_1", "unit": "BJD"},
-            {"name": "bump_width_1", "value": _BUMP_WIDTH, "fit": 0,
-             "bounds": "uniform 0.001 0.1", "label": "bump_width_1", "unit": "d"},
-            {"name": "bump_ampl_tess_1", "value": _BUMP_AMPL, "fit": 0,
-             "bounds": "uniform 0 0.05", "label": "bump_ampl_tess_1"},
+            {
+                "name": "bump_tpeak_1",
+                "value": _BUMP_TPEAK,
+                "fit": 0,
+                "bounds": f"uniform {_BUMP_TPEAK - 0.1} {_BUMP_TPEAK + 0.1}",
+                "label": "bump_tpeak_1",
+                "unit": "BJD",
+            },
+            {
+                "name": "bump_width_1",
+                "value": _BUMP_WIDTH,
+                "fit": 0,
+                "bounds": "uniform 0.001 0.1",
+                "label": "bump_width_1",
+                "unit": "d",
+            },
+            {
+                "name": "bump_ampl_tess_1",
+                "value": _BUMP_AMPL,
+                "fit": 0,
+                "bounds": "uniform 0 0.05",
+                "label": "bump_ampl_tess_1",
+            },
         ]
     )
     write_params(d / "params.csv", rows=rows)

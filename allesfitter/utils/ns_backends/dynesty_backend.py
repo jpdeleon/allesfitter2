@@ -14,11 +14,9 @@ from multiprocessing import Pool
 from time import time as timer
 from typing import Callable
 
-import numpy as np
 import dynesty
 
 from . import build_results
-
 
 name = "dynesty"
 
@@ -50,50 +48,67 @@ def run(
     if modus == "static":
         logprint("\nRunning Static Nested Sampler (dynesty)...")
         logprint("--------------------------")
-        logprint("datadir: {}".format(_datadir))
+        logprint(f"datadir: {_datadir}")
         if use_mp:
             with closing(Pool(processes=cores)) as pool:
-                logprint("\nRunning on {} CPUs.".format(cores))
+                logprint(f"\nRunning on {cores} CPUs.")
                 sampler = dynesty.NestedSampler(
-                    loglike, prior_transform, ndim,
-                    pool=pool, queue_size=cores,
-                    bound=bound, sample=sample, nlive=nlive,
+                    loglike,
+                    prior_transform,
+                    ndim,
+                    pool=pool,
+                    queue_size=cores,
+                    bound=bound,
+                    sample=sample,
+                    nlive=nlive,
                 )
                 sampler.run_nested(dlogz=tol, print_progress=print_progress)
         else:
             sampler = dynesty.NestedSampler(
-                loglike, prior_transform, ndim,
-                bound=bound, sample=sample, nlive=nlive,
+                loglike,
+                prior_transform,
+                ndim,
+                bound=bound,
+                sample=sample,
+                nlive=nlive,
             )
             sampler.run_nested(dlogz=tol, print_progress=print_progress)
 
     elif modus == "dynamic":
         logprint("\nRunning Dynamic Nested Sampler (dynesty)...")
         logprint("--------------------------")
-        logprint("datadir: {}".format(_datadir))
+        logprint(f"datadir: {_datadir}")
         if use_mp:
             with closing(Pool(processes=cores)) as pool:
-                logprint("\nRunning on {} CPUs.".format(cores))
+                logprint(f"\nRunning on {cores} CPUs.")
                 sampler = dynesty.DynamicNestedSampler(
-                    loglike, prior_transform, ndim,
-                    pool=pool, queue_size=cores,
-                    bound=bound, sample=sample,
+                    loglike,
+                    prior_transform,
+                    ndim,
+                    pool=pool,
+                    queue_size=cores,
+                    bound=bound,
+                    sample=sample,
                 )
                 sampler.run_nested(
-                    nlive_init=nlive, dlogz_init=tol,
+                    nlive_init=nlive,
+                    dlogz_init=tol,
                     print_progress=print_progress,
                 )
         else:
             sampler = dynesty.DynamicNestedSampler(
-                loglike, prior_transform, ndim,
-                bound=bound, sample=sample,
+                loglike,
+                prior_transform,
+                ndim,
+                bound=bound,
+                sample=sample,
             )
             sampler.run_nested(nlive_init=nlive, print_progress=print_progress)
     else:
-        raise ValueError("ns_modus must be 'static' or 'dynamic', got {!r}".format(modus))
+        raise ValueError(f"ns_modus must be 'static' or 'dynamic', got {modus!r}")
 
     elapsed = timer() - t0
-    logprint("\nTime taken to run 'dynesty' ({}): {:.2f} hours".format(modus, elapsed / 3600.0))
+    logprint(f"\nTime taken to run 'dynesty' ({modus}): {elapsed / 3600.0:.2f} hours")
 
     r = sampler.results
     # dynesty Results behaves like a dict; access via subscript for portability.

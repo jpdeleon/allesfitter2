@@ -14,10 +14,9 @@ import numpy as np
 import pytest
 
 from allesfitter import config
-
 from tests.chromatic._helpers import (
-    NOISE_SIGMA,
     N_POINTS_PER_INST,
+    NOISE_SIGMA,
     RNG_SEED,
     TRUE_EPOCH,
     TRUE_PERIOD,
@@ -51,12 +50,16 @@ def _achromatic_datadir_with_outliers(tmp_path, settings_extra):
     flux[outlier_idx[3]] = 1.5
     expected_clipped_times = sorted(time[outlier_idx].tolist())
     write_data_csv(datadir / "tess.csv", time, flux, err)
-    write_settings(datadir, inst_phot=["tess"], bandpass=None,
-                   extra=settings_extra)
+    write_settings(datadir, inst_phot=["tess"], bandpass=None, extra=settings_extra)
     rows = (
         [
-            {"name": "b_rr", "value": TRUE_RR_TESS, "fit": 1,
-             "bounds": "uniform 0.0 0.3", "label": "rr"},
+            {
+                "name": "b_rr",
+                "value": TRUE_RR_TESS,
+                "fit": 1,
+                "bounds": "uniform 0.0 0.3",
+                "label": "rr",
+            },
         ]
         + common_orbital_rows()
         + dilution_rows(["tess"])
@@ -92,8 +95,7 @@ class TestRawFluxClip:
         clipped_err = config.BASEMENT.data["tess"]["raw_clipped_flux_err"]
 
         assert len(clipped_time) == 4, (
-            f"expected 4 clipped rows, got {len(clipped_time)} "
-            f"(times: {clipped_time.tolist()})"
+            f"expected 4 clipped rows, got {len(clipped_time)} " f"(times: {clipped_time.tolist()})"
         )
         assert len(clipped_flux) == 4 and len(clipped_err) == 4
         assert sorted(clipped_time.tolist()) == pytest.approx(expected)
@@ -138,8 +140,10 @@ class TestRawFluxClip:
         datadir, expected = _achromatic_datadir_with_outliers(
             tmp_path,
             settings_extra=[
-                "flux_min_raw,0.85", "flux_max_raw,1.15",
-                "fast_fit,True", "fast_fit_width,0.3333333333333333",
+                "flux_min_raw,0.85",
+                "flux_max_raw,1.15",
+                "fast_fit,True",
+                "fast_fit_width,0.3333333333333333",
             ],
         )
         config.init(str(datadir), quiet=True)

@@ -24,7 +24,7 @@ unit-testable without constructing a full :class:`~allesfitter.basement.Basement
 
 from __future__ import annotations
 
-from typing import Dict, List, Sequence
+from typing import Sequence
 
 from .parsing import parse_bounds, read_param_rows, read_settings
 from .physical_limits import check_value, eccentricity_error, lookup_limit
@@ -73,9 +73,9 @@ class ConfigError(ValueError):
 # with :mod:`allesfitter.validation.prior_checks`.
 
 
-def companions_from_settings(settings: Dict[str, str]) -> List[str]:
+def companions_from_settings(settings: dict[str, str]) -> list[str]:
     """Union of companion letters declared across the companion keys."""
-    seen: List[str] = []
+    seen: list[str] = []
     for key in _COMPANION_KEYS:
         for tok in (settings.get(key, "") or "").split():
             if tok and tok not in seen:
@@ -103,9 +103,9 @@ def _is_coupled(row: Sequence[str]) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def check_duplicate_param_names(rows: Sequence[Sequence[str]]) -> List[str]:
+def check_duplicate_param_names(rows: Sequence[Sequence[str]]) -> list[str]:
     """Flag parameter names that appear on more than one row."""
-    counts: Dict[str, int] = {}
+    counts: dict[str, int] = {}
     for row in rows:
         if not _is_real_param(row):
             continue
@@ -120,9 +120,9 @@ def check_duplicate_param_names(rows: Sequence[Sequence[str]]) -> List[str]:
     return []
 
 
-def check_fit_flags(rows: Sequence[Sequence[str]]) -> List[str]:
+def check_fit_flags(rows: Sequence[Sequence[str]]) -> list[str]:
     """The ``fit`` column (3rd) must be ``0`` or ``1`` on every real row."""
-    errors: List[str] = []
+    errors: list[str] = []
     for row in rows:
         if not _is_real_param(row) or len(row) < 3:
             continue
@@ -135,7 +135,7 @@ def check_fit_flags(rows: Sequence[Sequence[str]]) -> List[str]:
     return errors
 
 
-def check_values_numeric(rows: Sequence[Sequence[str]]) -> List[str]:
+def check_values_numeric(rows: Sequence[Sequence[str]]) -> list[str]:
     """The ``value`` column (2nd) must hold a usable initial value.
 
     Empty values are allowed on fixed (``fit==0``) or coupled rows — allesfitter
@@ -143,7 +143,7 @@ def check_values_numeric(rows: Sequence[Sequence[str]]) -> List[str]:
     must carry a numeric starting point, and any non-empty value must parse as
     a float (catches typos like ``0..1``).
     """
-    errors: List[str] = []
+    errors: list[str] = []
     for row in rows:
         if not _is_real_param(row) or len(row) < 2 or _is_coupled(row):
             continue
@@ -159,13 +159,11 @@ def check_values_numeric(rows: Sequence[Sequence[str]]) -> List[str]:
         try:
             float(value)
         except (TypeError, ValueError):
-            errors.append(
-                f"params.csv row '{row[0]}' has non-numeric value '{row[1]}'."
-            )
+            errors.append(f"params.csv row '{row[0]}' has non-numeric value '{row[1]}'.")
     return errors
 
 
-def check_bounds_wellformed(rows: Sequence[Sequence[str]]) -> List[str]:
+def check_bounds_wellformed(rows: Sequence[Sequence[str]]) -> list[str]:
     """Validate prior bounds for *fitted* rows.
 
     Fixed rows (``fit==0``) are ignored — their bounds are unused. For fitted
@@ -173,7 +171,7 @@ def check_bounds_wellformed(rows: Sequence[Sequence[str]]) -> List[str]:
     arity, satisfy ``lo < hi`` (uniform / truncated) and ``sigma > 0``
     (normal / truncated).
     """
-    errors: List[str] = []
+    errors: list[str] = []
     for row in rows:
         if not _is_real_param(row) or len(row) < 4 or _is_coupled(row):
             continue
@@ -182,9 +180,7 @@ def check_bounds_wellformed(rows: Sequence[Sequence[str]]) -> List[str]:
         name = row[0]
         parsed = parse_bounds(row[3])
         if parsed is None:
-            errors.append(
-                f"params.csv row '{name}' is fitted (fit=1) but has no prior bounds."
-            )
+            errors.append(f"params.csv row '{name}' is fitted (fit=1) but has no prior bounds.")
             continue
         kind, nums = parsed
         if kind == "__unknown__":
@@ -194,9 +190,7 @@ def check_bounds_wellformed(rows: Sequence[Sequence[str]]) -> List[str]:
             )
             continue
         if kind == "__bad__":
-            errors.append(
-                f"params.csv row '{name}' has malformed prior bounds '{row[3]}'."
-            )
+            errors.append(f"params.csv row '{name}' has malformed prior bounds '{row[3]}'.")
             continue
         if kind == "uniform":
             lo, hi = nums
@@ -227,14 +221,14 @@ def check_bounds_wellformed(rows: Sequence[Sequence[str]]) -> List[str]:
     return errors
 
 
-def check_values_within_bounds(rows: Sequence[Sequence[str]]) -> List[str]:
+def check_values_within_bounds(rows: Sequence[Sequence[str]]) -> list[str]:
     """A fitted row's initial value must lie inside its uniform/truncated prior.
 
     A starting point outside the prior support has zero likelihood under the
     sampler and is almost always a typo. ``normal`` priors are unbounded, so
     they are skipped here.
     """
-    errors: List[str] = []
+    errors: list[str] = []
     for row in rows:
         if not _is_real_param(row) or len(row) < 4 or row[2] != "1" or _is_coupled(row):
             continue
@@ -261,8 +255,8 @@ def check_values_within_bounds(rows: Sequence[Sequence[str]]) -> List[str]:
 
 
 def check_companions_have_params(
-    settings: Dict[str, str], rows: Sequence[Sequence[str]]
-) -> List[str]:
+    settings: dict[str, str], rows: Sequence[Sequence[str]]
+) -> list[str]:
     """Cross-file consistency: every declared companion must have param rows.
 
     A companion letter listed in ``settings.csv`` (``companions_phot`` /
@@ -271,7 +265,7 @@ def check_companions_have_params(
     unparameterized.
     """
     names = {row[0] for row in rows if _is_real_param(row)}
-    errors: List[str] = []
+    errors: list[str] = []
     for companion in companions_from_settings(settings):
         prefix = companion + "_"
         if not any(n.startswith(prefix) for n in names):
@@ -282,7 +276,7 @@ def check_companions_have_params(
     return errors
 
 
-def check_gp_baseline_vs_stellar_var(settings: Dict[str, str]) -> List[str]:
+def check_gp_baseline_vs_stellar_var(settings: dict[str, str]) -> list[str]:
     """Forbid a GP baseline and a GP stellar-variability model on the same key.
 
     For a given key (``flux`` / ``rv`` / ``rv2``), allesfitter cannot combine a
@@ -295,7 +289,7 @@ def check_gp_baseline_vs_stellar_var(settings: Dict[str, str]) -> List[str]:
     The supported pattern is a GP for stellar variability **plus a non-GP
     baseline** (e.g. polynomial, ``hybrid_*`` or ``sample_linear``).
     """
-    errors: List[str] = []
+    errors: list[str] = []
     for key, inst_key in _STELLAR_VAR_KEY_TO_INST_KEY.items():
         if settings.get("stellar_var_" + key, "none") not in _GP_VALUES:
             continue
@@ -318,7 +312,7 @@ def check_gp_baseline_vs_stellar_var(settings: Dict[str, str]) -> List[str]:
     return errors
 
 
-def _check_one_binning(key: str, raw: str) -> List[str]:
+def _check_one_binning(key: str, raw: str) -> list[str]:
     """Validate a single ``binning`` / ``binning_<inst>`` value string."""
     raw = (raw or "").strip()
     if raw == "" or raw.lower() == "none":
@@ -339,7 +333,7 @@ def _check_one_binning(key: str, raw: str) -> List[str]:
     return []
 
 
-def check_binning_value(settings: Dict[str, str]) -> List[str]:
+def check_binning_value(settings: dict[str, str]) -> list[str]:
     """``binning`` / ``binning_<inst>`` must be empty / ``none`` or a positive float.
 
     The value is a bin width in **days** (e.g. ``0.0208333`` for 30 min). A
@@ -349,7 +343,7 @@ def check_binning_value(settings: Dict[str, str]) -> List[str]:
     data-dependent "binning ≥ observation baseline" error is enforced in
     ``Basement.load_data`` (which has the light-curve time arrays).
     """
-    errors: List[str] = []
+    errors: list[str] = []
     errors += _check_one_binning("binning", settings.get("binning", ""))
     for key in settings:
         if key.startswith("binning_"):
@@ -357,7 +351,7 @@ def check_binning_value(settings: Dict[str, str]) -> List[str]:
     return errors
 
 
-def check_params_within_physical_limits(rows: Sequence[Sequence[str]]) -> List[str]:
+def check_params_within_physical_limits(rows: Sequence[Sequence[str]]) -> list[str]:
     """Enforce unambiguous physical ranges on initial values *and* prior bounds.
 
     For every real, non-coupled row whose name has a registered physical limit
@@ -372,7 +366,7 @@ def check_params_within_physical_limits(rows: Sequence[Sequence[str]]) -> List[s
     Only catches unambiguous constraints (rsuma, dilution, vsini); debatable
     cases (rr > 1, lambda range) warn in ``prior_checks`` instead.
     """
-    errors: List[str] = []
+    errors: list[str] = []
     for row in rows:
         if not _is_real_param(row) or len(row) < 2 or _is_coupled(row):
             continue
@@ -422,7 +416,7 @@ def check_params_within_physical_limits(rows: Sequence[Sequence[str]]) -> List[s
     return errors
 
 
-def check_eccentricity(rows: Sequence[Sequence[str]]) -> List[str]:
+def check_eccentricity(rows: Sequence[Sequence[str]]) -> list[str]:
     """Cross-parameter: each companion's ``f_s**2 + f_c**2`` must be < 1.
 
     Gathers the initial ``<c>_f_s`` / ``<c>_f_c`` values per companion and flags
@@ -430,8 +424,8 @@ def check_eccentricity(rows: Sequence[Sequence[str]]) -> List[str]:
     each is only bounded to ``[-1, 1]``, so this is the joint check that closes
     the ``e`` up-to-2 gap. Coupled / non-numeric rows are skipped.
     """
-    f_s: Dict[str, float] = {}
-    f_c: Dict[str, float] = {}
+    f_s: dict[str, float] = {}
+    f_c: dict[str, float] = {}
     for row in rows:
         if not _is_real_param(row) or len(row) < 2 or _is_coupled(row):
             continue
@@ -447,7 +441,7 @@ def check_eccentricity(rows: Sequence[Sequence[str]]) -> List[str]:
         elif name.endswith("_f_c"):
             f_c[name[: -len("_f_c")]] = val
 
-    errors: List[str] = []
+    errors: list[str] = []
     for companion in sorted(set(f_s) & set(f_c)):
         err = eccentricity_error(companion, f_s[companion], f_c[companion])
         if err:
@@ -460,7 +454,7 @@ def check_eccentricity(rows: Sequence[Sequence[str]]) -> List[str]:
 # ---------------------------------------------------------------------------
 
 
-def collect_config_errors(datadir: str) -> List[str]:
+def collect_config_errors(datadir: str) -> list[str]:
     """Run every structural check against a datadir and return all errors.
 
     Returns an empty list when ``params.csv`` is absent (nothing to validate —
@@ -472,7 +466,7 @@ def collect_config_errors(datadir: str) -> List[str]:
         return []
     settings = read_settings(datadir)
 
-    errors: List[str] = []
+    errors: list[str] = []
     errors += check_duplicate_param_names(rows)
     errors += check_fit_flags(rows)
     errors += check_values_numeric(rows)
@@ -486,7 +480,7 @@ def collect_config_errors(datadir: str) -> List[str]:
     return errors
 
 
-def validate_params_settings(datadir: str, *, raise_on_error: bool = True) -> List[str]:
+def validate_params_settings(datadir: str, *, raise_on_error: bool = True) -> list[str]:
     """Validate a datadir's ``params.csv`` / ``settings.csv`` consistency.
 
     Parameters
@@ -505,7 +499,8 @@ def validate_params_settings(datadir: str, *, raise_on_error: bool = True) -> Li
     errors = collect_config_errors(datadir)
     if errors and raise_on_error:
         raise ConfigError(
-            "Invalid allesfitter configuration in '%s':\n  - %s"
-            % (datadir, "\n  - ".join(errors))
+            "Invalid allesfitter configuration in '{}':\n  - {}".format(
+                datadir, "\n  - ".join(errors)
+            )
         )
     return errors

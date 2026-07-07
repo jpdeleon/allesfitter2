@@ -22,13 +22,11 @@ and verify the refined bounds satisfy the four physical invariants:
 from __future__ import annotations
 
 import math
-import runpy
 import types
 from pathlib import Path
 
 import numpy as np
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Load the private helpers without executing main().
@@ -95,7 +93,7 @@ def _muscat_single_transit(rng=None, n=600, rms=2e-3, baseline_hours=6.0):
 
 def test_bounds_tess_120s_clean(helpers):
     t, f = _tess_120s()
-    b = helpers.bounds(t, f, tdur_days=0.1)   # ~2.4 h transit
+    b = helpers.bounds(t, f, tdur_days=0.1)  # ~2.4 h transit
     assert b is not None
     # ln_err_hi ≤ 10% rel flux
     assert math.exp(b["lnerr_hi"]) <= 0.10 + 1e-9

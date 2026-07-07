@@ -31,9 +31,11 @@ try:
     import allesfitter  # noqa: F401
     from allesfitter import config, optimize
     from allesfitter.optimize import (
-        OptimizeResult, _extract_bounds, _on_bounds, _objective, logprint,
+        OptimizeResult,
+        _extract_bounds,
+        _on_bounds,
+        logprint,
     )
-    from allesfitter.mcmc import mcmc_lnprob
 except Exception:
     pytest.skip(
         "allesfitter or its dependencies are not importable",
@@ -139,8 +141,9 @@ def test_extract_bounds_normal_prior_uses_5sigma_window():
     # b_period was declared as normal 3.5 0.1 in _params_csv → ±5σ box
     # should be [3.0, 4.0].
     class _FakeBasement:
-        bounds = [['normal', 3.5, 0.1]]
+        bounds = [["normal", 3.5, 0.1]]
         ndim = 1
+
     b = _FakeBasement()
     out = _extract_bounds(b)
     assert out == [(3.0, 4.0)]
@@ -153,8 +156,8 @@ def test_extract_bounds_normal_prior_uses_5sigma_window():
 
 def test_on_bounds_detects_edge():
     bounds = [(0.0, 1.0), (-5.0, 5.0)]
-    assert _on_bounds([0.0, 0.0], bounds) is True   # left edge of dim 0
-    assert _on_bounds([1.0, 0.0], bounds) is True   # right edge of dim 0
+    assert _on_bounds([0.0, 0.0], bounds) is True  # left edge of dim 0
+    assert _on_bounds([1.0, 0.0], bounds) is True  # right edge of dim 0
     assert _on_bounds([0.5, 4.9999], bounds) is True  # within margin of dim 1
     assert _on_bounds([0.5, 0.0], bounds) is False
 
@@ -166,16 +169,24 @@ def test_on_bounds_detects_edge():
 
 def test_lbfgsb_improves_and_mutates_basement(datadir):
     theta_0_before = np.array(config.BASEMENT.theta_0, dtype=float)
-    res = optimize(str(datadir), method='L-BFGS-B', refine=False,
-                   n_restarts=1, save=False, quiet=True,
-                   improvement_threshold=0.0, skip_bounds_check=True)
+    res = optimize(
+        str(datadir),
+        method="L-BFGS-B",
+        refine=False,
+        n_restarts=1,
+        save=False,
+        quiet=True,
+        improvement_threshold=0.0,
+        skip_bounds_check=True,
+    )
     assert isinstance(res, OptimizeResult)
     assert res.success
     assert res.accepted
     assert res.lnprob_opt >= res.lnprob_initial
     # BASEMENT.theta_0 has been overwritten with the optimum
-    assert not np.allclose(config.BASEMENT.theta_0, theta_0_before), \
-        "theta_0 should have been mutated"
+    assert not np.allclose(
+        config.BASEMENT.theta_0, theta_0_before
+    ), "theta_0 should have been mutated"
 
 
 # ---------------------------------------------------------------------------
@@ -187,13 +198,20 @@ def test_acceptance_gate_rejects_insufficient_improvement(datadir, monkeypatch):
     """Set an absurdly large improvement_threshold so even a real
     improvement is rejected — verifies BASEMENT.theta_0 stays put."""
     theta_0_before = np.array(config.BASEMENT.theta_0, dtype=float)
-    res = optimize(str(datadir), method='L-BFGS-B', refine=False,
-                   n_restarts=1, save=False, quiet=True,
-                   improvement_threshold=1e30)
+    res = optimize(
+        str(datadir),
+        method="L-BFGS-B",
+        refine=False,
+        n_restarts=1,
+        save=False,
+        quiet=True,
+        improvement_threshold=1e30,
+    )
     assert res.accepted is False
     assert "improvement_threshold" in res.reject_reason
-    assert np.allclose(config.BASEMENT.theta_0, theta_0_before), \
-        "theta_0 must NOT mutate when the run is rejected"
+    assert np.allclose(
+        config.BASEMENT.theta_0, theta_0_before
+    ), "theta_0 must NOT mutate when the run is rejected"
 
 
 # ---------------------------------------------------------------------------
@@ -203,10 +221,17 @@ def test_acceptance_gate_rejects_insufficient_improvement(datadir, monkeypatch):
 
 def test_mutate_basement_false_leaves_theta0(datadir):
     theta_0_before = np.array(config.BASEMENT.theta_0, dtype=float)
-    res = optimize(str(datadir), method='L-BFGS-B', refine=False,
-                   n_restarts=1, save=False, quiet=True,
-                   improvement_threshold=0.0, mutate_basement=False,
-                   skip_bounds_check=True)
+    res = optimize(
+        str(datadir),
+        method="L-BFGS-B",
+        refine=False,
+        n_restarts=1,
+        save=False,
+        quiet=True,
+        improvement_threshold=0.0,
+        mutate_basement=False,
+        skip_bounds_check=True,
+    )
     assert res.accepted
     assert np.allclose(config.BASEMENT.theta_0, theta_0_before)
 
@@ -217,18 +242,33 @@ def test_mutate_basement_false_leaves_theta0(datadir):
 
 
 def test_save_writes_json(datadir):
-    optimize(str(datadir), method='L-BFGS-B', refine=False,
-             n_restarts=1, save=True, quiet=True,
-             improvement_threshold=0.0)
+    optimize(
+        str(datadir),
+        method="L-BFGS-B",
+        refine=False,
+        n_restarts=1,
+        save=True,
+        quiet=True,
+        improvement_threshold=0.0,
+    )
     out = datadir / "results" / "optimize_save.json"
     assert out.exists()
     payload = json.loads(out.read_text())
-    for key in ('method', 'accepted', 'lnprob_initial', 'lnprob_opt',
-                'theta_initial', 'theta_opt', 'fitkeys', 'nfev',
-                'wallclock_s', 'restart_lnprobs'):
+    for key in (
+        "method",
+        "accepted",
+        "lnprob_initial",
+        "lnprob_opt",
+        "theta_initial",
+        "theta_opt",
+        "fitkeys",
+        "nfev",
+        "wallclock_s",
+        "restart_lnprobs",
+    ):
         assert key in payload, key
-    assert payload['method'] == 'L-BFGS-B'
-    assert len(payload['theta_opt']) == config.BASEMENT.ndim
+    assert payload["method"] == "L-BFGS-B"
+    assert len(payload["theta_opt"]) == config.BASEMENT.ndim
 
 
 # ---------------------------------------------------------------------------
@@ -241,11 +281,17 @@ def test_multistart_consistency_rejection(datadir):
     rejected on multistart spread (since Latin-hypercube draws inside the
     big uniform priors land on radically different lnprobs)."""
     theta_0_before = np.array(config.BASEMENT.theta_0, dtype=float)
-    res = optimize(str(datadir), method='L-BFGS-B', refine=False,
-                   n_restarts=3, save=False, quiet=True,
-                   improvement_threshold=0.0,
-                   consistency_threshold=0.01,
-                   skip_bounds_check=True)
+    res = optimize(
+        str(datadir),
+        method="L-BFGS-B",
+        refine=False,
+        n_restarts=3,
+        save=False,
+        quiet=True,
+        improvement_threshold=0.0,
+        consistency_threshold=0.01,
+        skip_bounds_check=True,
+    )
     # one of: rejected for consistency, or accepted (if by luck all 3
     # land in the same basin within 0.01); the deterministic check we
     # want is "if rejected, theta_0 stays put".
@@ -261,9 +307,17 @@ def test_multistart_consistency_rejection(datadir):
 
 def test_cmaes_improves(datadir):
     pytest.importorskip("cma")
-    res = optimize(str(datadir), method='cmaes', refine=True,
-                   n_restarts=1, save=False, quiet=True,
-                   improvement_threshold=0.0, maxfevals=200, seed=7)
+    res = optimize(
+        str(datadir),
+        method="cmaes",
+        refine=True,
+        n_restarts=1,
+        save=False,
+        quiet=True,
+        improvement_threshold=0.0,
+        maxfevals=200,
+        seed=7,
+    )
     assert res.success
     assert res.lnprob_opt >= res.lnprob_initial
     assert res.refine is True
@@ -278,23 +332,51 @@ def test_cmaes_saves_state_on_every_call(datadir):
     pytest.importorskip("cma")
     pkl = datadir / "results" / "optimize_cma_state.pkl"
     assert not pkl.exists()
-    optimize(str(datadir), method='cmaes', refine=False, n_restarts=1,
-             save=False, quiet=True, improvement_threshold=0.0,
-             skip_bounds_check=True, maxfevals=120, seed=11)
+    optimize(
+        str(datadir),
+        method="cmaes",
+        refine=False,
+        n_restarts=1,
+        save=False,
+        quiet=True,
+        improvement_threshold=0.0,
+        skip_bounds_check=True,
+        maxfevals=120,
+        seed=11,
+    )
     assert pkl.exists() and pkl.stat().st_size > 0
 
 
 def test_cmaes_resume_continues_from_saved_state(datadir):
     pytest.importorskip("cma")
     # First call seeds the pickle.
-    optimize(str(datadir), method='cmaes', refine=False, n_restarts=1,
-             save=False, quiet=True, improvement_threshold=0.0,
-             skip_bounds_check=True, maxfevals=120, seed=11)
+    optimize(
+        str(datadir),
+        method="cmaes",
+        refine=False,
+        n_restarts=1,
+        save=False,
+        quiet=True,
+        improvement_threshold=0.0,
+        skip_bounds_check=True,
+        maxfevals=120,
+        seed=11,
+    )
     # Second call with resume=True must load the saved strategy and
     # record that fact in OptimizeResult.resumed_from_pickle.
-    res = optimize(str(datadir), method='cmaes', refine=False, n_restarts=1,
-                   save=False, quiet=True, improvement_threshold=0.0,
-                   skip_bounds_check=True, maxfevals=60, seed=11, resume=True)
+    res = optimize(
+        str(datadir),
+        method="cmaes",
+        refine=False,
+        n_restarts=1,
+        save=False,
+        quiet=True,
+        improvement_threshold=0.0,
+        skip_bounds_check=True,
+        maxfevals=60,
+        seed=11,
+        resume=True,
+    )
     assert res.resumed_from_pickle is True
 
 
@@ -303,10 +385,19 @@ def test_cmaes_resume_missing_pickle_warns_and_runs_fresh(datadir):
     pkl = datadir / "results" / "optimize_cma_state.pkl"
     assert not pkl.exists()
     with pytest.warns(UserWarning, match="resume=True but"):
-        res = optimize(str(datadir), method='cmaes', refine=False,
-                       n_restarts=1, save=False, quiet=True,
-                       improvement_threshold=0.0, skip_bounds_check=True,
-                       maxfevals=60, seed=11, resume=True)
+        res = optimize(
+            str(datadir),
+            method="cmaes",
+            refine=False,
+            n_restarts=1,
+            save=False,
+            quiet=True,
+            improvement_threshold=0.0,
+            skip_bounds_check=True,
+            maxfevals=60,
+            seed=11,
+            resume=True,
+        )
     assert res.resumed_from_pickle is False
     # Even though we couldn't resume, a fresh run still seeds the pickle.
     assert pkl.exists()
@@ -317,39 +408,49 @@ def test_cmaes_resume_ndim_mismatch_raises(datadir):
     disk, resume=True must refuse with a clear error."""
     pytest.importorskip("cma")
     import pickle as _pickle
+
     pkl = datadir / "results" / "optimize_cma_state.pkl"
     pkl.parent.mkdir(exist_ok=True)
     # Forge a (stub, meta) tuple with the wrong ndim. The strategy object
     # is never touched — _load_cma_state validates meta first and bails.
-    with open(pkl, 'wb') as f:
-        _pickle.dump((object(), {'ndim': 99, 'bounds': []}), f)
+    with open(pkl, "wb") as f:
+        _pickle.dump((object(), {"ndim": 99, "bounds": []}), f)
     with pytest.raises(ValueError, match="ndim="):
-        optimize(str(datadir), method='cmaes', refine=False, n_restarts=1,
-                 save=False, quiet=True, improvement_threshold=0.0,
-                 skip_bounds_check=True, maxfevals=60, seed=11, resume=True)
+        optimize(
+            str(datadir),
+            method="cmaes",
+            refine=False,
+            n_restarts=1,
+            save=False,
+            quiet=True,
+            improvement_threshold=0.0,
+            skip_bounds_check=True,
+            maxfevals=60,
+            seed=11,
+            resume=True,
+        )
 
 
 def test_resume_with_non_cmaes_method_raises(datadir):
     with pytest.raises(ValueError, match="resume=True is only meaningful"):
-        optimize(str(datadir), method='L-BFGS-B', n_restarts=1,
-                 save=False, quiet=True, resume=True)
+        optimize(str(datadir), method="L-BFGS-B", n_restarts=1, save=False, quiet=True, resume=True)
 
 
 def test_resume_with_multiple_restarts_raises(datadir):
     pytest.importorskip("cma")
     with pytest.raises(ValueError, match="incompatible with n_restarts"):
-        optimize(str(datadir), method='cmaes', n_restarts=3,
-                 save=False, quiet=True, resume=True)
+        optimize(str(datadir), method="cmaes", n_restarts=3, save=False, quiet=True, resume=True)
 
 
 def test_typo_kwarg_actionable(tmp_path):
     """Common kwarg typos must raise TypeError with a Did-you-mean hint."""
     import allesfitter
+
     cases = [
-        ('maxfeval', 'maxfevals'),
-        ('mutate_baseline', 'mutate_basement'),
-        ('n_restart', 'n_restarts'),
-        ('improvement_thresh', 'improvement_threshold'),
+        ("maxfeval", "maxfevals"),
+        ("mutate_baseline", "mutate_basement"),
+        ("n_restart", "n_restarts"),
+        ("improvement_thresh", "improvement_threshold"),
     ]
     for bad, expected in cases:
         with pytest.raises(TypeError) as ei:
@@ -396,18 +497,33 @@ def test_logprint_without_basement_is_noop(monkeypatch, capsys):
 
 
 def test_optimize_summary_lands_in_logfile(datadir):
-    optimize(str(datadir), method='L-BFGS-B', refine=False, n_restarts=1,
-             save=False, quiet=True, improvement_threshold=0.0,
-             skip_bounds_check=True)
+    optimize(
+        str(datadir),
+        method="L-BFGS-B",
+        refine=False,
+        n_restarts=1,
+        save=False,
+        quiet=True,
+        improvement_threshold=0.0,
+        skip_bounds_check=True,
+    )
     logf = _logfile_path(datadir)
     assert logf.exists()
     assert "optimize[L-BFGS-B]" in logf.read_text()
 
 
 def test_optimize_logs_start_and_per_restart_progress(datadir):
-    optimize(str(datadir), method='L-BFGS-B', refine=False, n_restarts=2,
-             save=False, quiet=True, improvement_threshold=0.0,
-             consistency_threshold=1e30, skip_bounds_check=True)
+    optimize(
+        str(datadir),
+        method="L-BFGS-B",
+        refine=False,
+        n_restarts=2,
+        save=False,
+        quiet=True,
+        improvement_threshold=0.0,
+        consistency_threshold=1e30,
+        skip_bounds_check=True,
+    )
     text = _logfile_path(datadir).read_text()
     # start marker
     assert "starting: ndim=" in text
@@ -420,10 +536,19 @@ def test_optimize_verbose_accepted_for_cmaes(datadir):
     pytest.importorskip("cma")
     # verbose=True must be a valid kwarg and not raise; it streams the cma
     # table to stdout but the run result is unaffected.
-    res = optimize(str(datadir), method='cmaes', refine=False, n_restarts=1,
-                   save=False, quiet=True, verbose=True,
-                   improvement_threshold=0.0, skip_bounds_check=True,
-                   maxfevals=120, seed=13)
+    res = optimize(
+        str(datadir),
+        method="cmaes",
+        refine=False,
+        n_restarts=1,
+        save=False,
+        quiet=True,
+        verbose=True,
+        improvement_threshold=0.0,
+        skip_bounds_check=True,
+        maxfevals=120,
+        seed=13,
+    )
     assert res.success
 
 
@@ -431,9 +556,17 @@ def test_cmaes_missing_dependency_raises_clear_error(datadir, monkeypatch):
     """If `import cma` fails, optimize() should raise an ImportError with
     a guidance message rather than crash deep inside the helper."""
     import sys
+
     # Hide the real cma module (if any) and inject an importer that fails.
-    monkeypatch.setitem(sys.modules, 'cma', None)
+    monkeypatch.setitem(sys.modules, "cma", None)
     with pytest.raises(ImportError, match="pip install cma"):
-        optimize(str(datadir), method='cmaes', refine=False,
-                 n_restarts=1, save=False, quiet=True,
-                 improvement_threshold=0.0, maxfevals=50)
+        optimize(
+            str(datadir),
+            method="cmaes",
+            refine=False,
+            n_restarts=1,
+            save=False,
+            quiet=True,
+            improvement_threshold=0.0,
+            maxfevals=50,
+        )

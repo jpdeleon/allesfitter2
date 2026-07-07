@@ -1,5 +1,4 @@
 #!/usr/bin/env python2
-# -*- coding: utf-8 -*-
 """
 Configuration and initialization module for allesfitter.
 
@@ -11,18 +10,17 @@ Functions:
     init: Initialize the allesfitter configuration for a given data directory.
 """
 
-from __future__ import print_function, division, absolute_import
 
 from .basement import Basement
 
 
 def init(datadir: str, quiet: bool = False) -> None:
     """Initialize allesfitter for a given data directory.
-    
+
     Loads all configuration files (settings.csv, params.csv,观测数据) and
     creates a global BASEMENT object containing all model parameters,
     observational data, and fitting settings.
-    
+
     Parameters
     ----------
     datadir : str
@@ -32,19 +30,19 @@ def init(datadir: str, quiet: bool = False) -> None:
         - data files: Light curves and/or radial velocity measurements
     quiet : bool, optional
         If True, suppress verbose output during initialization (default: False)
-    
+
     Returns
     -------
     None
         Sets the global BASEMENT object in the config module
-    
+
     Raises
     ------
     FileNotFoundError
         If required input files are missing from datadir
     ValueError
         If settings.csv contains invalid or conflicting settings
-    
+
     Examples
     --------
     >>> import allesfitter

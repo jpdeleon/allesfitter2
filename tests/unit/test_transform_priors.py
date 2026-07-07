@@ -1,15 +1,14 @@
 import numpy as np
-import pytest
 
 from allesfitter.priors.transform_priors import (
-    get_cosi_from_i,
     get_cosi_from_b,
+    get_cosi_from_i,
+    get_q1q2_from_u1u2,
     get_Rsuma_from_a_over_Rstar,
     get_Rsuma_from_Rstar_over_a,
-    get_sqrtesinw,
     get_sqrtecosw,
+    get_sqrtesinw,
     get_u1u2_from_q1q2,
-    get_q1q2_from_u1u2,
 )
 
 

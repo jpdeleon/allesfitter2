@@ -22,7 +22,6 @@ import numpy as np
 
 from . import build_results
 
-
 name = "ultranest"
 
 
@@ -53,6 +52,7 @@ def _safe_loglike(scalar_loglike: Callable):
         if not np.isfinite(v):
             return floor
         return float(v)
+
     return wrapped
 
 
@@ -86,8 +86,8 @@ def run(
     dlogz = float(settings.get("ns_tol", 0.5))
     if dlogz > 5.0:
         logprint(
-            "\n! ns_tol={} is dynesty-scale; clamping to dlogz=0.5 for ultranest "
-            "(typical range 0.1–1.0). Set ns_tol explicitly in settings.csv to silence.".format(dlogz)
+            f"\n! ns_tol={dlogz} is dynesty-scale; clamping to dlogz=0.5 for ultranest "
+            "(typical range 0.1–1.0). Set ns_tol explicitly in settings.csv to silence."
         )
         dlogz = 0.5
     min_ess = int(settings.get("un_min_ess", 400))
@@ -117,6 +117,7 @@ def run(
     _mpi_size, _mpi_rank = 1, 0
     try:
         from mpi4py import MPI
+
         _mpi_size = MPI.COMM_WORLD.Get_size()
         _mpi_rank = MPI.COMM_WORLD.Get_rank()
     except Exception:
@@ -149,13 +150,12 @@ def run(
         log_dir = None
         sampler_kwargs = dict(log_dir=None)
         logprint(
-            "\n! MPI rank {}/{}: log_dir disabled (only rank 0 writes the HDF5 store).".format(
-                _mpi_rank, _mpi_size
-            )
+            f"\n! MPI rank {_mpi_rank}/{_mpi_size}: log_dir disabled (only rank 0 writes the HDF5 store)."
         )
     else:
         try:
             import h5py  # noqa: F401
+
             log_dir = os.path.join(outdir, "ultranest_logs")
             os.makedirs(log_dir, exist_ok=True)
             sampler_kwargs = dict(log_dir=log_dir, resume="resume")
@@ -168,9 +168,9 @@ def run(
     logprint("--------------------------")
     # `outdir` is <datadir>/results; print its parent so log lines from
     # multiple concurrent fits are unambiguous when grepped or tailed.
-    logprint("datadir: {}".format(os.path.abspath(os.path.dirname(outdir))))
-    logprint("  log_dir   = {}".format(log_dir))
-    logprint("  min_nlive = {}, dlogz = {}, min_ess = {}".format(nlive, dlogz, min_ess))
+    logprint(f"datadir: {os.path.abspath(os.path.dirname(outdir))}")
+    logprint(f"  log_dir   = {log_dir}")
+    logprint(f"  min_nlive = {nlive}, dlogz = {dlogz}, min_ess = {min_ess}")
 
     # Resilient resume: if a prior aborted run left a truncated/corrupt HDF5
     # store, ultranest's resume='resume' path raises OSError when it tries to
@@ -189,13 +189,14 @@ def run(
     except OSError as exc:
         if log_dir is None:
             raise
-        import shutil
         import datetime as _dt
+        import shutil
+
         ts = _dt.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
         broken = log_dir + ".broken." + ts
         logprint(
-            "\n! UltraNest could not resume from {} ({}). "
-            "Renaming to {} and starting fresh.".format(log_dir, exc, broken)
+            f"\n! UltraNest could not resume from {log_dir} ({exc}). "
+            f"Renaming to {broken} and starting fresh."
         )
         shutil.move(log_dir, broken)
         os.makedirs(log_dir, exist_ok=True)
@@ -214,7 +215,7 @@ def run(
     result = sampler.run(**run_kwargs)
     elapsed = timer() - t0
 
-    logprint("\nTime taken to run 'ultranest': {:.2f} hours".format(elapsed / 3600.0))
+    logprint(f"\nTime taken to run 'ultranest': {elapsed / 3600.0:.2f} hours")
 
     # Map UltraNest result → unified schema.
     #

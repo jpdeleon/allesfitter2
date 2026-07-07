@@ -18,7 +18,6 @@ import pytest
 
 from allesfitter import computer, config
 
-
 # Orbital kwargs that ellc receives — must be equal across all insts/bands
 SHARED_ORBITAL_KWARGS = ("incl", "t_zero", "period", "a", "q", "f_c", "f_s")
 
@@ -67,7 +66,7 @@ class TestPerBandRR:
         for inst in ("tess", "kepler"):
             computer.flux_subfct_ellc(params, inst=inst, companion="b", xx=xx)
 
-        captured = {kw["t_obs"][0]: kw for tag, kw in captured_fluxes_calls if tag == "fluxes"}
+        {kw["t_obs"][0]: kw for tag, kw in captured_fluxes_calls if tag == "fluxes"}
         # We made 2 ellc.fluxes calls, one per inst, with identical xx[0] —
         # so re-key by inst via call order.
         inst_calls = [kw for tag, kw in captured_fluxes_calls if tag == "fluxes"]
@@ -118,9 +117,7 @@ class TestPerInstLDC:
 
         inst_calls = [kw for tag, kw in captured_fluxes_calls if tag == "fluxes"]
         assert len(inst_calls) == 2
-        np.testing.assert_allclose(
-            inst_calls[0]["ldc_1"], inst_calls[1]["ldc_1"], rtol=0, atol=0
-        )
+        np.testing.assert_allclose(inst_calls[0]["ldc_1"], inst_calls[1]["ldc_1"], rtol=0, atol=0)
 
 
 # --------------------------------------------------------------------------- #
@@ -159,9 +156,7 @@ class TestSharedOrbitalParams:
 
         inst_calls = [kw for tag, kw in captured_fluxes_calls if tag == "fluxes"]
         for kw in inst_calls:
-            assert kw["radius_1"] + kw["radius_2"] == pytest.approx(
-                truth["rsuma"], rel=1e-12
-            )
+            assert kw["radius_1"] + kw["radius_2"] == pytest.approx(truth["rsuma"], rel=1e-12)
 
 
 # --------------------------------------------------------------------------- #
@@ -179,10 +174,20 @@ class TestSharedBandpassLDCPropagation:
     @staticmethod
     def _build_shared_bp_datadir(tmp_path, name, *, q1, q2):
         from tests.chromatic._helpers import (
-            NOISE_SIGMA, N_POINTS_PER_INST, RNG_SEED, TRUE_EPOCH, TRUE_PERIOD,
-            TRUE_RR_TESS, common_orbital_rows, dilution_rows, err_baseline_rows,
-            phase_sampled_time, simulate_lightcurve, write_data_csv,
-            write_params, write_settings,
+            N_POINTS_PER_INST,
+            NOISE_SIGMA,
+            RNG_SEED,
+            TRUE_EPOCH,
+            TRUE_PERIOD,
+            TRUE_RR_TESS,
+            common_orbital_rows,
+            dilution_rows,
+            err_baseline_rows,
+            phase_sampled_time,
+            simulate_lightcurve,
+            write_data_csv,
+            write_params,
+            write_settings,
         )
 
         datadir = tmp_path / name
@@ -193,19 +198,38 @@ class TestSharedBandpassLDCPropagation:
             flux, err = simulate_lightcurve(time, TRUE_RR_TESS, NOISE_SIGMA, rng)
             write_data_csv(datadir / f"{inst}.csv", time, flux, err)
         write_settings(
-            datadir, inst_phot=["tess_pdcsap", "tess_qlp"], bandpass="tess tess",
+            datadir,
+            inst_phot=["tess_pdcsap", "tess_qlp"],
+            bandpass="tess tess",
         )
         rows = (
-            [{"name": "b_rr_tess", "value": TRUE_RR_TESS, "fit": 1,
-              "bounds": "uniform 0.0 0.3", "label": "rr_tess"}]
+            [
+                {
+                    "name": "b_rr_tess",
+                    "value": TRUE_RR_TESS,
+                    "fit": 1,
+                    "bounds": "uniform 0.0 0.3",
+                    "label": "rr_tess",
+                }
+            ]
             + common_orbital_rows()
             + dilution_rows(["tess_pdcsap", "tess_qlp"])
             + err_baseline_rows(["tess_pdcsap", "tess_qlp"])
             + [
-                {"name": "host_ldc_q1_tess", "value": q1, "fit": 1,
-                 "bounds": "uniform 0 1", "label": "q1_tess"},
-                {"name": "host_ldc_q2_tess", "value": q2, "fit": 1,
-                 "bounds": "uniform 0 1", "label": "q2_tess"},
+                {
+                    "name": "host_ldc_q1_tess",
+                    "value": q1,
+                    "fit": 1,
+                    "bounds": "uniform 0 1",
+                    "label": "q1_tess",
+                },
+                {
+                    "name": "host_ldc_q2_tess",
+                    "value": q2,
+                    "fit": 1,
+                    "bounds": "uniform 0 1",
+                    "label": "q2_tess",
+                },
             ]
         )
         write_params(datadir / "params.csv", rows=rows)
@@ -220,7 +244,10 @@ class TestSharedBandpassLDCPropagation:
 
         q1, q2 = 0.47, 0.30
         datadir = self._build_shared_bp_datadir(
-            tmp_path, "shared_bp_q47", q1=q1, q2=q2,
+            tmp_path,
+            "shared_bp_q47",
+            q1=q1,
+            q2=q2,
         )
         config.init(str(datadir), quiet=True)
         params = _prepared_params()
@@ -234,16 +261,17 @@ class TestSharedBandpassLDCPropagation:
         for kw in inst_calls:
             np.testing.assert_allclose(kw["ldc_1"], expected_u, rtol=0, atol=1e-12)
 
-    def test_editing_q1_value_changes_ldc_passed_to_ellc(
-        self, tmp_path, captured_fluxes_calls
-    ):
+    def test_editing_q1_value_changes_ldc_passed_to_ellc(self, tmp_path, captured_fluxes_calls):
         from allesfitter.lightcurves import (
             translate_limb_darkening_from_q_to_u as q_to_u,
         )
 
         # Run 1: q1=0.50
         datadir_a = self._build_shared_bp_datadir(
-            tmp_path, "shared_bp_q50", q1=0.50, q2=0.30,
+            tmp_path,
+            "shared_bp_q50",
+            q1=0.50,
+            q2=0.30,
         )
         config.init(str(datadir_a), quiet=True)
         params_a = _prepared_params()
@@ -254,7 +282,10 @@ class TestSharedBandpassLDCPropagation:
         # Reset BASEMENT and rebuild with q1=0.47
         config.BASEMENT = None
         datadir_b = self._build_shared_bp_datadir(
-            tmp_path, "shared_bp_q47b", q1=0.47, q2=0.30,
+            tmp_path,
+            "shared_bp_q47b",
+            q1=0.47,
+            q2=0.30,
         )
         config.init(str(datadir_b), quiet=True)
         params_b = _prepared_params()
@@ -268,10 +299,8 @@ class TestSharedBandpassLDCPropagation:
             f"LDC passed to ellc: ldc_a={ldc_a}, ldc_b={ldc_b}"
         )
         # And both must match the analytic q_to_u of their respective q1.
-        np.testing.assert_allclose(ldc_a, q_to_u([0.50, 0.30], law="quad"),
-                                   rtol=0, atol=1e-12)
-        np.testing.assert_allclose(ldc_b, q_to_u([0.47, 0.30], law="quad"),
-                                   rtol=0, atol=1e-12)
+        np.testing.assert_allclose(ldc_a, q_to_u([0.50, 0.30], law="quad"), rtol=0, atol=1e-12)
+        np.testing.assert_allclose(ldc_b, q_to_u([0.47, 0.30], law="quad"), rtol=0, atol=1e-12)
 
 
 # --------------------------------------------------------------------------- #
@@ -284,7 +313,6 @@ class TestAchromaticFallback:
         # Remove the chromatic key and inject an achromatic b_rr → the
         # fallback at computer.py:529-530 must kick in and use b_rr.
         config.init(str(two_band_two_inst_datadir), quiet=True)
-        b = config.BASEMENT
         params = _prepared_params()
         params.pop("b_rr_tess", None)
         params["b_rr"] = 0.123
@@ -309,10 +337,9 @@ class TestAchromaticFallback:
             "code paths don't KeyError"
         )
         # The backfilled value should match the first bandpass's rr.
-        bandpass = config.BASEMENT.settings["bandpass"]
+        config.BASEMENT.settings["bandpass"]
         first_inst = config.BASEMENT.settings["inst_phot"][0]
         first_band_key = config.BASEMENT.get_rr_key("b", first_inst)
         assert params["b_rr"] == params[first_band_key], (
-            f"backfilled b_rr={params['b_rr']} != {first_band_key}="
-            f"{params[first_band_key]}"
+            f"backfilled b_rr={params['b_rr']} != {first_band_key}=" f"{params[first_band_key]}"
         )

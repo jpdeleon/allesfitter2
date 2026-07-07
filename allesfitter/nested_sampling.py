@@ -1,5 +1,4 @@
 #!/usr/bin/env python2
-# -*- coding: utf-8 -*-
 """
 Nested Sampling inference module.
 
@@ -21,82 +20,96 @@ Notes
     - Saves results as compressed pickle files
 """
 
-from __future__ import print_function, division, absolute_import
 
 #::: modules
-import numpy as np
+import multiprocessing
 import os
+
+import numpy as np
 from scipy.special import ndtri
 from scipy.stats import truncnorm
-import multiprocessing
-multiprocessing.set_start_method('fork', force=True)
-#solves python>=3.8 issues, see https://stackoverflow.com/questions/60518386/error-with-module-multiprocessing-under-python3-8
+
+multiprocessing.set_start_method("fork", force=True)
+# solves python>=3.8 issues, see https://stackoverflow.com/questions/60518386/error-with-module-multiprocessing-under-python3-8
 import gzip
 import shutil
+
 try:
-   import cPickle as pickle
+    import cPickle as pickle
 except Exception:
-   import pickle
+    import pickle
 
 #::: warnings
 import warnings
-warnings.filterwarnings('ignore', category=np.VisibleDeprecationWarning) 
-warnings.filterwarnings('ignore', category=np.RankWarning) 
+
+warnings.filterwarnings("ignore", category=np.VisibleDeprecationWarning)
+warnings.filterwarnings("ignore", category=np.RankWarning)
 
 #::: allesfitter modules
 from . import config
-from .computer import update_params, calculate_lnlike_total
+from .computer import calculate_lnlike_total, update_params
 from .general_output import logprint, resolve_overwrite
-
-
 
 
 ###############################################################################
 #::: Nested Sampling log likelihood
 ###############################################################################
 def ns_lnlike(theta):
-    
+
     params = update_params(theta)
     lnlike = calculate_lnlike_total(params)
-    
-#    lnlike = 0
-#    
-#    for inst in config.BASEMENT.settings['inst_phot']:
-#        lnlike += calculate_lnlike(params, inst, 'flux')
-#    
-#    for inst in config.BASEMENT.settings['inst_rv']:
-#        lnlike += calculate_lnlike(params, inst, 'rv')
-#        
-#    if np.isnan(lnlike) or np.isinf(lnlike):
-#        lnlike = -np.inf
-        
-    return lnlike
 
+    #    lnlike = 0
+    #
+    #    for inst in config.BASEMENT.settings['inst_phot']:
+    #        lnlike += calculate_lnlike(params, inst, 'flux')
+    #
+    #    for inst in config.BASEMENT.settings['inst_rv']:
+    #        lnlike += calculate_lnlike(params, inst, 'rv')
+    #
+    #    if np.isnan(lnlike) or np.isinf(lnlike):
+    #        lnlike = -np.inf
+
+    return lnlike
 
 
 ###############################################################################
 #::: Nested Sampling prior transform
 ###############################################################################
 def ns_prior_transform(utheta):
-#    global config.BASEMENT
-    theta = np.zeros_like(utheta)*np.nan
+    #    global config.BASEMENT
+    theta = np.zeros_like(utheta) * np.nan
     for i in range(len(theta)):
-        if config.BASEMENT.bounds[i][0]=='uniform':
-            theta[i] = utheta[i]*(config.BASEMENT.bounds[i][2]-config.BASEMENT.bounds[i][1]) + config.BASEMENT.bounds[i][1]
-        elif config.BASEMENT.bounds[i][0]=='normal':
-            theta[i] = config.BASEMENT.bounds[i][1] + config.BASEMENT.bounds[i][2]*ndtri(utheta[i])
-        elif config.BASEMENT.bounds[i][0]=='trunc_normal':
-            theta[i] = my_truncnorm_isf(utheta[i],config.BASEMENT.bounds[i][1],config.BASEMENT.bounds[i][2],config.BASEMENT.bounds[i][3],config.BASEMENT.bounds[i][4]) 
+        if config.BASEMENT.bounds[i][0] == "uniform":
+            theta[i] = (
+                utheta[i] * (config.BASEMENT.bounds[i][2] - config.BASEMENT.bounds[i][1])
+                + config.BASEMENT.bounds[i][1]
+            )
+        elif config.BASEMENT.bounds[i][0] == "normal":
+            theta[i] = config.BASEMENT.bounds[i][1] + config.BASEMENT.bounds[i][2] * ndtri(
+                utheta[i]
+            )
+        elif config.BASEMENT.bounds[i][0] == "trunc_normal":
+            theta[i] = my_truncnorm_isf(
+                utheta[i],
+                config.BASEMENT.bounds[i][1],
+                config.BASEMENT.bounds[i][2],
+                config.BASEMENT.bounds[i][3],
+                config.BASEMENT.bounds[i][4],
+            )
         else:
-            raise ValueError('Bounds have to be "uniform", "normal" and "trunc_normal". Input from "params.csv" was "'+config.BASEMENT.bounds[i][0]+'".')
+            raise ValueError(
+                'Bounds have to be "uniform", "normal" and "trunc_normal". Input from "params.csv" was "'
+                + config.BASEMENT.bounds[i][0]
+                + '".'
+            )
     return theta
-    
 
-def my_truncnorm_isf(q,a,b,mean,std):
-    a_scipy = 1.*(a - mean) / std
-    b_scipy = 1.*(b - mean) / std
-    return truncnorm.isf(q,a_scipy,b_scipy,loc=mean,scale=std)
 
+def my_truncnorm_isf(q, a, b, mean, std):
+    a_scipy = 1.0 * (a - mean) / std
+    b_scipy = 1.0 * (b - mean) / std
+    return truncnorm.isf(q, a_scipy, b_scipy, loc=mean, scale=std)
 
 
 ###############################################################################
@@ -136,36 +149,35 @@ def ns_fit(datadir, backend=None, overwrite=None):
     config.init(datadir)
 
     #::: resolve backend (settings.csv wins, then kwarg, then default)
-    resolved = (
-        config.BASEMENT.settings.get('ns_backend')
-        or backend
-        or 'dynesty'
-    )
+    resolved = config.BASEMENT.settings.get("ns_backend") or backend or "dynesty"
     resolved = str(resolved).lower()
 
     #::: resolve overwrite for an existing save file (prompts if overwrite is
     #::: None; EOFError-safe so non-interactive/batch runs proceed by
     #::: overwriting). Raises ValueError if the user (or overwrite=False) aborts.
-    save_file = os.path.join(config.BASEMENT.outdir, 'save_ns.pickle.gz')
-    resolve_overwrite(save_file, overwrite=overwrite, label='Nested Sampling save')
+    save_file = os.path.join(config.BASEMENT.outdir, "save_ns.pickle.gz")
+    resolve_overwrite(save_file, overwrite=overwrite, label="Nested Sampling save")
 
     #::: an explicit overwrite=True also clears ultranest's resume store so the
     #::: run starts genuinely fresh (otherwise ultranest auto-resumes from it).
     if overwrite:
-        ultranest_logs = os.path.join(config.BASEMENT.outdir, 'ultranest_logs')
+        ultranest_logs = os.path.join(config.BASEMENT.outdir, "ultranest_logs")
         if os.path.isdir(ultranest_logs):
             shutil.rmtree(ultranest_logs)
 
     #::: dispatch (imports happen lazily, so ultranest stays optional)
     from .utils.ns_backends import get_backend, validate_settings_for_backend
+
     be = get_backend(resolved)
 
     #::: tell the user which settings.csv keys are unused / implicit for this backend
-    raw_keys = getattr(config.BASEMENT, '_settings_raw_keys', set())
+    raw_keys = getattr(config.BASEMENT, "_settings_raw_keys", set())
     # Also surface ns_backend itself when defaulted
-    if 'ns_backend' not in raw_keys:
-        logprint("\n! settings.csv: 'ns_backend' not set; defaulting to '{}'. "
-                 "Add a row to settings.csv for reproducibility.".format(resolved))
+    if "ns_backend" not in raw_keys:
+        logprint(
+            f"\n! settings.csv: 'ns_backend' not set; defaulting to '{resolved}'. "
+            "Add a row to settings.csv for reproducibility."
+        )
     validate_settings_for_backend(resolved, raw_keys, logprint=logprint)
 
     results = be.run(
@@ -179,13 +191,12 @@ def ns_fit(datadir, backend=None, overwrite=None):
     )
 
     #::: pickle-save the unified-schema results
-    with gzip.GzipFile(os.path.join(config.BASEMENT.outdir, 'save_ns.pickle.gz'), 'wb') as f:
+    with gzip.GzipFile(os.path.join(config.BASEMENT.outdir, "save_ns.pickle.gz"), "wb") as f:
         pickle.dump(results, f)
 
     #::: return a German saying
     try:
-        with open(os.path.join(os.path.dirname(__file__), 'utils', 'quotes2.txt')) as dataset:
-            return(np.random.choice([l for l in dataset]))
+        with open(os.path.join(os.path.dirname(__file__), "utils", "quotes2.txt")) as dataset:
+            return np.random.choice([l for l in dataset])
     except Exception:
-        return('42')
-    
+        return "42"

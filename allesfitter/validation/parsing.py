@@ -10,16 +10,15 @@ helpers so the two check layers stay pure and free of duplicated parsing.
 from __future__ import annotations
 
 import os
-from typing import Dict, List, Optional, Tuple
 
 
-def read_csv_rows(path) -> List[List[str]]:
+def read_csv_rows(path) -> list[list[str]]:
     """Split a CSV into stripped token lists, skipping blanks and ``#`` lines.
 
     Accepts a ``str`` or :class:`os.PathLike`. Returns ``[]`` for a missing
     file so callers can treat "absent" and "empty" alike.
     """
-    rows: List[List[str]] = []
+    rows: list[list[str]] = []
     path = os.fspath(path)
     if not os.path.exists(path):
         return rows
@@ -32,14 +31,14 @@ def read_csv_rows(path) -> List[List[str]]:
     return rows
 
 
-def read_param_rows(datadir: str) -> List[List[str]]:
+def read_param_rows(datadir: str) -> list[list[str]]:
     """Return the non-comment rows of ``<datadir>/params.csv``."""
     return read_csv_rows(os.path.join(datadir, "params.csv"))
 
 
-def read_settings(datadir: str) -> Dict[str, str]:
+def read_settings(datadir: str) -> dict[str, str]:
     """Return ``settings.csv`` as a ``{key: value}`` dict (first column keyed)."""
-    out: Dict[str, str] = {}
+    out: dict[str, str] = {}
     for parts in read_csv_rows(os.path.join(datadir, "settings.csv")):
         if not parts:
             continue
@@ -48,7 +47,7 @@ def read_settings(datadir: str) -> Dict[str, str]:
     return out
 
 
-def parse_bounds(bounds_str: str) -> Optional[Tuple[str, Tuple[float, ...]]]:
+def parse_bounds(bounds_str: str) -> tuple[str, tuple[float, ...]] | None:
     """Parse an allesfitter bounds string.
 
     Recognized forms (whitespace-separated):
@@ -82,7 +81,7 @@ def parse_bounds(bounds_str: str) -> Optional[Tuple[str, Tuple[float, ...]]]:
     return (kind, nums)
 
 
-def parse_uniform_bounds(bounds_str: str) -> Optional[Tuple[float, float]]:
+def parse_uniform_bounds(bounds_str: str) -> tuple[float, float] | None:
     """Return ``(lo, hi)`` for a ``uniform <lo> <hi>`` string, else ``None``.
 
     Thin convenience wrapper over :func:`parse_bounds` for callers (e.g. the

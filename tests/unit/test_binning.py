@@ -26,7 +26,7 @@ from tests.chromatic._helpers import (
 )
 
 _BIN_30MIN = 0.0208333  # days
-_N_RAW = 1440           # 2-min cadence over 2 days
+_N_RAW = 1440  # 2-min cadence over 2 days
 _SPAN_DAYS = 2.0
 
 
@@ -59,8 +59,15 @@ def _dense_datadir(tmp_path, *, binning=None, with_covariate=False):
     extra = [f"binning,{binning}"] if binning is not None else None
     write_settings(d, inst_phot=["tess"], bandpass=None, extra=extra)
     rows = (
-        [{"name": "b_rr", "value": TRUE_RR_TESS, "fit": 1,
-          "bounds": "uniform 0 0.3", "label": "rr"}]
+        [
+            {
+                "name": "b_rr",
+                "value": TRUE_RR_TESS,
+                "fit": 1,
+                "bounds": "uniform 0 0.3",
+                "label": "rr",
+            }
+        ]
         + common_orbital_rows(fit_orbital=False)
         + dilution_rows(["tess"])
         + err_baseline_rows(["tess"])
@@ -123,8 +130,15 @@ def _two_inst_datadir(tmp_path, *, extra):
         write_data_csv(d / f"{inst}.csv", t, flux, np.full(_N_RAW, 5e-4))
     write_settings(d, inst_phot=insts, bandpass=None, extra=extra)
     rows = (
-        [{"name": "b_rr", "value": TRUE_RR_TESS, "fit": 1,
-          "bounds": "uniform 0 0.3", "label": "rr"}]
+        [
+            {
+                "name": "b_rr",
+                "value": TRUE_RR_TESS,
+                "fit": 1,
+                "bounds": "uniform 0 0.3",
+                "label": "rr",
+            }
+        ]
         + common_orbital_rows(fit_orbital=False)
         + dilution_rows(insts)
         + err_baseline_rows(insts)
@@ -149,9 +163,7 @@ def test_per_instrument_override_disables_when_global_set(tmp_path):
     from allesfitter import config
 
     # Global binning bins everything; binning_muscat (empty) turns it off there.
-    d = _two_inst_datadir(
-        tmp_path, extra=[f"binning,{_BIN_30MIN}", "binning_muscat,"]
-    )
+    d = _two_inst_datadir(tmp_path, extra=[f"binning,{_BIN_30MIN}", "binning_muscat,"])
     config.init(str(d))
     assert 50 < len(config.BASEMENT.data["tess"]["time"]) < 150  # global applies
     assert len(config.BASEMENT.data["muscat"]["time"]) == _N_RAW  # override off
@@ -162,8 +174,8 @@ def test_binning_auto_sets_t_exp_and_n_int(tmp_path):
 
     config.init(str(_dense_datadir(tmp_path, binning=_BIN_30MIN)))
     s = config.BASEMENT.settings
-    assert s["t_exp_tess"] == _BIN_30MIN     # auto-derived from binning
-    assert s["t_exp_n_int_tess"] == 10       # seeded default
+    assert s["t_exp_tess"] == _BIN_30MIN  # auto-derived from binning
+    assert s["t_exp_n_int_tess"] == 10  # seeded default
 
 
 def test_binning_does_not_override_explicit_t_exp(tmp_path):
@@ -171,13 +183,11 @@ def test_binning_does_not_override_explicit_t_exp(tmp_path):
 
     # Global binning bins both. tess has an explicit (different) t_exp → kept;
     # muscat has none → t_exp auto-set to the bin width.
-    d = _two_inst_datadir(
-        tmp_path, extra=[f"binning,{_BIN_30MIN}", "t_exp_tess,0.005"]
-    )
+    d = _two_inst_datadir(tmp_path, extra=[f"binning,{_BIN_30MIN}", "t_exp_tess,0.005"])
     config.init(str(d))
     s = config.BASEMENT.settings
-    assert s["t_exp_tess"] == 0.005          # explicit value preserved
-    assert s["t_exp_muscat"] == _BIN_30MIN   # auto-derived
+    assert s["t_exp_tess"] == 0.005  # explicit value preserved
+    assert s["t_exp_muscat"] == _BIN_30MIN  # auto-derived
 
 
 def test_binning_model_evaluates_with_supersampling(tmp_path):

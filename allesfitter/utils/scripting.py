@@ -1,15 +1,16 @@
-import json
-from urllib.request import urlopen
 import datetime
-from pathlib import Path
-from itertools import combinations
+import json
 import urllib.request
+from itertools import combinations
+from pathlib import Path
+from urllib.request import urlopen
+
+import astropy.units as u
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
 from astropy.time import Time
-import astropy.units as u
 from astroquery.ipac.nexsci.nasa_exoplanet_archive import NasaExoplanetArchive
+from tqdm import tqdm
 
 G = 6.67e-11
 D_H = 24.0
@@ -19,6 +20,7 @@ au = 1.496e11
 msun = 1.9891e30
 rsun = 0.5 * 1.392684e9
 
+
 def get_package_data_path() -> str:
     # Get the directory where this module is located
     module_dir = Path(__file__).resolve().parent
@@ -26,7 +28,9 @@ def get_package_data_path() -> str:
     data_dir.mkdir(exist_ok=True)  # Make sure the data directory exists
     return str(data_dir)
 
+
 DATA_PATH = get_package_data_path()
+
 
 def get_tfop_info(target_name: str) -> dict:
     base_url = "https://exofop.ipac.caltech.edu/tess"
@@ -199,9 +203,7 @@ def get_tois(
     remove_FP=True,
 ):
     """Download TOI list from TESS Alert/TOI Release"""
-    dl_link = (
-        "https://exofop.ipac.caltech.edu/tess/download_toi.php?sort=toi&output=csv"
-    )
+    dl_link = "https://exofop.ipac.caltech.edu/tess/download_toi.php?sort=toi&output=csv"
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     fp = outdir.joinpath("TOIs.csv")
@@ -245,26 +247,24 @@ def get_ctois(clobber=False, outdir=DATA_PATH, verbose=False, remove_FP=True):
     See interface: https://exofop.ipac.caltech.edu/tess/view_ctoi.php
     See also: https://exofop.ipac.caltech.edu/tess/ctoi_help.php
     """
-    dl_link = (
-        "https://exofop.ipac.caltech.edu/tess/download_ctoi.php?sort=ctoi&output=csv"
-    )
+    dl_link = "https://exofop.ipac.caltech.edu/tess/download_ctoi.php?sort=ctoi&output=csv"
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     fp = outdir.joinpath("CTOIs.csv")
 
     if not fp.exists() or clobber:
         d = pd.read_csv(dl_link)  # , dtype={'RA': float, 'Dec': float})
-        msg = "Downloading {}\n".format(dl_link)
+        msg = f"Downloading {dl_link}\n"
     else:
         d = pd.read_csv(fp).drop_duplicates()
-        msg = "Loaded: {}\n".format(fp)
+        msg = f"Loaded: {fp}\n"
     d.to_csv(fp, index=False)
 
     # remove False Positives
     if remove_FP:
         d = d[d["User Disposition"] != "FP"]
         msg += "CTOIs with user disposition==FP are removed.\n"
-    msg += "Saved: {}\n".format(fp)
+    msg += f"Saved: {fp}\n"
     if verbose:
         print(msg)
     d.columns = [c.replace("Error", "err") for c in d.columns]
@@ -393,12 +393,7 @@ def d_from_pkaiews(p, k, a, i, e, w, tr_sign=1, kind=14):
     b = impact_parameter_ec(a, i, e, w, tr_sign)
     ae = np.sqrt(1.0 - e**2) / (1.0 + tr_sign * e * np.sin(w))
     ds = 1.0 if kind == 14 else -1.0
-    return (
-        p
-        / np.pi
-        * np.arcsin(np.sqrt((1.0 + ds * k) ** 2 - b**2) / (a * np.sin(i)))
-        * ae
-    )
+    return p / np.pi * np.arcsin(np.sqrt((1.0 + ds * k) ** 2 - b**2) / (a * np.sin(i))) * ae
 
 
 def get_tdur(per, rsuma, inc, k, b):
