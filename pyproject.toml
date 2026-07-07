@@ -70,9 +70,14 @@ Download = "https://github.com/jpdeleon/allesfitter2"
 [project.scripts]
 prepare_allesfit = "allesfitter.scripts:prepare_allesfit"
 run_allesfitter_grid = "allesfitter.scripts:run_allesfitter_grid"
+allesfitter-gui = "allesfitter.webgui.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
+
+# Ship the web GUI's Jinja2 templates + static assets inside the wheel.
+[tool.setuptools.package-data]
+"allesfitter.webgui" = ["templates/*.html", "static/*"]
 
 # Version is read from a single source of truth: allesfitter/_version.py.
 # Bump __version__ there and the build, runtime, and installed metadata all
@@ -166,3 +171,8 @@ files = ["allesfitter"]
 
 [tool.uv]
 no-binary-package = ["ellc"]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+]

@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}{{ run.target }} results · allesfitter{% endblock %}
+{% block content %}
+<section class="stack">
+  <div class="row-between">
+    <h1>{{ run.target }} <span class="badge state-{{ run.state }}">{{ run.state }}</span></h1>
+    <a class="btn" href="/jobs">Back to jobs</a>
+  </div>
+
+  <div class="panel meta-grid">
+    <div><span class="muted">Run</span><br><span class="mono small">{{ run.run_id }}</span></div>
+    <div><span class="muted">Instruments</span><br><span class="mono small">{{ run.insts }}</span></div>
+    <div><span class="muted">Bands</span><br>{{ run.bands }}</div>
+    <div><span class="muted">Sampler</span><br>{{ run.sampler }}</div>
+    <div><span class="muted">log(Z)</span><br><span class="mono">{{ run.logz or '—' }}</span></div>
+  </div>
+
+  {% if run.error %}<div class="result err">{{ run.error }}</div>{% endif %}
+
+  {% if images %}
+  <h2>Figures</h2>
+  <div class="figs">
+    {% for name in images %}
+    <figure>
+      <a href="/results/{{ run.run_id }}/file/{{ name }}" target="_blank">
+        <img loading="lazy" src="/results/{{ run.run_id }}/file/{{ name }}" alt="{{ name }}">
+      </a>
+      <figcaption class="mono small">{{ name }}</figcaption>
+    </figure>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if documents %}
+  <h2>Plots (PDF)</h2>
+  <ul class="doc-list">
+    {% for name in documents %}
+    <li><a href="/results/{{ run.run_id }}/file/{{ name }}" target="_blank">{{ name }}</a></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if not images and not documents %}
+  <p class="empty">No figures yet — the run may still be in progress.
+    <a href="/jobs">Watch the log →</a></p>
+  {% endif %}
+</section>
+{% endblock %}
+{% block scripts %}
+{% if run.state in ('created','pending','running') %}
+<script>setTimeout(() => location.reload(), 5000);</script>
+{% endif %}
+{% endblock %}

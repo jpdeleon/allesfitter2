@@ -173,6 +173,34 @@ Detailed per-feature walkthroughs and all advisory material now live in
 - **Decision guide** — [effective use](notes.md#effective-use-of-allesfitter2), [settings & priors by use case](notes.md#choosing-settings--priors-by-use-case), [prior cookbook](notes.md#prior-cookbook), [best practices](notes.md#best-practices)
 - **Reference** — [parameter sources](notes.md#parameter-sources--databases), [troubleshooting](notes.md#troubleshooting), [TIC contratio vs SPOC CROWDSAP](notes.md#tic-contratio-vs-spoc-crowdsap)
 
+## Web GUI (`allesfitter-gui`)
+
+A browser-based GUI for configuring, launching, and reviewing **multi-band /
+multi-epoch transit fits** without hand-editing `settings.csv` / `params.csv`.
+It is a thin FastAPI + Jinja2 shell over the existing engine
+(`allesfitter/webgui/`): a form generates a valid allesfitter datadir, stages the
+light curves, validates the config through `Basement` before launching, then runs
+each fit as its own detached subprocess (allesfitter's config is module-global) with
+live-log streaming and rendered result figures.
+
+It reproduces the full TOI-6715 single-fit vocabulary: many instruments in one
+joint fit, chromatic radius-ratio/limb-darkening keyed by **bandpass**, per-instrument
+heterogeneous baselines including joint/coupled-GP share groups
+(`baseline_share_flux`) and `hybrid_linear_multi` covariate detrending.
+
+```bash
+pip install -e ".[webgui]"        # or: uv sync --extra webgui
+
+allesfitter-gui                    # serve at http://127.0.0.1:8000
+allesfitter-gui --runs-root ./runs --toi-csv data/TOIs.csv --port 8080
+allesfitter-gui --no-network       # disable NASA Exoplanet Archive auto-fill
+```
+
+Pages: **Targets** (status badges), **New fit** (form + Validate/Run + ephemeris
+auto-fill), **Jobs** (live status + streaming log), **Results** (figures + `log(Z)`).
+Experiment-grid / `log(Z)` model comparison (reusing `run_allesfitter_grid`) and RV
+fitting are planned follow-on phases.
+
 ## Testing
 
 A pytest regression suite under `tests/` pins the chromatic contract and core utilities (546+ collected tests).
@@ -186,6 +214,8 @@ pytest tests/chromatic/ -m '' # include end-to-end NS fits (~30 s extra)
 ```
 
 `tests/chromatic/` covers scope mapping (global vs per-bandpass vs per-instrument keys), parser-error messages, LD-law defaults, likelihood assembly (monkeypatched `ellc.fluxes`), `prepare_allesfit` emission shapes, raw-flux clipping, an end-to-end two-band NS fit, and the run logger. See `docs/chromatic_validation.md` for the requirement → code → test mapping.
+
+`tests/unit/webgui/` covers the web GUI: config generation round-tripped through `Basement`, chromatic-by-bandpass keys, share-group / covariate baselines, staging, the run registry + job seam, the subprocess launcher, result discovery, and FastAPI route smoke tests. Engine-dependent tests skip cleanly where the compiled deps are unavailable.
 
 ## Citation
 

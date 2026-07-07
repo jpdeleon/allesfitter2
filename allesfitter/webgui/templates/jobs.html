@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Jobs · allesfitter{% endblock %}
+{% block nav_jobs %}active{% endblock %}
+{% block content %}
+<section class="stack">
+  <div class="row-between">
+    <h1>Jobs</h1>
+    <span class="muted small" id="poll-note">live · refreshes every 3s</span>
+  </div>
+  <div class="table-scroll">
+    <table class="grid" id="jobs-table">
+      <thead><tr>
+        <th>Run</th><th>Target</th><th>Instruments</th><th>Sampler</th>
+        <th>State</th><th>log(Z)</th><th>Log</th>
+      </tr></thead>
+      <tbody id="jobs-body"><tr><td colspan="7" class="muted">loading…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div id="log-panel" class="panel hidden">
+    <div class="row-between">
+      <h3 id="log-title">Log</h3>
+      <button class="ghost" id="log-close" type="button">close ✕</button>
+    </div>
+    <pre id="log-body" class="log"></pre>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script src="/static/jobs.js"></script>{% endblock %}

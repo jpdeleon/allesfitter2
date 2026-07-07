@@ -49,3 +49,7 @@ examples/
 **/results/**/*.csv
 **/results_*/**/*.csv
 **/priors/**/*.csv
+
+# webgui generated run dirs + sqlite registry
+webgui_runs/
+*.sqlite3

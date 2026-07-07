@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Targets · allesfitter{% endblock %}
+{% block nav_home %}active{% endblock %}
+{% block content %}
+<section class="stack">
+  <div class="row-between">
+    <h1>Targets</h1>
+    <a class="btn primary" href="/fit">+ New fit</a>
+  </div>
+
+  {% if targets %}
+  <div class="cards">
+    {% for t in targets %}
+    <article class="card">
+      <div class="card-head">
+        <h3>{{ t.target }}</h3>
+        <span class="badge state-{{ t.fit_status }}">{{ t.fit_status }}</span>
+      </div>
+      <p class="muted">{{ t.n_runs }} run{{ '' if t.n_runs == 1 else 's' }}</p>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="empty">No fits yet. <a href="/fit">Configure your first fit →</a></p>
+  {% endif %}
+
+  {% if runs %}
+  <h2>Recent runs</h2>
+  <table class="grid">
+    <thead><tr><th>Run</th><th>Target</th><th>Instruments</th><th>Sampler</th><th>State</th><th>log(Z)</th></tr></thead>
+    <tbody>
+    {% for r in runs %}
+      <tr>
+        <td><a href="/results/{{ r.run_id }}">{{ r.run_id }}</a></td>
+        <td>{{ r.target }}</td>
+        <td class="mono small">{{ r.insts }}</td>
+        <td>{{ r.sampler }}</td>
+        <td><span class="badge state-{{ r.state }}">{{ r.state }}</span></td>
+        <td class="mono small">{{ r.logz or '—' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+{% endblock %}
