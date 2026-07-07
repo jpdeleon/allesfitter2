@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Prepare · allesfitter{% endblock %}
+{% block nav_prepare %}active{% endblock %}
+{% block content %}
+<section class="stack" id="prepare-form">
+  <h1>Prepare from catalog</h1>
+  <p class="muted">
+    Auto-download light curves and generate a full allesfitter config from just a
+    target and sector — no manual upload. The run appears on
+    <a href="/jobs">Jobs</a> as <span class="badge state-preparing">preparing</span>,
+    then <span class="badge state-prepared">prepared</span> once validated. Review
+    the generated config, then hit <strong>Fit</strong>.
+  </p>
+
+  {% if not allow_network %}
+  <div class="panel result err">
+    Network lookups are disabled (the GUI was started with <code>--no-network</code>).
+    Preparing needs to download data — restart without that flag to use this page.
+  </div>
+  {% endif %}
+
+  <div class="panel">
+    <h2>Target</h2>
+    <div class="field-row">
+      <label>Identifier
+        <input id="target" placeholder="HD 39091">
+      </label>
+      <label>Type
+        <select id="id-type">
+          <option value="name">name</option>
+          <option value="toi">TOI</option>
+          <option value="tic">TIC</option>
+          <option value="ctoi">CTOI</option>
+        </select>
+      </label>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Data selection</h2>
+    <div class="field-grid">
+      <label>Mission
+        <select id="mission">
+          {% for mo in missions %}<option value="{{ mo }}">{{ mo }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Sector / campaign / quarter
+        <input id="sectors" placeholder="1 2   ·   -1 (latest)   ·   all">
+      </label>
+      <label>Pipeline
+        <select id="pipeline">
+          {% for p in pipelines %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Light-curve type
+        <select id="lc-type">
+          {% for l in lc_types %}<option value="{{ l }}">{{ l }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Quality flags
+        <select id="quality">
+          {% for q in quality_flags %}<option value="{{ q }}">{{ q }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Outlier σ-clip
+        <input id="sigma" type="number" step="any" placeholder="none">
+      </label>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Instruments &amp; chromaticity</h2>
+    <div class="field-grid">
+      <label>Filename(s) <span class="muted small">(-f)</span>
+        <input id="filename" placeholder="tess   ·   kepler tess" value="tess">
+      </label>
+      <label>Bandpass(es) <span class="muted small">(-bp, one per file)</span>
+        <input id="bandpass" placeholder="leave blank = achromatic">
+      </label>
+      <label>Default sampler
+        <select id="sampler">
+          <option value="mcmc">MCMC (emcee)</option>
+          <option value="ns">Nested Sampling</option>
+        </select>
+      </label>
+      <label class="check"><input type="checkbox" id="ttv"> Emit per-transit TTV rows (--ttv)</label>
+      <label class="check"><input type="checkbox" id="overwrite"> Overwrite existing files (-o)</label>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="btn primary" id="prepare" type="button">Prepare →</button>
+    <div id="result" class="result" role="status" aria-live="polite"></div>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script src="/static/prepare.js"></script>{% endblock %}

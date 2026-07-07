@@ -188,6 +188,16 @@ joint fit, chromatic radius-ratio/limb-darkening keyed by **bandpass**, per-inst
 heterogeneous baselines including joint/coupled-GP share groups
 (`baseline_share_flux`) and `hybrid_linear_multi` covariate detrending.
 
+**Prepare from catalog.** The **Prepare** page wires the `prepare_allesfit` pipeline
+into the GUI: give it a target (name/TOI/TIC/CTOI) and a sector/campaign/quarter and
+it runs `prepare_allesfit` as a subprocess to **auto-download** the TESS/K2/Kepler
+light curves and **auto-generate** the whole datadir (light-curve CSVs, `params.csv`,
+`settings.csv`, GP/dilution/TTV priors) — no manual upload or hand-typed ephemerides.
+The run appears on **Jobs** as `preparing`, then `prepared` once it re-emits a
+launch-compatible `run.py` and validates through `Basement`; you review the generated
+config and click **Fit** (MCMC or Nested Sampling) to launch it via the same
+subprocess launcher as a manual fit. Requires network access (not `--no-network`).
+
 ```bash
 pip install -e ".[webgui]"        # or: uv sync --extra webgui
 
@@ -196,8 +206,10 @@ allesfitter-gui --runs-root ./runs --toi-csv data/TOIs.csv --port 8080
 allesfitter-gui --no-network       # disable NASA Exoplanet Archive auto-fill
 ```
 
-Pages: **Targets** (status badges), **New fit** (form + Validate/Run + ephemeris
-auto-fill), **Jobs** (live status + streaming log), **Results** (figures + `log(Z)`).
+Pages: **Targets** (status badges), **Prepare** (catalog target + sector →
+auto-downloaded, validated, ready-to-fit run), **New fit** (form + Validate/Run +
+ephemeris auto-fill), **Jobs** (live status + streaming log + Fit/Stop actions),
+**Results** (figures + `log(Z)`).
 Experiment-grid / `log(Z)` model comparison (reusing `run_allesfitter_grid`) and RV
 fitting are planned follow-on phases.
 
@@ -215,7 +227,7 @@ pytest tests/chromatic/ -m '' # include end-to-end NS fits (~30 s extra)
 
 `tests/chromatic/` covers scope mapping (global vs per-bandpass vs per-instrument keys), parser-error messages, LD-law defaults, likelihood assembly (monkeypatched `ellc.fluxes`), `prepare_allesfit` emission shapes, raw-flux clipping, an end-to-end two-band NS fit, and the run logger. See `docs/chromatic_validation.md` for the requirement → code → test mapping.
 
-`tests/unit/webgui/` covers the web GUI: config generation round-tripped through `Basement`, chromatic-by-bandpass keys, share-group / covariate baselines, staging, the run registry + job seam, the subprocess launcher, result discovery, and FastAPI route smoke tests. Engine-dependent tests skip cleanly where the compiled deps are unavailable.
+`tests/unit/webgui/` covers the web GUI: config generation round-tripped through `Basement`, chromatic-by-bandpass keys, share-group / covariate baselines, staging, the run registry + job seam, the subprocess launcher, result discovery, the `prepare_allesfit` integration (argv building, datadir discovery, the prepare finalize state machine, and the `/prepare` + `/jobs/fit` routes), and FastAPI route smoke tests. Engine-dependent tests skip cleanly where the compiled deps are unavailable.
 
 ## Citation
 

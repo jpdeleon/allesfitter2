@@ -62,6 +62,15 @@ def band_sort_key(band: str) -> tuple[int, str]:
         return (len(CANONICAL_BANDS), b)
 
 
+# --- prepare / download choices --------------------------------------------
+# Options surfaced on the /prepare form; mirror scripts/prepare_allesfit.py's
+# argparse choices so the GUI can only build valid CLI invocations.
+MISSIONS: tuple[str, ...] = ("tess", "k2", "kepler")
+PIPELINES: tuple[str, ...] = ("spoc", "qlp", "cdips", "pathos", "tess-spoc", "everest", "k2sff")
+LC_TYPES: tuple[str, ...] = ("pdcsap", "sap")
+QUALITY_FLAGS: tuple[str, ...] = ("default", "none", "hard", "hardest")
+
+
 # --- limb darkening + baseline models --------------------------------------
 # allesfitter limb-darkening laws (quad is the safe default).
 LD_LAWS: tuple[str, ...] = ("quad", "lin", "sqrt", "log", "exp", "power2", "nonlinear")

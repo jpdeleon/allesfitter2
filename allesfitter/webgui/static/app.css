@@ -104,7 +104,8 @@ table.grid { width: 100%; border-collapse: collapse; font-size: .88rem; }
 }
 .badge.muted { color: var(--muted); }
 .state-done { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); border-color: transparent; }
-.state-running, .state-pending, .state-created { background: color-mix(in srgb, var(--run) 16%, transparent); color: var(--run); border-color: transparent; }
+.state-running, .state-pending, .state-created, .state-preparing { background: color-mix(in srgb, var(--run) 16%, transparent); color: var(--run); border-color: transparent; }
+.state-prepared { background: color-mix(in srgb, var(--ok) 12%, transparent); color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
 .state-failed, .state-stopped { background: color-mix(in srgb, var(--err) 16%, transparent); color: var(--err); border-color: transparent; }
 
 .mono { font-family: var(--mono); }
@@ -118,6 +119,11 @@ table.grid { width: 100%; border-collapse: collapse; font-size: .88rem; }
 
 .log { font-family: var(--mono); font-size: .78rem; white-space: pre-wrap; max-height: 55vh; overflow: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: .7rem; }
 .hidden { display: none; }
+
+/* Jobs action cell: prepared-run sampler picker + Fit button. */
+.action-cell { display: inline-flex; align-items: center; gap: .35rem; }
+.mini { font-size: .78rem; padding: .2rem .45rem; }
+select.mini { padding: .15rem .3rem; }
 .meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; }
 
 .figs { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }

@@ -21,12 +21,14 @@ from pathlib import Path
 # Run lifecycle states.
 CREATED = "created"
 PENDING = "pending"
+PREPARING = "preparing"  # prepare_allesfit subprocess is downloading/generating
+PREPARED = "prepared"  # config generated + validated, ready for the user to fit
 RUNNING = "running"
 DONE = "done"
 FAILED = "failed"
 STOPPED = "stopped"
 
-_ACTIVE_STATES = frozenset({CREATED, PENDING, RUNNING})
+_ACTIVE_STATES = frozenset({CREATED, PENDING, PREPARING, RUNNING})
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
@@ -120,6 +122,31 @@ class RunStore:
         if error is not None:
             sets.append("error = ?")
             vals.append(error)
+        vals.append(run_id)
+        with self._cursor() as conn:
+            conn.execute(f"UPDATE runs SET {', '.join(sets)} WHERE run_id = ?", vals)
+
+    _UPDATABLE = frozenset(
+        {"target", "sampler", "state", "run_dir", "insts", "bands", "companions", "logz", "error"}
+    )
+
+    def update_run(self, run_id: str, **fields: object) -> None:
+        """Update whitelisted columns of a run in one statement (+ ``updated_at``).
+
+        Used by the prepare pipeline to repoint ``run_dir`` at the discovered
+        datadir and fill ``insts`` once generation finishes.
+        """
+        sets: list[str] = []
+        vals: list[object] = []
+        for key, value in fields.items():
+            if key not in self._UPDATABLE:
+                raise ValueError(f"cannot update unknown/immutable column {key!r}")
+            sets.append(f"{key} = ?")
+            vals.append(str(value) if isinstance(value, Path) else value)
+        if not sets:
+            return
+        sets.append("updated_at = ?")
+        vals.append(time.time())
         vals.append(run_id)
         with self._cursor() as conn:
             conn.execute(f"UPDATE runs SET {', '.join(sets)} WHERE run_id = ?", vals)

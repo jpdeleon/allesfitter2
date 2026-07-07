@@ -35,9 +35,11 @@ from allesfitter.webgui import (
     formparse,
     instruments,
     jobs,
+    prepare,
     results,
     staging,
 )
+from allesfitter.webgui import runstore as rs
 from allesfitter.webgui import validate as _validate
 from allesfitter.webgui.job_store import RunStoreJobStore, set_job_store
 from allesfitter.webgui.runstore import RunStore
@@ -107,6 +109,20 @@ def create_app(
                 "baseline_models": instruments.BASELINE_MODELS,
                 "ld_laws": instruments.LD_LAWS,
                 "families": instruments.FAMILIES,
+            },
+        )
+
+    @app.get("/prepare", response_class=HTMLResponse)
+    def prepare_form(request: Request):
+        return templates.TemplateResponse(
+            request,
+            "prepare.html",
+            {
+                "missions": instruments.MISSIONS,
+                "pipelines": instruments.PIPELINES,
+                "lc_types": instruments.LC_TYPES,
+                "quality_flags": instruments.QUALITY_FLAGS,
+                "allow_network": app.state.allow_network,
             },
         )
 
@@ -182,6 +198,54 @@ def create_app(
         jobs.launch(job_store, run_id, run_dir, sampler=sampler)
         return JSONResponse({"run_id": run_id})
 
+    @app.post("/prepare/run")
+    async def prepare_run(request: Request):
+        if not app.state.allow_network:
+            raise HTTPException(
+                status_code=400,
+                detail="network is disabled (--no-network); prepare needs to download data",
+            )
+        payload = await request.json()
+        try:
+            argv = prepare.build_prepare_argv(payload)
+        except (ValueError, KeyError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        target = str(payload.get("target") or "").strip()
+        sampler = payload.get("sampler", "mcmc")
+        run_id = _new_run_id(target)
+        work_dir = runs_root / run_id
+        argv += ["-dir", str(work_dir)]
+
+        store.create_run(
+            run_id=run_id,
+            target=target,
+            run_dir=str(work_dir),
+            sampler=sampler,
+            state=rs.PREPARING,
+        )
+        prepare.launch_prepare(store, run_id, work_dir, argv)
+        return JSONResponse({"run_id": run_id})
+
+    @app.get("/prepare/log/{run_id}", response_class=PlainTextResponse)
+    def prepare_log(run_id: str, n: int = 300):
+        if store.get_run(run_id) is None:
+            raise HTTPException(status_code=404, detail=f"unknown run {run_id!r}")
+        return prepare.tail_log(runs_root / run_id, n=n)
+
+    @app.post("/jobs/fit/{run_id}")
+    def jobs_fit(run_id: str, sampler: str = "mcmc"):
+        row = store.get_run(run_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"unknown run {run_id!r}")
+        run_dir = Path(row["run_dir"])
+        store.update_run(run_id, sampler=sampler)
+        try:
+            jobs.launch(job_store, run_id, run_dir, sampler=sampler)
+        except (FileNotFoundError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return JSONResponse({"run_id": run_id, "sampler": sampler})
+
     @app.get("/jobs/status")
     def jobs_status(target: str | None = None):
         return JSONResponse({"runs": store.list_runs(target)})
@@ -193,7 +257,8 @@ def create_app(
     @app.post("/jobs/stop/{run_id}")
     def jobs_stop(run_id: str):
         _run_dir(run_id)  # 404 if unknown
-        return JSONResponse({"stopped": jobs.stop(run_id)})
+        stopped = jobs.stop(run_id) or prepare.stop(run_id)
+        return JSONResponse({"stopped": stopped})
 
     @app.get("/results/{run_id}/file/{name}")
     def result_file(run_id: str, name: str):
