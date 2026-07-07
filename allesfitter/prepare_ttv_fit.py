@@ -142,7 +142,7 @@ def prepare_ttv_fit(datadir, style='fullplot', max_transits=20):
             try:
                 trend = flatten(tr_times, tr_flux, window_length=eclipse_width[companion]/2., method='biweight', return_trend=True)[1]
                 tmid2 = np.median( tr_times[ np.argsort(trend)[0:int(N_points_in_eclipse/2.)] ] ) # the tmid estimated from the observations as the minimum of the data
-            except:
+            except Exception:
                 warnings.warn('Install wotan for improved performance of prepare_ttv_fit().')
                 trend = None
                 tmid2 = np.median( tr_times[ np.argsort(tr_times)[0:int(N_points_in_eclipse/2.)] ] ) # the tmid estimated from the observations as the minimum of the data
@@ -225,7 +225,7 @@ def prepare_ttv_fit(datadir, style='fullplot', max_transits=20):
             raise ValueError("The keyword argument 'style' must be 'fullplot', 'monthplot', or 'tessplot'.")
         
         #::: mark the tranists/eclipses of each photometric companion
-        for i, c in enumerate(alles.settings['companions_phot']):
+        for c in alles.settings['companions_phot']:
             ind_tr, ind_out = index_transits(time_combined, alles.initial_guess_params_median[c+'_epoch'], alles.initial_guess_params_median[c+'_period'], window)
             if style=='fullplot':
                 axes = fullplot(time_combined[ind_tr], flux_combined[ind_tr], color=alles.settings[c+'_color'], ax=axes, label=c)

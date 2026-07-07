@@ -202,7 +202,7 @@ def plot_MCMC_corner(sampler):
 
     #::: make pretty titles for the corner plot  
     labels, units = [], []
-    for i,l in enumerate(config.BASEMENT.fitlabels):
+    for i,_l in enumerate(config.BASEMENT.fitlabels):
         labels.append( str(config.BASEMENT.fitlabels[i]) )
         units.append( str(config.BASEMENT.fitunits[i]) )
     
@@ -214,7 +214,7 @@ def plot_MCMC_corner(sampler):
             fittruths2[ind] -= int(params_median[companion+'_epoch'])
             params_median2[companion+'_epoch'] -= int(params_median[companion+'_epoch'])
                 
-    for i,l in enumerate(labels):
+    for i,_l in enumerate(labels):
         if len( units[i].strip(' ') ) > 0:
             labels[i] = str(labels[i]+' ('+units[i]+')')
         

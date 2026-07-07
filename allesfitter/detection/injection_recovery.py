@@ -39,7 +39,7 @@ from .transit_search import get_tls_kwargs_by_tic, tls_search
 from .injection_recovery_output import irplot
 try:
     from exoworlds.tess import tessio
-except:
+except Exception:
     pass
 
 #::: plotting settings
@@ -151,7 +151,7 @@ def to_do_or_not_to_do_that_is_the_question(ex, period, rplanet):
 
 
 # ::: a fast injection for a simple, circular, and small planet
-def inject(time, flux, flux_err, epoch, period, r_companion_earth, r_host=1, m_host=1, ldc=[0.5,0.5], dil=0, return_depth=False, window=None):
+def inject(time, flux, flux_err, epoch, period, r_companion_earth, r_host=1, m_host=1, ldc=(0.5,0.5), dil=0, return_depth=False, window=None):
     a = ( (G/(4*np.pi**2) * (period*u.d)**2 * (m_host*u.Msun))**(1./3.) ).to(u.AU).value  #in AU 
     r_host_over_a = ((r_host*u.Rsun)/(a*u.AU)).decompose().value #unitless
     r_companion_over_a = ((r_companion_earth*u.Rearth)/(a*u.AU)).decompose().value #unitless

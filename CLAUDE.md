@@ -37,9 +37,15 @@ Ruff configuration lives in `pyproject.toml` under `[tool.ruff]`. Do not
 add a separate `ruff.toml` or `.ruff.toml`. Do not add inline `# noqa`
 comments without a rule code.
 
-## Git commit
+## Create test, Update readme, and Git commit for each new feature
+Create a unit tests. Add tests as new features are added. Organize the tests accordingly.
+Update readme.md.
 Create a detailed git commit after accomplishing a unique feature.
 
-## Unit tests
-Create a unit tests.
+## gitignore
+Do not track large files locally and in git history. Update .gitignore if needed.
+
+## Large files
+Ask me permission if there is a need to read a large files even if in auto edit mode.
+The purpose is to save tokens and context length.
 

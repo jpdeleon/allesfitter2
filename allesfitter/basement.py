@@ -2776,7 +2776,7 @@ class Basement:
                 ind_p = np.where(self.fitkeys==companion+'_period')[0][0]
                 N_truth_shift = int(np.round((self.settings['mid_epoch']-self.fittruths[ind_e])/self.fittruths[ind_p]))
                 self.fittruths[ind_e] += N_truth_shift * self.fittruths[ind_p]
-            except:
+            except Exception:
                 pass
             
             #::: if a fit param, also update the bounds accordingly

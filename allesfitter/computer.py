@@ -1541,7 +1541,7 @@ def calculate_lnlike_total(params):
                 try:
                     gp.compute(x_j, yerr=yerr_j)
                     lnlike_total += gp.log_likelihood(y_j)
-                except:
+                except Exception:
                     return -np.inf
                     
                     
@@ -1580,7 +1580,7 @@ def calculate_lnlike_total(params):
             try:
                 gp.compute(x, yerr=yerr)
                 lnlike_total += gp.log_likelihood(y)
-            except:
+            except Exception:
                 return -np.inf
             
             
@@ -1655,7 +1655,7 @@ def calculate_lnlike_total(params):
 #        try:
 #            gp.compute(x, yerr=yerr_w)
 #            lnlike = gp.log_likelihood(y)
-#        except:
+#        except Exception:
 #            lnlike = -np.inf
 #        
 #        

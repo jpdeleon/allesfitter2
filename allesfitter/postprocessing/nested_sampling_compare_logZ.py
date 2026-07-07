@@ -23,7 +23,7 @@ import os, sys
 import gzip
 try:
    import cPickle as pickle
-except:
+except Exception:
    import pickle
 from dynesty import utils as dyutils
 from tqdm import tqdm

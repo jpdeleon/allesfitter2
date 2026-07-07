@@ -39,7 +39,7 @@ def str_digits(y):
 def extra_digits(x,y):
     try:
         return int(np.floor(np.log10(np.abs(x)))) - int(np.floor(np.log10(np.abs(y))))
-    except:
+    except Exception:
         return 0
     
 def round_tex(x, err_low, err_up, mode=None):

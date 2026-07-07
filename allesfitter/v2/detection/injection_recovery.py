@@ -34,9 +34,10 @@ from transitleastsquares import catalog_info
 from .transit_search import tls_search
 from ..generator import inject_lc_model
 from .injection_recovery_output import irplot
+from .. import defaults
 try:
     from exoworlds.tess import tessio
-except:
+except Exception:
     pass
 
 #::: settings and constants
@@ -106,6 +107,7 @@ def to_do_or_not_to_do_that_is_the_question(ex, period, rplanet):
 ###############################################################################
 def inject_and_tls_search(time, flux, flux_err,                                #lightcurve
                           periods=1., rplanets=11., logfname='logfile.csv',    #for inject_lightcurve_model()
+                          R_host=1.,                                           #stellar radius (R_sun) for transit-depth scaling
                           # SNR_threshold=5.,                                  #for tls_search()
                           # known_transits=None, 
                           # mask_multiplier=1.5,
@@ -146,8 +148,7 @@ def inject_and_tls_search(time, flux, flux_err,                                #
     #::: convert input
     periods = np.atleast_1d(periods)
     rplanets = np.atleast_1d(rplanets)
-    if injection_params is None: injection_params = defaults.get_default_params()
-    else: injection_params = defaults.fill_params()
+    injection_params = defaults.fill_params(injection_params)
         
         
     #::: set up a logfile

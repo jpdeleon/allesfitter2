@@ -83,7 +83,7 @@ def irplot(fname, SNR_threshold, period_bins=None, rplanet_bins=None, options=No
     inj_rplanets = np.atleast_1d(results['inj_rplanet'])
     try: 
         inj_depths = np.atleast_1d(results['inj_depth'])
-    except:
+    except Exception:
         inj_depths = np.nan*inj_rplanets
     # tls_periods = np.atleast_1d(results['tls_period'])
     # tls_SNRs = np.atleast_1d(results['tls_SNR'])
@@ -142,7 +142,7 @@ def irplot(fname, SNR_threshold, period_bins=None, rplanet_bins=None, options=No
         ax.set(xlabel='Period (days)', ylabel='Radius '+r'$(R_\oplus)$')
         ax.text(0.5,1.05,'SNR>'+str(SNR_threshold)+' | blue: not recovered | white: recovered',ha='center',va='center',transform=ax.transAxes)
         try: fig.savefig( os.path.join(options['outdir'],options['logfname'].split('.')[0]+'_snr'+str(SNR_threshold)+'_scatter.pdf'), bbox_inches='tight') #some matplotlib versions crash when saving pdf...
-        except: fig.savefig( os.path.join(options['outdir'],options['logfname'].split('.')[0]+'_snr'+str(SNR_threshold)+'_scatter.jpg'), bbox_inches='tight') #some matplotlib versions need pillow for jpg (conda install pillow)...
+        except Exception: fig.savefig( os.path.join(options['outdir'],options['logfname'].split('.')[0]+'_snr'+str(SNR_threshold)+'_scatter.jpg'), bbox_inches='tight') #some matplotlib versions need pillow for jpg (conda install pillow)...
         plt.close(fig)
         # err
     
@@ -180,7 +180,7 @@ def irplot(fname, SNR_threshold, period_bins=None, rplanet_bins=None, options=No
                 # yticklabels = [ np.format_float_positional( get_inj_depth_from_inj_rplanet(y0+(y1-y0)*item), 1 ) for item in [0,0.25,0.5,0.75,1]])
         
         try: fig.savefig( os.path.join(options['outdir'],options['logfname'].split('.')[0]+'_snr'+str(SNR_threshold)+'_hist.pdf'), bbox_inches='tight') #some matplotlib versions crash when saving pdf...
-        except: fig.savefig( os.path.join(options['outdir'],options['logfname'].split('.')[0]+'_snr'+str(SNR_threshold)+'_hist.jpg'), bbox_inches='tight') #some matplotlib versions need pillow for jpg (conda install pillow)...   
+        except Exception: fig.savefig( os.path.join(options['outdir'],options['logfname'].split('.')[0]+'_snr'+str(SNR_threshold)+'_hist.jpg'), bbox_inches='tight') #some matplotlib versions need pillow for jpg (conda install pillow)...   
         plt.close(fig)
     
     

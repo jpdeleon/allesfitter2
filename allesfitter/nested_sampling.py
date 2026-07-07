@@ -35,7 +35,7 @@ import gzip
 import shutil
 try:
    import cPickle as pickle
-except:
+except Exception:
    import pickle
 
 #::: warnings
@@ -186,6 +186,6 @@ def ns_fit(datadir, backend=None, overwrite=None):
     try:
         with open(os.path.join(os.path.dirname(__file__), 'utils', 'quotes2.txt')) as dataset:
             return(np.random.choice([l for l in dataset]))
-    except:
+    except Exception:
         return('42')
     

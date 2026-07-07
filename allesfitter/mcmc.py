@@ -114,7 +114,7 @@ def mcmc_lnprob(theta):
 #        try:
         ln = mcmc_lnlike(theta)
         return lp + ln
-#        except:
+#        except Exception:
 #            return -np.inf
         
 
@@ -266,7 +266,7 @@ def mcmc_fit(datadir, overwrite=None, append=None):
     try:
         with open(os.path.join(os.path.dirname(__file__), 'utils', 'quotes2.txt')) as dataset:
             return(np.random.choice([l for l in dataset]))
-    except:
+    except Exception:
         return('42')
     
     

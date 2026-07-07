@@ -165,7 +165,7 @@ def plot_viol(pathbase, liststrgstar, liststrgruns, lablstrgruns, pathimag, pval
     gdat.liststrgparaconc = np.unique(gdat.liststrgparaconc)
     gdat.listlablparaconc = np.copy(gdat.liststrgparaconc)
     for k, strgparaconc in enumerate(gdat.liststrgparaconc):
-        for i, strgruns in enumerate(liststrgruns):
+        for i, _strgruns in enumerate(liststrgruns):
             if strgparaconc in liststrgpara[i]:
                 gdat.listlablparaconc[k] = listlablpara[i][np.where(liststrgpara[i] == strgparaconc)[0][0]]
     

@@ -128,5 +128,5 @@ def plot_info(ax, text=0, params=None, settings=None, **kwargs):
         ax.text(0,0.25,r'$\sqrt{e} \sin{\omega}$ = '+np.format_float_positional(params['f_s'],5,False), transform=ax.transAxes)
         ax.text(0,0.15,'LD = '+str(params['ldc']), transform=ax.transAxes)
         try: ax.text(0,0.05,'LD transf = ['+", ".join([np.format_float_positional(item,5,False) for item in params['ldc_transformed']]) + ']', transform=ax.transAxes)
-        except: pass
+        except Exception: pass
     return ax

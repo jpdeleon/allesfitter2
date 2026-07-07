@@ -32,7 +32,7 @@ from ..bumps.bump import bump_model as _bump_model
 
 
 
-def transit_model(time, rr=0.1, rsuma=0.1, cosi=0, epoch=0, period=1, ldc=[0.5,0.5]):
+def transit_model(time, rr=0.1, rsuma=0.1, cosi=0, epoch=0, period=1, ldc=(0.5,0.5)):
     params = {
             'b_rr':rr,
             'b_rsuma':rsuma,

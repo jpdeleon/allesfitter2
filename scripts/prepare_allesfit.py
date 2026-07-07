@@ -65,7 +65,7 @@ except Exception as e:
     command = (
         "pip install git+https://github.com/john-livingston/limbdark.git#egg=limbdark"
     )
-    raise ModuleNotFoundError(command)
+    raise ModuleNotFoundError(command) from e
 
 assert lk.__version__[0] == "2"
 
@@ -1726,7 +1726,7 @@ def main():
         # appended after the lightcurve download (below) because we need
         # the observed time series to count transits with data coverage.
         if not ttv:
-            for i, row in target_df.iterrows():
+            for i, _ in target_df.iterrows():
                 pl = planets[i]
                 text += f"#TTV companion {pl},,,,,\n"
                 # ±0.05 d = ±72 min; real TTV uncertainties for TESS-class
@@ -2099,7 +2099,7 @@ fast_fit_width,0.3333333333333333
 secondary_eclipse,False
 phase_curve,False
 shift_epoch,True\n"""
-        for i, row in target_df.iterrows():
+        for i, _ in target_df.iterrows():
             pl = planets[i]
             text2 += f"inst_for_{pl}_epoch,all\n"
             text2 += f"#inst_for_{pl}_epoch,{' '.join(fns)}\n"
@@ -2113,6 +2113,7 @@ mcmc_thin_by,2
 ###############################################################################,
 # Nested Sampling settings,
 ###############################################################################,
+ns_backend,dynesty
 ns_modus,dynamic
 ns_nlive,1000
 ns_bound,multi
@@ -2192,7 +2193,7 @@ fit_ttvs,False
 ###############################################################################,\n"""
         for inst in fns:
             text2 += f"host_grid_{inst},sparse\n"
-        for i, row in target_df.iterrows():
+        for i, _ in target_df.iterrows():
             pl = planets[i]
             for inst in fns:
                 text2 += f"#{pl}_grid_{inst},sparse\n"

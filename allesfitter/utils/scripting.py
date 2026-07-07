@@ -38,7 +38,7 @@ def get_tfop_info(target_name: str) -> dict:
         return data_json
     except Exception as e:
         print(e)
-        raise ValueError(f"No TIC data found for {target_name}")
+        raise ValueError(f"No TIC data found for {target_name}") from e
 
 
 def get_name_aliases(name, key=None):
@@ -165,7 +165,7 @@ def catalog_info_TIC(TIC_ID):
         from astroquery.mast import Catalogs
     except Exception as e:
         print(e)
-        raise ImportError("Package astroquery required but failed to import")
+        raise ImportError("Package astroquery required but failed to import") from e
 
     result = Catalogs.query_criteria(catalog="Tic", ID=TIC_ID).as_array()
     Teff = result[0][64]

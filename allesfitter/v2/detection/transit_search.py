@@ -32,7 +32,7 @@ from transitleastsquares import transit_mask, cleaned_array, catalog_info
 #::: my modules
 try:
     from exoworlds.tess import tessio
-except:
+except Exception:
     pass
 
 
@@ -61,7 +61,7 @@ def tls_search(time, flux, flux_err,                                           #
                show_plot=False, save_plot=False, outdir='',                    #mine
                R_host=1., R_host_min=0.13, R_host_max=3.5,                     #tls
                M_host=1., M_host_min=0.1, M_host_max=1.,                       #tls
-               ldc=[0.4804, 0.1867],                                           #tls
+               ldc=(0.4804, 0.1867),                                           #tls
                n_transits_min=3,                                               #tls
                **tls_kwargs):                                                  #tls
     '''
