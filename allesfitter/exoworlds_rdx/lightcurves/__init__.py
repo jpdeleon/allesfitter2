@@ -28,7 +28,11 @@ sns.set(
 sns.set_style({"xtick.direction": "in", "ytick.direction": "in"})
 sns.set_context(rc={"lines.markeredgewidth": 1})
 
-from .expand_flags import expand_flags
-from .gp_decor import gp_decor
-from .index_transits import get_first_epoch, index_eclipses, index_transits
-from .lightcurve_tools import phase_fold, rebin_err
+# NOTE: order matters — gp_decor imports names from this package's own
+# namespace (`from . import get_first_epoch, ...`), so it must be imported
+# last, after the names it needs are already bound below. Do not let an
+# import-sorter alphabetize this block.
+from .index_transits import get_first_epoch, index_eclipses, index_transits  # isort: skip
+from .lightcurve_tools import phase_fold, rebin_err  # isort: skip
+from .expand_flags import expand_flags  # isort: skip
+from .gp_decor import gp_decor  # isort: skip
