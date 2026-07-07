@@ -100,8 +100,18 @@ def _parse_segment_label(mission_str):
 
 
 def _segments_match(a, b):
-    """Tolerant segment-id equality (handles int vs str-with-suffix)."""
-    return str(a) == str(b)
+    """Tolerant segment-id equality (handles int vs str-with-suffix).
+
+    Purely-numeric ids compare by value so zero-padding is irrelevant
+    (``1`` == ``'01'``): lightkurve's search table carries zero-padded
+    strings ('01') while a downloaded ``LightCurve.sector`` is an int (1).
+    Non-numeric labels (K2 '11a'/'11b') fall back to string equality so the
+    alpha suffix is still distinguished.
+    """
+    sa, sb = str(a).strip(), str(b).strip()
+    if sa.isdigit() and sb.isdigit():
+        return int(sa) == int(sb)
+    return sa == sb
 
 
 def _natural_segment_sort_key(s):
@@ -1876,7 +1886,7 @@ fig = allesfitter.show_initial_guess(dir_path)
                 # case: sector int or list
                 _w = _segment_word(mission)
                 _w_p = _segment_word(mission, plural=True)
-                idx = [str(i) in sector for i in sectors]
+                idx = [any(_segments_match(i, s) for s in sector) for i in sectors]
                 msg = f"{pipeline.upper()} lightcurves for {_w}={sector} is not available. Try {_w}={unique_sectors}."
                 assert sum(idx) > 0, logger.error(msg)
 

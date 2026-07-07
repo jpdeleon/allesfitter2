@@ -90,6 +90,18 @@ def test_segments_match_is_string_tolerant():
     assert prep._segments_match(5, 6) is False
 
 
+def test_segments_match_is_zero_pad_tolerant():
+    # lightkurve's search table carries zero-padded strings ('01') while a
+    # downloaded LightCurve.sector is an int (1); numeric ids must compare by
+    # value so a user's "-s 1" survives both the availability and header gates.
+    assert prep._segments_match(1, "01") is True
+    assert prep._segments_match("01", "1") is True
+    assert prep._segments_match("07", 7) is True
+    # K2 campaign alpha suffixes stay distinguished (not purely numeric).
+    assert prep._segments_match("11a", "11b") is False
+    assert prep._segments_match("11a", "11") is False
+
+
 def test_natural_segment_sort_orders_numeric_then_suffix():
     labels = ["11b", "2", "11a", "1", "10"]
     ordered = sorted(labels, key=prep._natural_segment_sort_key)
