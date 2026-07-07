@@ -748,14 +748,14 @@ if __name__ == '__main__':
     
     #::: 
     t0 = timer()
-    for i in range(N):
+    for _i in range(N):
         calc_M_comp_from_RV(K = 13e-3,P = 12*365, incl = 90 ,ecc = 0, M_host = 1, return_unit = u.Mjup, approx=False)
     t1 = timer()
     dt12 = (t1-t0)/N
     print('Runtime with floats:', dt12*1e3, 'ms')
     
     t3 = timer()
-    for i in range(N):
+    for _i in range(N):
         calc_M_comp_from_RV_astropy(K = 13e-3,P = 12*365, incl = 90 ,ecc = 0, M_host = 1, return_unit = u.Mjup, approx=False)
     t4 = timer()
     dt34 = (t4-t3)/N
@@ -814,14 +814,14 @@ if __name__ == '__main__':
     
     #::: 
     t0 = timer()
-    for i in range(N):
+    for _i in range(N):
         P_to_a(1,1,1)
     t1 = timer()
     dt12 = (t1-t0)/N
     print('P_to_a: Runtime with floats:', dt12*1e3, 'ms')
     
     t3 = timer()
-    for i in range(N):
+    for _i in range(N):
         P_to_a(1,1,1)
     t4 = timer()
     dt34 = (t4-t3)/N

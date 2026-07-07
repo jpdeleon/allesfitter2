@@ -31,7 +31,7 @@ try:
     import allesfitter  # noqa: F401
     from allesfitter import config, optimize
     from allesfitter.optimize import (
-        OptimizeResult, _extract_bounds, _on_bounds, _objective,
+        OptimizeResult, _extract_bounds, _on_bounds, _objective, logprint,
     )
     from allesfitter.mcmc import mcmc_lnprob
 except Exception:
@@ -358,6 +358,73 @@ def test_typo_kwarg_actionable(tmp_path):
         assert bad in msg, msg
         assert expected in msg, (bad, msg)
         assert "did you mean" in msg.lower()
+
+
+# ---------------------------------------------------------------------------
+# 10) logprint mirrors output into the run's timestamped logfile
+# ---------------------------------------------------------------------------
+
+
+def _logfile_path(datadir) -> Path:
+    b = config.BASEMENT
+    return Path(b.outdir) / ("logfile_" + b.now + ".log")
+
+
+def test_logprint_writes_to_logfile_and_console(datadir, capsys):
+    logprint("hello", "optimize")
+    captured = capsys.readouterr()
+    assert "hello optimize" in captured.out
+    logf = _logfile_path(datadir)
+    assert logf.exists()
+    assert "hello optimize" in logf.read_text()
+
+
+def test_logprint_quiet_suppresses_console_but_logs_to_file(datadir, capsys):
+    logprint("quiet-line", quiet=True)
+    captured = capsys.readouterr()
+    assert "quiet-line" not in captured.out
+    logf = _logfile_path(datadir)
+    assert logf.exists()
+    assert "quiet-line" in logf.read_text()
+
+
+def test_logprint_without_basement_is_noop(monkeypatch, capsys):
+    monkeypatch.setattr(config, "BASEMENT", None, raising=False)
+    # Must not raise even though there is no BASEMENT to resolve a logfile.
+    logprint("orphan", quiet=True)
+    assert "orphan" not in capsys.readouterr().out
+
+
+def test_optimize_summary_lands_in_logfile(datadir):
+    optimize(str(datadir), method='L-BFGS-B', refine=False, n_restarts=1,
+             save=False, quiet=True, improvement_threshold=0.0,
+             skip_bounds_check=True)
+    logf = _logfile_path(datadir)
+    assert logf.exists()
+    assert "optimize[L-BFGS-B]" in logf.read_text()
+
+
+def test_optimize_logs_start_and_per_restart_progress(datadir):
+    optimize(str(datadir), method='L-BFGS-B', refine=False, n_restarts=2,
+             save=False, quiet=True, improvement_threshold=0.0,
+             consistency_threshold=1e30, skip_bounds_check=True)
+    text = _logfile_path(datadir).read_text()
+    # start marker
+    assert "starting: ndim=" in text
+    # one progress line per restart
+    assert "restart 1/2:" in text
+    assert "restart 2/2:" in text
+
+
+def test_optimize_verbose_accepted_for_cmaes(datadir):
+    pytest.importorskip("cma")
+    # verbose=True must be a valid kwarg and not raise; it streams the cma
+    # table to stdout but the run result is unaffected.
+    res = optimize(str(datadir), method='cmaes', refine=False, n_restarts=1,
+                   save=False, quiet=True, verbose=True,
+                   improvement_threshold=0.0, skip_bounds_check=True,
+                   maxfevals=120, seed=13)
+    assert res.success
 
 
 def test_cmaes_missing_dependency_raises_clear_error(datadir, monkeypatch):

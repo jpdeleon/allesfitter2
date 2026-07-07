@@ -66,7 +66,7 @@ def plot_histograms(datadirs, titles, keys, options=None):
     all_paramslabels = {}
     for datadir, title in zip(datadirs, titles):
         try: all_params[title] = get_mcmc_posterior_samples(datadir, as_type='dic')
-        except: all_params[title] = get_ns_posterior_samples(datadir, as_type='dic')
+        except Exception: all_params[title] = get_ns_posterior_samples(datadir, as_type='dic')
         all_paramslabels[title] = get_labels(datadir, as_type='dic')
         
     if options['epoch_median']:
@@ -86,7 +86,7 @@ def plot_histograms(datadirs, titles, keys, options=None):
     
     if options['layout'] == '1x1':
         fig_list, ax_list = [], []
-        for i, key in enumerate(keys):
+        for _, key in enumerate(keys):
             fig, ax = plt.subplots()
             # for alles, title in zip(alles_list, titles):
                 # plot1(alles.posterior_params[key], ax, options['type'], label=title)

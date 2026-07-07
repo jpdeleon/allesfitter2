@@ -32,7 +32,7 @@ from glob import glob
 from pprint import pprint
 try: 
     from brokenaxes import brokenaxes
-except: 
+except Exception: 
     pass #don't throw an error for now, otherwise people will panic
 import pathlib
 from astropy.time import Time
@@ -237,7 +237,7 @@ def chunkplot(time, y, yerr=None, chunk_size=30., clip=False, sharey=False, axes
             _set_axes(ax1, time, y, labels={'show_x': (i==N-1)})    
         
     #::: iterate over all existing, set-up axes and plot
-    for i, ax1 in enumerate(np.atleast_1d(axes)):
+    for _, ax1 in enumerate(np.atleast_1d(axes)):
         
         #::: check if there is data to be plotted on this axis
         ind = np.where( (time > ax1.get_xlim()[0]) & (time <= ax1.get_xlim()[1]) )[0]
@@ -332,7 +332,7 @@ def monthplot(time, y, yerr=None, clip=False, sharey=False, axes=None, **kwargs)
             _set_axes(ax1, time, y, labels={'show_x': (i==N-1)})    
         
     #::: iterate over all existing, set-up axes and plot
-    for i, ax1 in enumerate(np.atleast_1d(axes)):
+    for _, ax1 in enumerate(np.atleast_1d(axes)):
         
         #::: check if there is data to be plotted on this axis
         ind = np.where( (time > ax1.get_xlim()[0]) & (time <= ax1.get_xlim()[1]) )[0]
@@ -447,7 +447,7 @@ def tessplot(time, y, yerr=None, clip=False, sharey=False, axes=None, **kwargs):
             _set_axes(ax1, time, y, labels={'show_x': (i==N-1)})    
         
     #::: iterate over all existing, set-up axes and plot
-    for i, ax1 in enumerate(np.atleast_1d(axes)):
+    for _, ax1 in enumerate(np.atleast_1d(axes)):
         
         #::: check if there is data to be plotted on this axis
         ind = np.where( (time > ax1.get_xlim()[0]) & (time <= ax1.get_xlim()[1]) )[0]
@@ -580,7 +580,7 @@ def _guess_xlabels(time):
     
 
 
-def _set_axes(ax, time, y, labels={}):
+def _set_axes(ax, time, y, labels=None):
     '''
     Sets the axes ticks and labels automatically.
     '''
@@ -614,7 +614,7 @@ def _set_axes(ax, time, y, labels={}):
   
         
   
-def _set_brokenaxes(bax, time, y, labels={}):
+def _set_brokenaxes(bax, time, y, labels=None):
     '''
     Sets the axes ticks and labels automatically.
     '''
@@ -667,7 +667,7 @@ def _get_errorbar_color(color):
     try:
         rgb = ColorConverter.to_rgb(color)
         return _scale_lightness(rgb, 1.75)
-    except:
+    except Exception:
         return None
 
 

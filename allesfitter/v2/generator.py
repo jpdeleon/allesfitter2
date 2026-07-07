@@ -234,7 +234,7 @@ def make_rv_model(time,
                   ecc=0,
                   omega=0,
                   dil=0,
-                  ldc=[0.4804, 0.1867],
+                  ldc=(0.4804, 0.1867),
                   ld='quad',
                   show_plot=False, save_plot=False, save_csv=False,
                   fname_plot='rv.pdf', fname_csv='rv.csv'):
@@ -284,7 +284,7 @@ def make_rv_model(time,
     if rv is None: rv = np.zeros_like(time)
     if rv_err is None: rv_err = np.zeros_like(time)
         
-    params = translate(quiet=True, R_companion=R_companion, M_companion=M_companion, R_companion_unit=R_companion_unit, M_companion_unit=M_companion_unit, R_host=R_host, M_host=M_host, epoch=epoch, period=period, incl=incl, ecc=ecc, omega=omega, ldc=ldc, ld=ld)   
+    params = translator.translate(quiet=True, R_companion=R_companion, M_companion=M_companion, R_companion_unit=R_companion_unit, M_companion_unit=M_companion_unit, R_host=R_host, M_host=M_host, epoch=epoch, period=period, incl=incl, ecc=ecc, omega=omega, ldc=ldc, ld=ld)
     def ellc_rv_short(time): 
         return ellc.rv(t_obs=time, radius_1=params['R_host/a'], radius_2=params['R_companion/a'], sbratio=sbratio, incl=params['incl'], t_zero=epoch, period=params['period'], a=params['a'], q=1, f_c=params['f_c'], f_s=params['f_s'], ldc_1=ldc, ldc_2=None, gdc_1=None, gdc_2=None, didt=None, domdt=None, rotfac_1=1, rotfac_2=1, hf_1=1.5, hf_2=1.5, bfac_1=None, bfac_2=None, heat_1=None, heat_2=None, lambda_1=None, lambda_2=None, vsini_1=None, vsini_2=None, t_exp=None, n_int=None,  grid_1='default', grid_2='default', ld_1=ld, ld_2=None, shape_1='sphere', shape_2='sphere', spots_1=None, spots_2=None, verbose=1)[0]
     

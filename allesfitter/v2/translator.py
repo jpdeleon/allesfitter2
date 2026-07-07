@@ -53,7 +53,7 @@ def translate_alles_to_ellc(params, settings):
     for companion in companions_all:
         try:
             params2[companion+'_incl'] = np.arccos( params2[companion+'_cosi'] )/np.pi*180.
-        except:
+        except Exception:
             params2[companion+'_incl'] = None
         
        
@@ -73,7 +73,7 @@ def translate_alles_to_ellc(params, settings):
             try:
                 params2[companion+'_radius_1'] = params2[companion+'_rsuma'] / (1. + params2[rr_key])
                 params2[companion+'_radius_2'] = params2[companion+'_radius_1'] * params2[rr_key]
-            except:
+            except Exception:
                 params2[companion+'_radius_1'] = None
                 params2[companion+'_radius_2'] = None
             
@@ -213,7 +213,7 @@ def translate(params=None, settings=None, quiet=False, **params_kwargs):
             R_companion_with_unit = params2['r_companion_jup']*u.Rjup
         elif 'r_companion_sun' in params2:
             R_companion_with_unit = params2['r_companion_sun']*u.Rsun
-    except:
+    except Exception:
         pass
         
         
@@ -227,7 +227,7 @@ def translate(params=None, settings=None, quiet=False, **params_kwargs):
             M_companion_with_unit = params2['m_companion_jup']*u.Mjup
         elif 'm_companion_sun' in params2:
             M_companion_with_unit = params2['m_companion_sun']*u.Msun
-    except:
+    except Exception:
         pass
     
         
@@ -303,93 +303,93 @@ def translate(params=None, settings=None, quiet=False, **params_kwargs):
     #::: translate
     #==========================================================================
     try: set_('r_companion_earth', params2['rr'] * (params2['r_host']*u.Rsun).to(u.Rearth).value)
-    except: pass
+    except Exception: pass
     try: set_('r_companion_earth', (params2['r_companion_jup']*u.Rjup).to(u.Rearth).value)
-    except: pass
+    except Exception: pass
     try: set_('r_companion_earth', (params2['r_companion_sun']*u.Rsun).to(u.Rearth).value)
-    except: pass
+    except Exception: pass
     
     try: set_('r_companion_jup', params2['rr'] * (params2['r_host']*u.Rsun).to(u.Rjup).value)
-    except: pass
+    except Exception: pass
     try: set_('r_companion_jup', (params2['r_companion_earth']*u.Rearth).to(u.Rjup).value)
-    except: pass
+    except Exception: pass
     try: set_('r_companion_jup', (params2['r_companion_sun']*u.Rsun).to(u.Rjup).value)
-    except: pass
+    except Exception: pass
     
     try: set_('r_companion_sun', params2['rr'] * (params2['r_host']*u.Rsun).to(u.Rsun).value)
-    except: pass
+    except Exception: pass
     try: set_('r_companion_sun', (params2['r_companion_earth']*u.Rearth).to(u.Rsun).value)
-    except: pass
+    except Exception: pass
     try: set_('r_companion_sun', (params2['r_companion_jup']*u.Rjup).to(u.Rsun).value)
-    except: pass
+    except Exception: pass
 
     try: set_('m_companion_earth', (params2['m_companion_jup']*u.Mjup).to(u.Mearth).value)
-    except: pass
+    except Exception: pass
     try: set_('m_companion_earth', (params2['m_companion_sun']*u.Msun).to(u.Mearth).value)
-    except: pass
+    except Exception: pass
     
     try: set_('m_companion_jup', (params2['m_companion_earth']*u.Mearth).to(u.Mjup).value)
-    except: pass
+    except Exception: pass
     try: set_('m_companion_jup', (params2['m_companion_sun']*u.Msun).to(u.Mjup).value)
-    except: pass
+    except Exception: pass
     
     try: set_('m_companion_sun', (params2['m_companion_earth']*u.Mearth).to(u.Msun).value)
-    except: pass
+    except Exception: pass
     try: set_('m_companion_sun', (params2['m_companion_jup']*u.Mjup).to(u.Msun).value)
-    except: pass
+    except Exception: pass
         
     try: set_('a', ( (G/(4*np.pi**2) * (params2['period']*u.d)**2 * (params2['m_host']*u.Msun + M_companion_with_unit))**(1./3.) ).to(u.AU).value)  #in AU 
-    except: pass
+    except Exception: pass
 
     try: set_('incl', np.rad2deg(np.arccos(params2['cosi']))) #in deg
-    except: pass
+    except Exception: pass
     try: set_('cosi', np.cos(np.deg2rad(params2['incl'])))
-    except: pass
+    except Exception: pass
     
     try: set_('ecc', params2['f_c']**2 + params2['f_s']**2) #in deg
-    except: pass
+    except Exception: pass
     try: set_('omega', np.rad2deg(np.mod( np.arctan2(params2['f_s'], params2['f_c']), 2*np.pi))) #in deg from 0 to 360
-    except: pass
+    except Exception: pass
     try: set_('f_c', np.sqrt(params2['ecc']) * np.cos(np.deg2rad(params2['omega'])))
-    except: pass
+    except Exception: pass
     try: set_('f_s', np.sqrt(params2['ecc']) * np.sin(np.deg2rad(params2['omega'])))
-    except: pass
+    except Exception: pass
     
     try: set_('r_host_over_a', ((params2['r_host']*u.Rsun) / (params2['a']*u.AU)).decompose().value)
-    except: pass
+    except Exception: pass
     try: set_('r_host_over_a', params2['rsuma'] / (1. + params2['rr']))
-    except: pass
+    except Exception: pass
     try: set_('r_host_over_a', 1./params2['a_over_R_host'])
-    except: pass
+    except Exception: pass
 
 
     if params2['a_over_R_host'] is None:
         try: params2['a_over_R_host'] = ((params2['a']*u.AU) / (params2['r_host']*u.Rsun)).decompose().value
-        except: pass
+        except Exception: pass
 
     if params2['a_over_R_host'] is None:
         try: params2['a_over_R_host'] = 1./params2['r_host_over_a']
-        except: pass
+        except Exception: pass
 
     if params2['r_companion_over_a'] is None:
         try: params2['r_companion_over_a'] = (R_companion_with_unit / (params2['a']*u.AU)).decompose().value
-        except: pass
+        except Exception: pass
 
     if params2['r_companion_over_a'] is None:
         try: params2['r_companion_over_a'] = params2['rr'] / params2['a_over_R_host']
-        except: pass
+        except Exception: pass
     
     if params2['rr'] is None:
         try: params2['rr'] = (R_companion_with_unit / (params2['r_host']*u.Rsun)).decompose().value
-        except: pass
+        except Exception: pass
     
     if params2['rsuma'] is None:
         try: params2['rsuma'] = ((params2['r_host']*u.Rsun + R_companion_with_unit) / (params2['a']*u.AU)).decompose().value
-        except: pass
+        except Exception: pass
     
     if params2['rsuma'] is None:
         try: params2['rsuma'] = params2['r_host_over_a'] + params2['r_companion_over_a']
-        except: pass
+        except Exception: pass
     
     if params2['ldc_transformed'] is None:
         try:
@@ -397,7 +397,7 @@ def translate(params=None, settings=None, quiet=False, **params_kwargs):
                 q1 = (params2['ldc'][0] + params2['ldc'][1])**2
                 q2 = 0.5 * params2['ldc'][0] / (params2['ldc'][0] + params2['ldc'][1])
                 params2['ldc_transformed'] = [q1, q2]
-        except:
+        except Exception:
             pass
         
     #more TBD

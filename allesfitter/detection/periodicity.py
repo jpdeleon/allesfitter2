@@ -231,7 +231,7 @@ def estimate_period_old(time, y, y_err, periodogram_kwargs=None, astropy_kwargs=
     #::: fast slide clip (1 day, 5 sigma) [replaces Wotan's slow slide clip]
     #==========================================================================
     try: ff = slide_clip(time, ff, **wotan_kwargs['slide_clip'])
-    except: print('Fast slide clip failed and was skipped.')     
+    except Exception: print('Fast slide clip failed and was skipped.')     
     
     
     #==========================================================================

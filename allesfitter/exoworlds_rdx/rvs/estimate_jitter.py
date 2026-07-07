@@ -52,7 +52,7 @@ def log_probability(params):
     try:
         ll = log_likelihood(params)
         lp = external_log_prior(params)
-    except:
+    except Exception:
         return -np.inf
     if not np.isfinite(lp):
         return -np.inf
@@ -274,7 +274,7 @@ def estimate_jitter(x,y,white_noise,
     #::: Save the resulting parameters in a table
     with open( os.path.join(outdir,fname+'table.csv'), 'wb' ) as f:
         f.write('name,median,ll,ul\n')
-        for i, key in enumerate(names):
+        for key in names:
             f.write(key + ',' + str(params[key]) + ',' + str(params_ll[key]) + ',' + str(params_ul[key]) + '\n' )
     
     

@@ -121,12 +121,12 @@ class allesclass():
         
         try:
             self.params_star = config.BASEMENT.params_star
-        except:
+        except Exception:
             pass
         
         try:
             self.external_priors = config.BASEMENT.external_priors
-        except:
+        except Exception:
             pass
         
         print('working')

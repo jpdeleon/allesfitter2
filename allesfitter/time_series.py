@@ -80,10 +80,10 @@ def clean(time, y, y_err=None):
     """
     try:
         time = time.value
-        flux = flux.value
-        if y_err is not None: 
+        y = y.value
+        if y_err is not None:
             y_err = y_err.value
-    except:
+    except Exception:
         pass
     time = np.ma.array(time)
     y = np.ma.array(y)

@@ -35,7 +35,7 @@ import warnings
 try:
     import rebound
     from rebound.particle import Particle
-except:
+except Exception:
     warnings.warn('Module "rebound" could not be imported. Orbital plots are not available.')
 from itertools import cycle
 
@@ -47,7 +47,7 @@ from allesfitter.exoworlds_rdx.lightcurves.lightcurve_tools import calc_phase
 
 
 
-def OrbitPlot(sim, figsize=None, lim=None, limz=None, Narc=100, xlabel='x', ylabel='y', zlabel='z', color=False, periastron=False, trails=True, show_orbit=True, lw=1., glow=False, slices=False, plotparticles=[], primary=None, fancy=False, ax=None):
+def OrbitPlot(sim, figsize=None, lim=None, limz=None, Narc=100, xlabel='x', ylabel='y', zlabel='z', color=False, periastron=False, trails=True, show_orbit=True, lw=1., glow=False, slices=False, plotparticles=(), primary=None, fancy=False, ax=None):
     """
     Convenience function for plotting instantaneous orbits.
 
@@ -205,7 +205,7 @@ def fading_line(x, y, color='black', alpha_initial=1., alpha_final=0., glow=Fals
 
 
 
-def OrbitPlotOneSlice(sim, ax, lim=None, limz=None, Narc=100, color=False, periastron=False, trails=False, show_orbit=True, lw=1., axes="xy", plotparticles=[], primary=None, glow=False, fancy=False):
+def OrbitPlotOneSlice(sim, ax, lim=None, limz=None, Narc=100, color=False, periastron=False, trails=False, show_orbit=True, lw=1., axes="xy", plotparticles=(), primary=None, glow=False, fancy=False):
     p_orb_pairs = []
     if not plotparticles:
         plotparticles = range(1, sim.N_real)
@@ -215,7 +215,7 @@ def OrbitPlotOneSlice(sim, ax, lim=None, limz=None, Narc=100, color=False, peria
 
     if lim is None:
         lim = 0.
-        for p, o in p_orb_pairs: 
+        for _, o in p_orb_pairs:
             if o.a>0.:
                 r = (1.+o.e)*o.a
             else:
@@ -271,7 +271,7 @@ def OrbitPlotOneSlice(sim, ax, lim=None, limz=None, Narc=100, color=False, peria
         sun = (256./256.,256./256.,190./256.)
         opa = 0.020
         size = 6000.
-        for i in range(256):
+        for _ in range(256):
             ax.scatter(getattr(prim,axes[0]),getattr(prim,axes[1]), alpha=opa, s=size*lw, facecolor=sun, edgecolor=None, zorder=3)
             size *= 0.95
         
@@ -281,7 +281,7 @@ def OrbitPlotOneSlice(sim, ax, lim=None, limz=None, Narc=100, color=False, peria
         random.seed(1) #always same stars
         x, y = [], []
         #small stars
-        for i in range(64):
+        for _ in range(64):
             x.append(random.uniform(mi,ma))
             y.append(random.uniform(mi,ma))
         ax.scatter(x,y, alpha=0.05, s=8*lw, facecolor=starcolor, edgecolor=None, zorder=3)
@@ -289,7 +289,7 @@ def OrbitPlotOneSlice(sim, ax, lim=None, limz=None, Narc=100, color=False, peria
         ax.scatter(x,y, alpha=0.2, s=0.5*lw, facecolor=starcolor, edgecolor=None, zorder=3)
         #medium stars
         x, y = [], []
-        for i in range(16):
+        for _ in range(16):
             x.append(random.uniform(mi,ma))
             y.append(random.uniform(mi,ma))
         ax.scatter(x,y, alpha=0.1, s=15*lw, facecolor=starcolor, edgecolor=None, zorder=3)
@@ -360,8 +360,10 @@ def OrbitPlotOneSlice(sim, ax, lim=None, limz=None, Narc=100, color=False, peria
 
 
 
-def plot_top_down_view(params_median, params_star, a=None, timestep=None, scaling=5., colors=sns.color_palette('deep'), linewidth=2, plot_arrow=False, ax=None):
-    
+def plot_top_down_view(params_median, params_star, a=None, timestep=None, scaling=5., colors=None, linewidth=2, plot_arrow=False, ax=None):
+    if colors is None:
+        colors = sns.color_palette('deep')
+
     sim = rebound.Simulation()
     sim.add(m=1)
     

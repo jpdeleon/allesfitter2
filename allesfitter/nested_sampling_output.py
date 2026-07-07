@@ -30,7 +30,7 @@ import os
 import gzip
 try:
    import cPickle as pickle
-except:
+except Exception:
    import pickle
 from copy import deepcopy
 from dynesty import utils as dyutils
@@ -645,7 +645,7 @@ def ns_output(datadir, backend=None, overwrite=None):
     
     #::: make pretty titles for the plots  
     labels, units = [], []
-    for i,l in enumerate(config.BASEMENT.fitlabels):
+    for i,_l in enumerate(config.BASEMENT.fitlabels):
         labels.append( str(config.BASEMENT.fitlabels[i]) )
         units.append( str(config.BASEMENT.fitunits[i]) )
         
@@ -662,7 +662,7 @@ def ns_output(datadir, backend=None, overwrite=None):
             params_median2[companion+'_epoch'] -= int(params_median[companion+'_epoch'])
                 
 
-    for i,l in enumerate(labels):
+    for i,_l in enumerate(labels):
         if len( units[i].strip(' ') ) > 0:
             labels[i] = str(labels[i]+' ('+units[i]+')')
         

@@ -47,7 +47,7 @@ except ImportError:
 #::: my modules
 try:
     from exoworlds.tess import tessio
-except:
+except Exception:
     pass
 from ..exoworlds_rdx.lightcurves.lightcurve_tools import plot_phase_folded_lightcurve, rebin_err  
 from ..time_series import clean, slide_clip
@@ -969,7 +969,7 @@ def tls_search_tess(time, flux, flux_err,
 #                 pdf.savefig( fig2 )
 #                 pdf.savefig( fig3 )
 #             #     fig.savefig(os.path.join(options['outdir'],'flux_'+wotan_kwargs['flatten']['method']+'.pdf'), bbox_inches='tight') #some matplotlib versions crash when saving pdf...
-#             # except: 
+#             # except Exception: 
 #             #     fig.savefig(os.path.join(options['outdir'],'flux_'+wotan_kwargs['flatten']['method']+'.jpg'), bbox_inches='tight') #some matplotlib versions need pillow for jpg (conda install pillow)...
         
 #         if ('1' in options['show_plot']):
@@ -1079,7 +1079,7 @@ def tls_search_tess(time, flux, flux_err,
 #                 ax.set_axis_off()
 #                 if ('2' in options['save_plot']):
 #                     try: fig.savefig(os.path.join(options['outdir'],'tls_signal_'+str(i)+'.pdf'), bbox_inches='tight') #some matplotlib versions crash when saving pdf...
-#                     except: fig.savefig(os.path.join(options['outdir'],'tls_signal_'+str(i)+'.jpg'), bbox_inches='tight') #some matplotlib versions need pillow for jpg (conda install pillow)...
+#                     except Exception: fig.savefig(os.path.join(options['outdir'],'tls_signal_'+str(i)+'.jpg'), bbox_inches='tight') #some matplotlib versions need pillow for jpg (conda install pillow)...
 #                 if ('2' in options['show_plot']):
 #                     plt.show(fig)
 #                 else:
@@ -1127,7 +1127,7 @@ def tls_search_tess(time, flux, flux_err,
         
 #         if ('3' in options['save_plot']):
 #             try: fig.savefig(os.path.join(options['outdir'],'tls_signal_all.pdf'), bbox_inches='tight') #some matplotlib versions crash when saving pdf...
-#             except: fig.savefig(os.path.join(options['outdir'],'tls_signal_all.jpg'), bbox_inches='tight') #some matplotlib versions need pillow for jpg (conda install pillow)...
+#             except Exception: fig.savefig(os.path.join(options['outdir'],'tls_signal_all.jpg'), bbox_inches='tight') #some matplotlib versions need pillow for jpg (conda install pillow)...
 #         if ('3' in options['show_plot']):
 #             plt.show(fig)
 #         else:

@@ -55,7 +55,7 @@ def index_transits(time, epoch, period, width):
         tmid = np.array( [ epoch + i * period for i in range(N) ] )
         _, ind_tr, mask_tr = mask_ranges( time, tmid - width/2., tmid + width/2. )
         ind_out = np.arange( len(time) )[ ~mask_tr ]
-    except:
+    except Exception:
         ind_tr, ind_out = slice(0), slice(None)
 
     return ind_tr, ind_out 

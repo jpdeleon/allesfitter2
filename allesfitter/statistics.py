@@ -254,7 +254,7 @@ def residual_stats(residuals):
     passed_durbin = alles_durbin(residuals)
     try:
         passed_ljung = alles_ljung(residuals)
-    except:
+    except Exception:
         logprint('Ljung-Box Test crashed.')
         passed_ljung = '(crashed)'
     logprint('Summary')

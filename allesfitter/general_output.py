@@ -589,7 +589,7 @@ def guesstimator(params_median, companion, base=None, inst=None):
     
         return zoomwindow, y_zoomwindow, phase_shift #in h; in phase units
 
-    except:
+    except Exception:
         return 8., [0.98,1.02], 0. #in h; in rel. flux; in phase units
 
 
@@ -1034,7 +1034,7 @@ def plot_1(ax, samples, inst, companion, style,
                 # y1 = np.nanmax(buf)+0.1*nanptp(buf)
                 # if y1>y0: ax.set(ylim=[y0,y1])
                 ax.set(ylim=y_zoomwindow)
-            except:
+            except Exception:
                 pass
             
         if style in ['phasezoom_occ']:
@@ -1044,7 +1044,7 @@ def plot_1(ax, samples, inst, companion, style,
                 y0 = np.nanmin(buf)-0.1*nanptp(buf)
                 y1 = np.nanmax(buf)+0.1*nanptp(buf)
                 if y1>y0: ax.set(ylim=[y0,y1])
-            except:
+            except Exception:
                 pass
                 # ax.axis('off')
                 # ax.set( ylim=[0.999,1.0005] )
@@ -1056,7 +1056,7 @@ def plot_1(ax, samples, inst, companion, style,
                 y0 = np.min(phase_curve_no_dips)-0.1*np.ptp(phase_curve_no_dips)
                 y1 = np.max(phase_curve_no_dips)+0.1*np.ptp(phase_curve_no_dips)
                 if y1>y0: ax.set(ylim=[y0,y1])
-            except:
+            except Exception:
                 pass
                 # ax.axis('off')
                 # ax.set( ylim=[0.999,1.001] )
@@ -1525,7 +1525,7 @@ def logprint_initial_guess():
 
     logprint('\nParameters:')
     logprint('--------------------------')    
-    for i, key in enumerate(config.BASEMENT.params):
+    for _i, key in enumerate(config.BASEMENT.params):
         if key in config.BASEMENT.fitkeys: 
             ind = np.where( config.BASEMENT.fitkeys == key )[0][0]
             logprint('{0: <30}'.format(key), '{0: <15}'.format(str(config.BASEMENT.params[key])), '{0: <5}'.format('free'), '{0: <30}'.format(str(config.BASEMENT.bounds[ind])) )

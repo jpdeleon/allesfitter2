@@ -438,7 +438,8 @@ class TestNestedSamplingIntegration:
         """Test that NS results can be loaded."""
         import gzip
         import pickle
-        
+        import allesfitter
+
         monkeypatch.chdir(setup_test_datadir)
         
         allesfitter.ns_fit(setup_test_datadir)

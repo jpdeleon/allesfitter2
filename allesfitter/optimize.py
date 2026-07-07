@@ -22,6 +22,7 @@ from __future__ import print_function, division, absolute_import
 import json
 import os
 import pickle
+import sys
 import warnings
 from dataclasses import dataclass, field, asdict
 from time import time as _now
@@ -35,6 +36,37 @@ _CMA_STATE_FILENAME = 'optimize_cma_state.pkl'
 
 from . import config
 from .mcmc import mcmc_lnprob
+
+
+###############################################################################
+#::: print function that prints into console and logfile at the same time
+###############################################################################
+def logprint(*text: Any, quiet: bool = False) -> None:
+    """Print to console and append to the run's timestamped logfile.
+
+    Mirrors ``general_output.logprint`` so that ``optimize()`` output is
+    recorded in the same ``logfile_<now>.log`` as the sampler runs. The
+    console echo is suppressed when ``quiet=True``; the logfile is written
+    regardless (best-effort — silently skipped if BASEMENT or the output
+    directory is unavailable).
+    """
+    if not quiet:
+        print(*text)
+    b = getattr(config, 'BASEMENT', None)
+    if b is None:
+        return
+    original = sys.stdout
+    try:
+        logpath = os.path.join(b.outdir, 'logfile_' + b.now + '.log')
+        with open(logpath, 'a') as f:
+            sys.stdout = f
+            print(*text)
+    except OSError:
+        # Some Windows versions choke on the open()/os.path.join() combo;
+        # also covers a missing/unwritable outdir.
+        pass
+    finally:
+        sys.stdout = original
 
 
 # Methods that scipy.optimize.minimize accepts a `bounds` keyword for.
@@ -295,6 +327,7 @@ def optimize(
     skip_bounds_check: bool = False,
     workers: int = 1,
     quiet: bool = False,
+    verbose: bool = False,
     resume: bool = False,
     **_extra_kwargs,
 ) -> OptimizeResult:
@@ -338,7 +371,13 @@ def optimize(
         Parallel-process workers (currently honoured by
         ``differential_evolution`` only).
     quiet : bool
-        Suppress the one-line summary print at the end.
+        Suppress the console echo of the progress / summary lines. The
+        run logfile (``<outdir>/logfile_<now>.log``) is still written.
+    verbose : bool
+        CMA-ES only. Stream the ``cma`` library's own per-generation
+        convergence table to the console (off by default — the
+        start/per-restart/summary ``logprint`` lines give progress
+        without the full table). Independent of ``quiet``.
     resume : bool
         CMA-ES only. When True, load the pickled strategy state from
         ``<outdir>/optimize_cma_state.pkl`` (saved by a previous call) and
@@ -356,7 +395,7 @@ def optimize(
             'datadir', 'method', 'refine', 'n_restarts', 'sigma0', 'maxfevals',
             'seed', 'save', 'mutate_basement', 'improvement_threshold',
             'consistency_threshold', 'skip_bounds_check', 'workers', 'quiet',
-            'resume',
+            'verbose', 'resume',
         ])
         _bits = []
         for _bad in sorted(_extra_kwargs):
@@ -428,6 +467,12 @@ def optimize(
 
     # Dispatch + per-restart accumulation.
     t0 = _now()
+    logprint(
+        "optimize[{}]  starting: ndim={}  n_restarts={}  maxfevals={}  "
+        "lnprob_initial={:.2f}".format(
+            method, b.ndim, n_restarts,
+            maxfevals if maxfevals is not None else 'default', lnp_0),
+        quiet=quiet)
     restart_results = []
     total_nfev = 0
     any_success = False
@@ -450,7 +495,7 @@ def optimize(
                             else None)
             x_r, nfev_r, ok_r, _resumed = _run_cmaes(
                 x0, bounds, sigma0=sigma0, maxfevals=maxfevals,
-                seed=seed + r, resume_path=_resume_path,
+                seed=seed + r, verbose=verbose, resume_path=_resume_path,
                 save_path=cma_state_path)
             resumed_from_pickle = resumed_from_pickle or _resumed
         else:
@@ -468,6 +513,10 @@ def optimize(
         lnp_r = float(mcmc_lnprob(x_r))
         restart_results.append((x_r, lnp_r))
         total_nfev += nfev_r
+        logprint(
+            "optimize[{}]  restart {}/{}: lnprob={:.2f}  nfev={}  "
+            "ok={}".format(method, r + 1, len(x0_list), lnp_r, nfev_r, ok_r),
+            quiet=quiet)
 
     # Best across restarts.
     restart_lnprobs = [lp for _, lp in restart_results]
@@ -525,12 +574,12 @@ def optimize(
         with open(os.path.join(outdir, 'optimize_save.json'), 'w') as f:
             json.dump(asdict(result), f, indent=2)
 
-    if not quiet:
-        status = "accepted" if accepted else "rejected ({})".format(reject)
-        print(
-            "optimize[{}]  lnprob: {:.2f} -> {:.2f}  (Δ={:+.2f})  "
-            "nfev={}  {:.1f}s  [{}]".format(
-                method, lnp_0, lnp_best, delta,
-                total_nfev, wallclock, status))
+    status = "accepted" if accepted else "rejected ({})".format(reject)
+    logprint(
+        "optimize[{}]  lnprob: {:.2f} -> {:.2f}  (Δ={:+.2f})  "
+        "nfev={}  {:.1f}s  [{}]".format(
+            method, lnp_0, lnp_best, delta,
+            total_nfev, wallclock, status),
+        quiet=quiet)
 
     return result

@@ -11,50 +11,11 @@ def estimate_noise_wrap(pathdata):
     #::: run MCMC fit to estimate errors and baselines
     estimate_noise.estimate_noise(pathdata)
     
-    def fwrite_params(key, label, unit, physical_bounds):
-        if INPUT[key+'_bounds_type'].value == 'uniform':
-            bounds = 'uniform ' \
-                     + str( np.max( [physical_bounds[0], float(INPUT[key+'_median'].value)-float(INPUT[key+'_lerr'].value)] ) ) + ' ' \
-                     + str( np.min( [physical_bounds[1], float(INPUT[key+'_median'].value)+float(INPUT[key+'_uerr'].value)] ) )
-        elif INPUT[key+'_bounds_type'].value == 'uniform * 5':
-            bounds = 'uniform ' \
-                     + str( np.max( [physical_bounds[0], float(INPUT[key+'_median'].value)-5*float(INPUT[key+'_lerr'].value)] ) ) + ' ' \
-                     + str( np.min( [physical_bounds[1], float(INPUT[key+'_median'].value)+5*float(INPUT[key+'_uerr'].value)] ) )
-        elif INPUT[key+'_bounds_type'].value == 'trunc_normal':
-            bounds = 'trunc_normal ' \
-                     + str(physical_bounds[0]) + ' ' \
-                     + str(physical_bounds[1]) + ' ' \
-                     + str(INPUT[key+'_median'].value) + ' ' \
-                     + str(np.max( [ float(INPUT[key+'_lerr'].value), float(INPUT[key+'_uerr'].value) ] ))
-        elif INPUT[key+'_bounds_type'].value == 'trunc_normal * 5':
-            bounds = 'trunc_normal ' \
-                     + str(physical_bounds[0]) + ' ' \
-                     + str(physical_bounds[1]) + ' ' \
-                     + str(INPUT[key+'_median'].value) + ' ' \
-                     + str(5*np.max( [ float(INPUT[key+'_lerr'].value), float(INPUT[key+'_uerr'].value) ] ))
-        fwrite(key + ',' + str(INPUT[key+'_median'].value) + ',' + str(int(INPUT[key+'_fit'].value)) + ',' +  bounds + ',' + label + ',' + unit)
-    
-    
     def fwrite(text):
         fname_params = os.path.join(pathdata, 'params.csv')
         with open(fname_params, 'a') as f:
             f.write(text+'\\n')
     
-    
-    def get_median_and_error_strings(text_median, text_lerr, text_uerr):
-        if (text_median.value == ''):
-            median = 'NaN'
-            nan_fields = True
-        else:
-            median = text_median.value
-        if (text_lerr.value == '') or (text_uerr.value == ''):
-            err = 'NaN'
-            nan_fields = True
-        else:
-            err = str( 5.* np.max( [float(text_lerr.value), float(text_uerr.value)] ) )
-        median, err, _ = round_txt_separately( float(median), float(err), float(err) )
-        return median, err
-         
     
     def clean_up_csv(fname, N_last_rows=0):
         

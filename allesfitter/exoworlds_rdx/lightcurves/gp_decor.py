@@ -27,13 +27,13 @@ import emcee
 try:
     import celerite
     from celerite import terms
-except:
+except Exception:
     pass
 #    warnings.warn('Module "celerite" could not be imported. Some functionality might not be available.')
 try:
     import george
     from george import kernels
-except:
+except Exception:
     pass
 #    warnings.warn('Module "george" could not be imported. Some functionality might not be available.')
 import corner
@@ -110,7 +110,7 @@ def log_probability(params):
         gp = call_gp(params)
         ll = gp.log_likelihood(yy)
         lp = gp.log_prior() + external_log_prior(params)
-    except:
+    except Exception:
         return -np.inf
     if not np.isfinite(lp):
         return -np.inf

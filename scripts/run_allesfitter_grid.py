@@ -59,7 +59,7 @@ def extract_logz(run_dir: Path) -> str:
         if f.suffix.lower() not in (".log", ".txt"):
             continue
         m = None
-        for m in LOGZ_RE.finditer(f.read_text(errors="ignore")):
+        for m in LOGZ_RE.finditer(f.read_text(errors="ignore")):  # noqa: B007 - last-match idiom; m is used after the loop
             pass  # keep last match in file
         if m:
             best = f"{float(m.group(1)):.2f} +- {float(m.group(2)):.2f}"

@@ -51,13 +51,13 @@ def rebin_err(t, f, ferr=None, dt = 0.02, phasefolded=False, ferr_type='medsig',
     if sigmaclip is True:
         try:
             f = sigma_clip(f, sigma=5, iters=3)
-        except:
+        except Exception:
             pass
     
     #::: make masked values to NaNs if applicable
     try:
         f[ f.mask ] = np.nan
-    except:
+    except Exception:
         pass
     
     #::: bin
@@ -82,7 +82,7 @@ def rebin_err(t, f, ferr=None, dt = 0.02, phasefolded=False, ferr_type='medsig',
                     try:
                         freg[i] = np.nanmean(f[l])
                         freg_err[i] = np.nanstd(f[l])
-                    except: #e.g. in case of an empty or completely masked array
+                    except Exception: #e.g. in case of an empty or completely masked array
                         freg[i] = np.nan
                         freg_err[i] = np.nan
                     
@@ -124,7 +124,7 @@ def rebin_err_matrix(t, fmatrix, fmatrixerr=None, dt = 0.02, phasefolded=False, 
                 f = sigma_clip( fmatrix[ j, : ], sigma=5, iters=3 )
                 f [ f.mask ] = np.nan
                 fmatrix[ j, : ] = f
-            except:
+            except Exception:
                 pass
     
     #::: bin
@@ -227,7 +227,7 @@ def phase_fold_matrix(time, flux_matrix, P, Tprim, dt = 0.02, ferr_type='medsig'
     
     
     
-def plot_phase_folded_lightcurve(time, flux, period, epoch, ax=None, xlim=[-0.25,0.75], dt=0.02, ferr=None, ferr_type='medsig', ferr_style='sem', sigmaclip=False, normalize=True, title='', period_factor=1.):
+def plot_phase_folded_lightcurve(time, flux, period, epoch, ax=None, xlim=(-0.25,0.75), dt=0.02, ferr=None, ferr_type='medsig', ferr_style='sem', sigmaclip=False, normalize=True, title='', period_factor=1.):
     if ax is None:
         fig, ax = plt.subplots()
     else:
@@ -247,7 +247,7 @@ def plot_phase_folded_lightcurve(time, flux, period, epoch, ax=None, xlim=[-0.25
         ax.set_xlabel( 'Phase' )
         ax.set_xlim(xlim)
         try: ax.set_ylim([ np.nanmin(phaseflux-2*phaseflux_err), np.nanmax(phaseflux+2*phaseflux_err) ])
-        except: pass
+        except Exception: pass
 #        ax.axvline(0,color='k')
 #        ax.axvline(0.5,color='k')
     
@@ -265,7 +265,7 @@ def plot_phase_folded_lightcurve(time, flux, period, epoch, ax=None, xlim=[-0.25
     
 def plot_phase_folded_lightcurve_dic(ax, dic, obj_id=None, ferr_type='medsig', ferr_style='std', sigmaclip=False, period_factor=1.):
     #::: multiple objects in dic
-    if not isinstance( dic['OBJ_ID'], basestring ): 
+    if not isinstance( dic['OBJ_ID'], str ):
         ind = np.where( dic['OBJ_ID'] == obj_id )[0]
         if 'SYSREM_FLUX3_ERR' in dic: ferr =  dic['SYSREM_FLUX3_ERR'][ind]
         else: ferr = None        
@@ -289,7 +289,7 @@ def plot_binned_lightcurve(ax, time, f, ferr=np.nan, bin_time=0, show_transit_re
         bin_width = 1. * bin_time / exposure
         
         #TODO: IF TIME IS IN HOURS, TIMEGAP HAS TO BE ADJUSTED!!!!
-        time, f, ferr = binning1D_per_night(time, f, bin_width, timegap=TODO*3600, setting='median', normalize=normalize)
+        time, f, ferr = binning1D_per_night(time, f, bin_width, timegap=3600, setting='median', normalize=normalize)
         
         #or Ed's binning method (SLOW!) (bin_time required in units of hjd, i.e. here in days)
 #        time, f, ferr  = rebin_err(time, f, ferr=None, dt = bin_time/(24. * 3600.), ferr_type='medsig', ferr_style='std')
@@ -331,7 +331,7 @@ def plot_binned_lightcurve(ax, time, f, ferr=np.nan, bin_time=0, show_transit_re
 def plot_binned_lightcurve_dic(ax, dic, obj_id=None, bin_time=0, normalize=True, show_transit_regions=False, debug=False):
     
     #::: multiple objects in dic
-    if not isinstance( dic['OBJ_ID'], basestring ): 
+    if not isinstance( dic['OBJ_ID'], str ):
         ind = np.where( dic['OBJ_ID'] == obj_id )[0]
         if 'SYSREM_FLUX3_ERR' in dic: ferr =  dic['SYSREM_FLUX3_ERR'][ind]
         else: ferr = np.nan       

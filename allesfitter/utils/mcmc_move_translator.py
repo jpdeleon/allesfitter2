@@ -19,7 +19,7 @@ from __future__ import print_function, division, absolute_import
 #::: modules
 try:
     import emcee
-except:
+except Exception:
     pass
 
 
