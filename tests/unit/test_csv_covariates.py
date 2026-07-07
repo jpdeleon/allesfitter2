@@ -200,6 +200,24 @@ def test_basement_loads_covariate_axis_into_data(tmp_path):
     assert len(b.data["lco"]["covariates"]["airmass"]) == len(b.data["lco"]["time"])
 
 
+def test_stellar_var_setting_is_exact_not_instrument_suffix(tmp_path):
+    d = _build_datadir(tmp_path)
+    settings_path = d / "settings.csv"
+    settings_path.write_text(settings_path.read_text() + "stellar_var_flux_lco,sample_linear\n")
+
+    with pytest.raises(ValueError, match="stellar_var_flux_lco"):
+        Basement(str(d), quiet=True)
+
+
+def test_stellar_var_rv2_exact_setting_is_recognized(tmp_path):
+    d = _build_datadir(tmp_path)
+    settings_path = d / "settings.csv"
+    settings_path.write_text(settings_path.read_text() + "stellar_var_rv2,none\n")
+
+    b = Basement(str(d), quiet=True)
+    assert b.settings["stellar_var_rv2"] == "none"
+
+
 def test_hybrid_poly_against_airmass_matches_polyfit(tmp_path):
     """End-to-end proof that hybrid_poly_1 with _against=airmass receives
     the covariate as its abscissa and recovers a sensible linear fit."""

@@ -715,6 +715,43 @@ class Basement:
         # implicit (defaulted) vs. explicitly set in the CSV.
         self._settings_raw_keys = {r[0] for r in rows}
 
+        _bandpass_keyed_prefixes = ("host_ld_law_",)
+        _per_inst_prefixes = (
+            "host_ld_law_",
+            "host_ld_space_",
+            "host_grid_",
+            "host_shape_",
+            "host_flux_weighted_",
+            "host_rotfac_",
+            "host_hf_",
+            "host_bfac_",
+            "host_heat_",
+            "host_lambda_",
+            "host_N_spots_",
+        )
+        for _comp in ("b", "c", "d", "e", "f", "g"):
+            _per_inst_prefixes = _per_inst_prefixes + (
+                _comp + "_ld_law_",
+                _comp + "_ld_space_",
+                _comp + "_grid_",
+                _comp + "_shape_",
+                _comp + "_flux_weighted_",
+                _comp + "_N_spots_",
+            )
+        _per_inst_prefixes = _per_inst_prefixes + (
+            "baseline_flux_",
+            "baseline_rv_",
+            "baseline_rv2_",
+            "error_flux_",
+            "error_rv_",
+            "error_rv2_",
+            "t_exp_n_int_",
+            "t_exp_",
+        )
+        # Match the most specific (longest) prefix first, so that e.g.
+        # ``t_exp_n_int_<inst>`` is not mis-parsed as ``t_exp_`` + ``n_int_<inst>``.
+        _per_inst_prefixes = tuple(sorted(_per_inst_prefixes, key=len, reverse=True))
+
         #::: check for unrecognized settings keys
         valid_settings_keys = {
             "companions_phot",
@@ -778,67 +815,11 @@ class Basement:
             "baseline_share_flux",
             "baseline_share_rv",
             "baseline_share_rv2",
-        }
-        valid_settings_prefixes = [
-            "host_ld_law_",
-            "host_ld_space_",
-            "host_grid_",
-            "host_shape_",
-            "host_flux_weighted_",
-            "host_rotfac_",
-            "host_hf_",
-            "host_bfac_",
-            "host_heat_",
-            "host_lambda_",
-            "host_N_spots_",
-            "b_ld_law_",
-            "b_ld_space_",
-            "b_grid_",
-            "b_shape_",
-            "b_flux_weighted_",
-            "b_N_spots_",
-            "c_ld_law_",
-            "c_ld_space_",
-            "c_grid_",
-            "c_shape_",
-            "c_flux_weighted_",
-            "c_N_spots_",
-            "d_ld_law_",
-            "d_ld_space_",
-            "d_grid_",
-            "d_shape_",
-            "d_flux_weighted_",
-            "d_N_spots_",
-            "e_ld_law_",
-            "e_ld_space_",
-            "e_grid_",
-            "e_shape_",
-            "e_flux_weighted_",
-            "e_N_spots_",
-            "f_ld_law_",
-            "f_ld_space_",
-            "f_grid_",
-            "f_shape_",
-            "f_flux_weighted_",
-            "f_N_spots_",
-            "g_ld_law_",
-            "g_ld_space_",
-            "g_grid_",
-            "g_shape_",
-            "g_flux_weighted_",
-            "g_N_spots_",
-            "baseline_flux_",
-            "baseline_rv_",
-            "baseline_rv2_",
-            "error_flux_",
-            "error_rv_",
-            "error_rv2_",
-            "binning_",
-            "N_bumps_",
-            "t_exp_",
             "stellar_var_flux",
             "stellar_var_rv",
-        ]
+            "stellar_var_rv2",
+        }
+        valid_settings_prefixes = _per_inst_prefixes + ("binning_", "N_bumps_")
 
         #::: Every key in settings.csv is an explicit user choice. An
         #::: unrecognized key (typo or deprecated keyword) is otherwise silently
@@ -986,10 +967,6 @@ class Basement:
         #::: Other per-instrument prefixes (ld_space, companion LD, baseline,
         #::: error, t_exp, ...) are NOT resolved per-bandpass, so their suffix must
         #::: still be an instrument to avoid an accepted-but-ignored setting.
-        _bandpass_keyed_prefixes = ("host_ld_law_",)
-        #::: Match the most specific (longest) prefix first, so that e.g.
-        #::: ``t_exp_n_int_<inst>`` is not mis-parsed as ``t_exp_`` + ``n_int_<inst>``.
-        _per_inst_prefixes = tuple(sorted(_per_inst_prefixes, key=len, reverse=True))
         _orphans = []
         for _key in list(self.settings.keys()):
             if _key in ("user-given:", "automatically set:"):
