@@ -1732,7 +1732,9 @@ def calculate_lnlike_total(params):
 
                 #::: calculate errors, baseline and stellar variability
                 yerr_w = calculate_yerr_w(params, inst, key)
-                baseline = calculate_baseline(params, inst, key, model=model, yerr_w=yerr_w)
+                baseline, baseline_correction = _calculate_baseline_and_correction(
+                    params, inst, key, model, yerr_w
+                )
                 stellar_var = calculate_stellar_var(
                     params, inst, key, model=model, baseline=baseline, yerr_w=yerr_w
                 )
@@ -1747,18 +1749,7 @@ def calculate_lnlike_total(params):
                 lnlike_total += -0.5 * (
                     np.sum((residuals) ** 2 * inv_sigma2_w - np.log(inv_sigma2_w / 2.0 / np.pi))
                 )  # use np.sum to catch any nan and then set lnlike to nan
-                # Tier-2 marginal-lnlike correction: when the baseline is
-                # hybrid_linear_multi the standard chi² above evaluates at
-                # the MAP weights ŵ. Adding -½ŵᵀΛŵ - ½logdet(A) + ½logdet(Λ)
-                # promotes it to the true marginal log-likelihood
-                # (Gaussian-Gaussian closed form).
-                if (
-                    config.BASEMENT.settings["baseline_" + key + "_" + inst]
-                    == "hybrid_linear_multi"
-                ):
-                    _y_resid = config.BASEMENT.data[inst][key] - model
-                    _w_hat, _corr = _hybrid_linear_multi_solve(inst, key, _y_resid, yerr_w)
-                    lnlike_total += _corr
+                lnlike_total += baseline_correction
 
         # --------------------------------------------------------------------------
         #::: CASES 2a) and 2b)
@@ -1793,7 +1784,9 @@ def calculate_lnlike_total(params):
 
                     #::: calculate errors, baseline and stellar variability
                     yerr_w = calculate_yerr_w(params, inst, key)
-                    baseline = calculate_baseline(params, inst, key, model=model, yerr_w=yerr_w)
+                    baseline, baseline_correction = _calculate_baseline_and_correction(
+                        params, inst, key, model, yerr_w
+                    )
                     stellar_var = calculate_stellar_var(
                         params, inst, key, model=model, baseline=baseline, yerr_w=yerr_w
                     )
@@ -1810,16 +1803,7 @@ def calculate_lnlike_total(params):
                     lnlike_total += -0.5 * (
                         np.sum((residuals) ** 2 * inv_sigma2_w - np.log(inv_sigma2_w / 2.0 / np.pi))
                     )  # use np.sum to catch any nan and then set lnlike to nan
-                    # Tier-2 marginal-lnlike correction (same logic as
-                    # Case 1) — promotes the chi² at ŵ into the true
-                    # Gaussian-marginalised log-likelihood.
-                    if (
-                        config.BASEMENT.settings["baseline_" + key + "_" + inst]
-                        == "hybrid_linear_multi"
-                    ):
-                        _y_resid = config.BASEMENT.data[inst][key] - model
-                        _w_hat, _corr = _hybrid_linear_multi_solve(inst, key, _y_resid, yerr_w)
-                        lnlike_total += _corr
+                    lnlike_total += baseline_correction
 
                 #::: if that baseline is in GPs
                 elif config.BASEMENT.settings["baseline_" + key + "_" + inst] in GPs:
@@ -2406,6 +2390,27 @@ def _hybrid_linear_multi_solve(inst, key, y_resid, yerr_w):
     prior_quad = float(w_hat @ ((1.0 / sigma_p2) * w_hat))
     correction = -0.5 * prior_quad - 0.5 * logdet_A + 0.5 * logdet_Lambda
     return w_hat, correction
+
+
+def _calculate_baseline_and_correction(params, inst, key, model, yerr_w):
+    """Return a likelihood baseline and its analytic marginal correction.
+
+    Hybrid linear baselines obtain both values from one matrix solve. Other
+    baseline methods retain the regular calculation and have no correction.
+    """
+    baseline_method = config.BASEMENT.settings["baseline_" + key + "_" + inst]
+    if baseline_method != "hybrid_linear_multi":
+        return calculate_baseline(params, inst, key, model=model, yerr_w=yerr_w), 0.0
+
+    if "design_matrix" not in config.BASEMENT.data[inst]:
+        raise KeyError(
+            f"baseline_{key}_{inst}=hybrid_linear_multi but no design matrix is "
+            f"stored for {inst}. Did you set baseline_{key}_{inst}_cols=<names>?"
+        )
+    y_resid = config.BASEMENT.data[inst][key] - model
+    w_hat, correction = _hybrid_linear_multi_solve(inst, key, y_resid, yerr_w)
+    baseline = config.BASEMENT.data[inst]["design_matrix"] @ w_hat
+    return baseline, correction
 
 
 def baseline_hybrid_linear_multi(*args):

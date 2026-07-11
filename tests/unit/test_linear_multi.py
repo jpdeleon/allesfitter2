@@ -321,6 +321,34 @@ def test_hybrid_baseline_returns_X_at_w_hat(tmp_path):
     np.testing.assert_allclose(out, expected_signal, atol=1e-4)
 
 
+def test_hybrid_lnlike_solves_linear_system_once(monkeypatch, tmp_path):
+    """The MAP baseline and marginal correction must share one solve."""
+    from allesfitter import computer
+
+    d = _build_datadir(
+        tmp_path,
+        baseline_type="hybrid_linear_multi",
+        cols="airmass fwhm bias",
+        weights=(0.3, -0.1, 0.0),
+    )
+    b = Basement(str(d), quiet=True)
+    config.BASEMENT = b
+    original_solve = computer._hybrid_linear_multi_solve
+    solve_count = 0
+
+    def counting_solve(*args, **kwargs):
+        nonlocal solve_count
+        solve_count += 1
+        return original_solve(*args, **kwargs)
+
+    monkeypatch.setattr(computer, "_hybrid_linear_multi_solve", counting_solve)
+
+    result = mcmc_lnlike(np.array(b.theta_0, dtype=float))
+
+    assert np.isfinite(result)
+    assert solve_count == 1
+
+
 def test_hybrid_lnlike_better_than_tier1_at_zero(tmp_path):
     """At theta_0 (with all Tier-1 weights at zero), Tier-2 already
     fits the optimal linear baseline analytically and should give a
