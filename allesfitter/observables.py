@@ -13,7 +13,6 @@ Twitter: m_n_guenther
 Web: www.mnguenther.com
 """
 
-
 #::: modules
 import os
 import pathlib
@@ -179,7 +178,6 @@ def calc_M_comp_from_RV(K, P, incl, ecc, M_host, return_unit="M_earth", approx=F
 
     # use the full binary mass function
     if not approx:
-
         # We rearange the binary mass function as a 3rd order polynomial.
         # We start with these definitions of a and b:
         a = np.sin(np.deg2rad(incl)) ** 3  # dimensionless
@@ -230,12 +228,13 @@ def calc_M_comp_from_RV(K, P, incl, ecc, M_host, return_unit="M_earth", approx=F
 
         return s
 
-    # use the exoplanet approximation (just for testing)
+    # use the low-companion-mass approximation (M_comp << M_host)
     else:
-        return (
-            K / np.sin(incl) * np.sqrt(1 - ecc**2) * np.cbrt(P / (2 * np.pi * G) * (M_host) ** 2)
-        ) / return_unit
-        # TODO, something is not right here
+        sin_incl = np.sin(np.deg2rad(incl))
+        mass_kg = (
+            K / sin_incl * np.sqrt(1 - ecc**2) * np.cbrt(P * M_host**2 / (2 * np.pi * G.value))
+        )
+        return mass_kg / return_unit
 
 
 ###############################################################################
@@ -281,7 +280,6 @@ def calc_M_comp_from_RV_astropy(K, P, incl, ecc, M_host, return_unit=u.Mearth, a
 
     # use the full binary mass function
     if not approx:
-
         # We rearange the binary mass function as a 3rd order polynomial.
         # We start with these definitions of a and b:
         a = np.sin(incl) ** 3  # dimensionless
@@ -344,10 +342,15 @@ def calc_M_comp_from_RV_astropy(K, P, incl, ecc, M_host, return_unit=u.Mearth, a
 
         return s.value
 
-    # use the exoplanet approximation (just for testing)
+    # use the low-companion-mass approximation (M_comp << M_host)
     else:
         return (
-            (K / np.sin(incl) * np.sqrt(1 - ecc**2) * np.cbrt(P / (2 * np.pi * G) * (M_host) ** 2))
+            (
+                K
+                / np.sin(incl)
+                * np.sqrt(1 - ecc**2)
+                * np.cbrt(P * (M_host * u.Msun) ** 2 / (2 * np.pi * G))
+            )
             .decompose()
             .to(return_unit)
             .value
@@ -743,7 +746,6 @@ def estimate_spectral_class(Teff):
 #::: MAIN
 ##########################################################################
 if __name__ == "__main__":
-
     ##########################################################################
     #::: speed test
     ##########################################################################
