@@ -104,28 +104,24 @@ def binning2D(arr, bin_width, setting="mean", normalize=False, axis=1):
 
 
 def bin_edge_indices(time1D, bin_width, timegap, N_time):
-    """DETERMINE ALL THE BIN-EDGE-INDICES (TO NOT BIN OVER DIFFERENT NIGHTS)"""
-    """ this currently relies on the fact that timestamps for all are approximately the same
-    (given for the case of a HJD array that represents MJD values with small corrections)"""
+    """Return start and exclusive-end indices without crossing night gaps."""
+    if N_time != len(time1D):
+        raise ValueError("N_time must match the length of time1D")
+    if N_time == 0:
+        return [], []
 
-    #    ind_start_of_night = np.append( 0 , np.where( np.diff(time) > timegap )[0] + 1 )
-    ind_end_of_night = np.append(np.where(np.diff(time1D) > timegap)[0], len(np.diff(time1D) - 1))
-    N_nights = len(ind_end_of_night)
+    bin_width = int(bin_width)
+    if bin_width <= 0:
+        raise ValueError("bin_width must be positive")
 
-    first_ind = [0]
+    night_starts = np.r_[0, np.where(np.diff(time1D) > timegap)[0] + 1]
+    night_ends = np.r_[night_starts[1:], N_time]
+    first_ind = []
     last_ind = []
-    i = 0
-    #    j = 0
-    while (first_ind[-1] < N_time) & (i < N_nights):
-        if (first_ind[-1] + bin_width) < ind_end_of_night[i]:
-            last_ind.append(first_ind[-1] + bin_width)
-        else:
-            last_ind.append(ind_end_of_night[i])
-            i += 1
-        first_ind.append(last_ind[-1] + 1)
-    #        j += 1
-
-    del first_ind[-1]
+    for night_start, night_end in zip(night_starts, night_ends):
+        for start in range(int(night_start), int(night_end), bin_width):
+            first_ind.append(start)
+            last_ind.append(min(start + bin_width, int(night_end)))
 
     return first_ind, last_ind
 
@@ -143,7 +139,6 @@ def binning1D_per_night(time, arr, bin_width, timegap=3600, setting="mean", norm
 
     if setting == "mean":
         for nn in range(N_bins):
-            # skip no/single data points
             if last_ind[nn] > first_ind[nn]:
                 bintime[nn] = np.nanmean(time[first_ind[nn] : last_ind[nn]])
                 # skip All-NAN slices (i.e. where all flux data is masked)
@@ -152,7 +147,6 @@ def binning1D_per_night(time, arr, bin_width, timegap=3600, setting="mean", norm
                     binarr_err[nn] = np.nanstd(arr[first_ind[nn] : last_ind[nn]])
     elif setting == "median":
         for nn in range(N_bins):
-            # skip no/single data points
             if last_ind[nn] > first_ind[nn]:
                 bintime[nn] = np.nanmedian(time[first_ind[nn] : last_ind[nn]])
                 # skip All-NAN slices (i.e. where all flux data is masked)
@@ -195,7 +189,7 @@ def binning2D_per_night(
             bintime[:, nn] = np.nanmedian(time[:, first_ind[nn] : last_ind[nn]], axis=axis)
             binarr[:, nn] = np.nanmedian(arr[:, first_ind[nn] : last_ind[nn]], axis=axis)
             binarr_err[:, nn] = 1.48 * np.nanmedian(
-                abs(arr[:, first_ind[nn] : last_ind[nn]] - binarr[:, nn])
+                abs(arr[:, first_ind[nn] : last_ind[nn]] - binarr[:, nn, None]), axis=axis
             )
 
     if normalize:
@@ -208,44 +202,25 @@ def binning2D_per_night(
 
 def binning1D_per_night_list(time, arr, bin_width, timegap=3600, setting="mean", normalize=False):
     """different style of program, same application"""
-    N = len(time)
     bin_width = int(bin_width)
 
     bintime = []
     binarr = []
     binarr_err = []
 
-    #    ind_start_of_night = np.append( 0 , np.where( np.diff(time) > timegap )[0] + 1 )
-    ind_end_of_night = np.append(np.where(np.diff(time) > timegap)[0], len(np.diff(time) - 1))
-    N_nights = len(ind_end_of_night)
-    first_ind = 0
-    i = 0
+    first_indices, last_indices = bin_edge_indices(time, bin_width, timegap, len(time))
 
     if setting == "mean":
-        while (first_ind < N) & (i < N_nights):
-            if (first_ind + bin_width) < ind_end_of_night[i]:
-                last_ind = first_ind + bin_width
-            else:
-                last_ind = ind_end_of_night[i]
-                i += 1
-
+        for first_ind, last_ind in zip(first_indices, last_indices):
             bintime.append(np.nanmean(time[first_ind:last_ind]))
             binarr.append(np.nanmean(arr[first_ind:last_ind]))
             binarr_err.append(np.nanstd(arr[first_ind:last_ind]))
-            first_ind = last_ind + 1
 
     elif setting == "median":
-        while first_ind < N:
-            if (first_ind + bin_width) < ind_end_of_night[i]:
-                last_ind = first_ind + bin_width
-            else:
-                last_ind = ind_end_of_night[i]
-                i += 1
-
+        for first_ind, last_ind in zip(first_indices, last_indices):
             bintime.append(np.nanmedian(time[first_ind:last_ind]))
             binarr.append(np.nanmedian(arr[first_ind:last_ind]))
             binarr_err.append(1.48 * np.nanmedian(abs(arr[first_ind:last_ind] - binarr[-1])))
-            first_ind = last_ind
 
     bintime = np.array(bintime)
     binarr = np.array(binarr)
@@ -263,7 +238,6 @@ def binning1D_per_night_list(time, arr, bin_width, timegap=3600, setting="mean",
 # MAIN (FOR TESTING)
 ######################################################################
 if __name__ == "__main__":
-
     ######################################################################
     # TEST binning2D_per_night
     ######################################################################
