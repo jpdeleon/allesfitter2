@@ -103,7 +103,11 @@ def run(
                 bound=bound,
                 sample=sample,
             )
-            sampler.run_nested(nlive_init=nlive, print_progress=print_progress)
+            sampler.run_nested(
+                nlive_init=nlive,
+                dlogz_init=tol,
+                print_progress=print_progress,
+            )
     else:
         raise ValueError(f"ns_modus must be 'static' or 'dynamic', got {modus!r}")
 
