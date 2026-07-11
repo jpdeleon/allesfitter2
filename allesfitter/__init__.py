@@ -42,6 +42,8 @@ import warnings
 from shutil import copyfile
 from typing import Any, Optional, Union
 
+warnings.filterwarnings("ignore", message=".*pkg_resources is deprecated.*")
+
 import matplotlib.pyplot as plt
 import numpy as np
 

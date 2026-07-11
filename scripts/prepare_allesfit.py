@@ -1677,9 +1677,9 @@ def main():
                         f"{pl}_rr_{_bp},{rprs:.4f},1,uniform 0 {_rr_upper:.4f},"
                         f"$R_{pl} / R_\\star (\\mathrm{{{_bp}}})$,,\n"
                     )
-            text += f"{pl}_rsuma,{rsuma:.4f},1,uniform {_rsuma_lo:.4f} {_rsuma_hi:.4f},$(R_\star + R_{pl}) / a_{pl}$,,\n"
+            text += f"{pl}_rsuma,{rsuma:.4f},1,uniform {_rsuma_lo:.4f} {_rsuma_hi:.4f},$(R_\\star + R_{pl}) / a_{pl}$,,\n"
             # text += f"{pl}_rsuma,{rsuma:.4f},1,uniform 0 1,$(R_\star + R_{pl}) / a_{pl}$,,\n"
-            text += f"{pl}_cosi,0,1,uniform 0 {_cosi_max:.4f},$\cos" + "{i_" + pl + "}$,,\n"
+            text += f"{pl}_cosi,0,1,uniform 0 {_cosi_max:.4f},$\\cos" + "{i_" + pl + "}$,,\n"
             text += (
                 f"{pl}_epoch,{epoch:.6f},1,normal {epoch:.6f} {epocherr:.6f},$T_"
                 + "{0;"
@@ -1687,13 +1687,13 @@ def main():
                 + "}$,BJD,\n"
             )
             text += f"{pl}_period,{Porb:.6f},1,normal {Porb:.6f} {Porberr:.6f},$P_{pl}$,d,\n"
-            text += f"{pl}_f_c,0,0,uniform -1 1,$\sqrt{{e_{pl}}} \cos{{\omega_{pl}}}$,,\n"
-            text += f"{pl}_f_s,0,0,uniform -1 1,$\sqrt{{e_{pl}}} \sin{{\omega_{pl}}}$,,\n"
+            text += f"{pl}_f_c,0,0,uniform -1 1,$\\sqrt{{e_{pl}}} \\cos{{\\omega_{pl}}}$,,\n"
+            text += f"{pl}_f_s,0,0,uniform -1 1,$\\sqrt{{e_{pl}}} \\sin{{\\omega_{pl}}}$,,\n"
             for inst in fns:
                 text += f"#{pl}_sbratio_{inst},0,0,uniform 0 1,$J$,,\n"
         text += "#dilution per instrument,,,,,,\n"
         for inst in fns:
-            text += f"dil_{inst},0,0,uniform 0 1,$D_\mathrm{{0; {inst}}}$,,\n"
+            text += f"dil_{inst},0,0,uniform 0 1,$D_\\mathrm{{0; {inst}}}$,,\n"
         # Limb-darkening coefficients are keyed by bandpass in chromatic mode
         # and by instrument otherwise — `ldc_suffixes` already encodes this
         # decision (unique bandpasses when --bandpass was given, fns otherwise).
@@ -1720,7 +1720,9 @@ def main():
         # no transit signal is recoverable, so samples there were wasted.
         text += "#errors per instrument,,,,,,\n"
         for inst in fns:
-            text += f"ln_err_flux_{inst},-6,1,uniform -10 -3,$\log{{\sigma ({inst})}}$,rel. flux,\n"
+            text += (
+                f"ln_err_flux_{inst},-6,1,uniform -10 -3,$\\log{{\\sigma ({inst})}}$,rel. flux,\n"
+            )
         # GP Matern32 ln(rho) upper bound = 5 → exp(5) ≈ 148 days, beyond
         # any plausible TESS systematic or Kepler quarter, and short of
         # the regime where the kernel is degenerate with the baseline
@@ -1728,9 +1730,9 @@ def main():
         # was unhelpful.
         text += "#baseline per instrument,,,,,,\n"
         for inst in fns:
-            text += f"#baseline_gp_offset_flux_{inst},0,1,uniform -0.1 0.1,$\mathrm{{offset ({inst})}}$,,\n"
-            text += f"baseline_gp_matern32_lnsigma_flux_{inst},-5,1,uniform -10 -3,$\mathrm{{gp ln \sigma ({inst})}}$,,\n"
-            text += f"baseline_gp_matern32_lnrho_flux_{inst},0,1,uniform -1 5,$\mathrm{{gp ln \\rho ({inst})}}$,,\n"
+            text += f"#baseline_gp_offset_flux_{inst},0,1,uniform -0.1 0.1,$\\mathrm{{offset ({inst})}}$,,\n"
+            text += f"baseline_gp_matern32_lnsigma_flux_{inst},-5,1,uniform -10 -3,$\\mathrm{{gp ln \\sigma ({inst})}}$,,\n"
+            text += f"baseline_gp_matern32_lnrho_flux_{inst},0,1,uniform -1 5,$\\mathrm{{gp ln \\rho ({inst})}}$,,\n"
         # TTV rows: when --ttv is NOT set, keep the commented-out stub for
         # reference. When --ttv IS set, the real per-transit rows are
         # appended after the lightcurve download (below) because we need
@@ -1743,7 +1745,7 @@ def main():
                 # transit S/N are of order minutes, so a narrower default
                 # is fine and converges faster.
                 for i in range(5):
-                    text += f"#{pl}_ttv_transit_{i+1},0,1,uniform -0.05 0.05,TTV$_\mathrm{{ttv;{i+1}}}$,d,\n"
+                    text += f"#{pl}_ttv_transit_{i+1},0,1,uniform -0.05 0.05,TTV$_\\mathrm{{ttv;{i+1}}}$,d,\n"
         if debug:
             logger.info(text)
         fp = outdir.joinpath("params.csv")
