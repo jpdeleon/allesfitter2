@@ -63,6 +63,16 @@ def test_stage_file_missing_source_raises(tmp_path):
         staging.stage_file(tmp_path / "nope.csv", "x", tmp_path / "run")
 
 
+def test_stage_file_rejects_path_traversal_without_unlinking_destination(tmp_path):
+    src = _write(tmp_path / "lc.csv", "#time,flux,flux_err\n1,1,0.1\n")
+    escaped = _write(tmp_path / "escaped.csv", "must remain")
+
+    with pytest.raises(ValueError, match="instrument label"):
+        staging.stage_file(src, "../escaped", tmp_path / "run")
+
+    assert escaped.read_text() == "must remain"
+
+
 def test_stage_all_rejects_duplicate_labels(tmp_path):
     a = _write(tmp_path / "a.csv", "#time,flux,flux_err\n1,1,0.1\n")
     b = _write(tmp_path / "b.csv", "#time,flux,flux_err\n1,1,0.1\n")

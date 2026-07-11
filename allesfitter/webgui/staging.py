@@ -14,6 +14,7 @@ covariates without importing the compiled fitting engine.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,6 +23,17 @@ import yaml
 
 # The three mandatory leading columns of every instrument CSV.
 _REQUIRED_COLUMNS = ("time", "flux", "flux_err")
+_SAFE_LABEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z")
+
+
+def validate_label(label: str) -> str:
+    """Return *label* if it is safe to use as a single filename component."""
+    if not _SAFE_LABEL.fullmatch(label):
+        raise ValueError(
+            "instrument label must start with a letter or digit and contain only "
+            "letters, digits, underscores, or hyphens"
+        )
+    return label
 
 
 def sniff_header(path: str | Path) -> list[str]:
@@ -96,9 +108,12 @@ def stage_file(
     if method not in ("symlink", "copy"):
         raise ValueError(f"method must be 'symlink' or 'copy', got {method!r}")
 
-    run_dir = Path(run_dir)
+    validate_label(label)
+    run_dir = Path(run_dir).resolve()
     run_dir.mkdir(parents=True, exist_ok=True)
     dest = run_dir / f"{label}.csv"
+    if dest.parent.resolve() != run_dir:
+        raise ValueError("staged file destination must be directly inside the run directory")
     if dest.exists() or dest.is_symlink():
         if not overwrite:
             raise FileExistsError(f"{dest} already exists (overwrite=False)")

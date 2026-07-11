@@ -59,6 +59,12 @@ def test_instrument_without_label_raises():
         formparse.build_fit_config({"target": "T", "instruments": [{"band": "g"}]})
 
 
+@pytest.mark.parametrize("label", ["../../escaped", "with/slash", "..", ".hidden", "has space"])
+def test_unsafe_instrument_label_raises(label):
+    with pytest.raises(ValueError, match="instrument label"):
+        formparse.build_fit_config({"target": "T", "instruments": [{"label": label, "band": "g"}]})
+
+
 def test_chromatic_explicit_bool_passthrough():
     cfg, _ = formparse.build_fit_config(
         {"target": "T", "instruments": [{"label": "m4g", "band": "g"}], "chromatic": "false"}

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from allesfitter.webgui import instruments as _inst
 from allesfitter.webgui import models as m
+from allesfitter.webgui.staging import validate_label
 
 
 def _f(value, default=None) -> float | None:
@@ -43,6 +44,7 @@ def _build_instrument(spec: dict) -> m.InstrumentSpec:
     label = spec.get("label", "").strip()
     if not label:
         raise ValueError("every instrument needs a non-empty label")
+    validate_label(label)
     band = (spec.get("band") or _inst.suggest_band(label)).strip()
     if not band:
         raise ValueError(f"instrument '{label}' has no bandpass (set one explicitly)")
