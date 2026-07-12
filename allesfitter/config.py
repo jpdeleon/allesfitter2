@@ -10,7 +10,6 @@ Functions:
     init: Initialize the allesfitter configuration for a given data directory.
 """
 
-
 from .basement import Basement
 
 

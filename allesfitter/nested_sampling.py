@@ -20,7 +20,6 @@ Notes
     - Saves results as compressed pickle files
 """
 
-
 #::: modules
 import multiprocessing
 import os

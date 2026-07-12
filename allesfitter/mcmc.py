@@ -23,7 +23,6 @@ Notes
     - Produces HDF5 backend for chain storage
 """
 
-
 #::: modules
 import multiprocessing
 import os
@@ -272,7 +271,7 @@ def mcmc_fit(datadir, overwrite=None, append=None):
         logprint(
             "\nTime taken to run 'emcee' on",
             config.BASEMENT.settings["multiprocess_cores"],
-            f"cores is {timemcmc/60./60.:.2f} hours",
+            f"cores is {timemcmc / 60.0 / 60.0:.2f} hours",
         )
 
     else:
@@ -286,7 +285,9 @@ def mcmc_fit(datadir, overwrite=None, append=None):
         sampler = run_mcmc(sampler)
         t1 = timer()
         timemcmc = t1 - t0
-        logprint(f"\nTime taken to run 'emcee' on a single core is {timemcmc/60./60.:.2f} hours")
+        logprint(
+            f"\nTime taken to run 'emcee' on a single core is {timemcmc / 60.0 / 60.0:.2f} hours"
+        )
 
     #::: Check performance and convergence
     logprint("\nAcceptance fractions:")

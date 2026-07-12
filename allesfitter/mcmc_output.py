@@ -13,30 +13,33 @@ Twitter: m_n_guenther
 Web: www.mnguenther.com
 """
 
-
-#::: plotting settings
-import seaborn as sns
-
-sns.set(
-    context="paper",
-    style="ticks",
-    palette="deep",
-    font="sans-serif",
-    font_scale=1.5,
-    color_codes=True,
-)
-sns.set_style({"xtick.direction": "in", "ytick.direction": "in"})
-sns.set_context(rc={"lines.markeredgewidth": 1})
-
 #::: modules
 import os
 from shutil import copyfile
 
-import emcee
-import matplotlib.pyplot as plt
 import numpy as np
-from corner import corner
-from matplotlib.ticker import FixedLocator, ScalarFormatter
+
+_HAS_PLOTTING = False
+
+
+def _init_plotting():
+    global _HAS_PLOTTING
+    if _HAS_PLOTTING:
+        return
+    _HAS_PLOTTING = True
+    import seaborn as sns
+
+    sns.set(
+        context="paper",
+        style="ticks",
+        palette="deep",
+        font="sans-serif",
+        font_scale=1.5,
+        color_codes=True,
+    )
+    sns.set_style({"xtick.direction": "in", "ytick.direction": "in"})
+    sns.set_context(rc={"lines.markeredgewidth": 1})
+
 
 #::: allesfitter modules
 from . import config, deriver
@@ -148,6 +151,9 @@ _HARD_NDIM_CAP = 60  # above this, skip the corner plot entirely
 #::: plot the MCMC chains
 ###############################################################################
 def plot_MCMC_chains(sampler):
+    _init_plotting()
+    import matplotlib.pyplot as plt
+    from matplotlib.ticker import FixedLocator
 
     chain = sampler.get_chain()
     log_prob = sampler.get_log_prob()
@@ -240,6 +246,11 @@ def plot_MCMC_chains(sampler):
 
 
 def plot_MCMC_corner(sampler):
+    _init_plotting()
+    import matplotlib.pyplot as plt
+    from corner import corner
+    from matplotlib.ticker import ScalarFormatter
+
     # Hard skip for very-high-dim fits: a 60×60 corner is 240k tiny
     # subplots, almost guaranteed OOM. Return a tiny placeholder fig so
     # mcmc_output() can still save *something* and continue.
@@ -481,6 +492,9 @@ def mcmc_output(datadir, quiet=False, overwrite=None):
     This will output information into the console, and create a output files
     into datadir/results/ (or datadir/QL/ if QL==True)
     """
+    import emcee
+    import matplotlib.pyplot as plt
+
     config.init(datadir, quiet=quiet)
 
     #::: security check
@@ -683,6 +697,8 @@ def mcmc_output(datadir, quiet=False, overwrite=None):
 ###############################################################################
 def get_mcmc_posterior_samples(datadir, Nsamples=None, as_type="dic"):  # QL=False,
     # config.init(datadir, QL=QL)
+    import emcee
+
     config.init(datadir)
     reader = emcee.backends.HDFBackend(
         os.path.join(config.BASEMENT.outdir, "mcmc_save.h5"), read_only=True

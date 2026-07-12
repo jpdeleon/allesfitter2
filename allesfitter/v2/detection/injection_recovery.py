@@ -13,7 +13,6 @@ Email: maxgue@mit.edu
 Web: www.mnguenther.com
 """
 
-
 #::: plotting settings
 import seaborn as sns
 
@@ -176,7 +175,6 @@ def inject_and_tls_search(
     for period, rplanet in tqdm(
         itertools.product(periods, rplanets), total=len(periods) * len(rplanets)
     ):  # combining the two for loops
-
         #::: check if this was already done
         if to_do_or_not_to_do_that_is_the_question(ex, period, rplanet):
             print("\tP = " + str(period) + " days, Rp = " + str(rplanet) + " Rearth --> do")

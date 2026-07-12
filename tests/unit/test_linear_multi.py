@@ -89,7 +89,7 @@ def _write_lc(path: Path, weights=(0.0, 0.0, 0.0), noise=1e-3, n=200, seed=0):
     err = np.full(n, noise)
     lines = ["#time,flux,flux_err,airmass,fwhm"]
     for i in range(n):
-        lines.append(f"{t[i]:.10f},{flux[i]:.10f},{err[i]:.10f}," f"{airmass[i]:.6f},{fwhm[i]:.6f}")
+        lines.append(f"{t[i]:.10f},{flux[i]:.10f},{err[i]:.10f},{airmass[i]:.6f},{fwhm[i]:.6f}")
     path.write_text("\n".join(lines) + "\n")
     return t, flux, err, airmass, fwhm
 
@@ -171,7 +171,7 @@ def test_user_declared_weight_row_overrides_synthesis(tmp_path):
     d = _build_datadir(tmp_path, cols="airmass bias", weights=(0.0, 0.0, 0.0))
     # Add the user's explicit weight row with a tighter prior.
     p = (d / "params.csv").read_text()
-    p += "baseline_linmulti_airmass_flux_lco,0.0,1," "uniform -0.5 0.5,$w_{airmass}$,,\n"
+    p += "baseline_linmulti_airmass_flux_lco,0.0,1,uniform -0.5 0.5,$w_{airmass}$,,\n"
     (d / "params.csv").write_text(p)
     b = Basement(str(d), quiet=True)
     # The user's row is honoured — its bound is uniform, not normal

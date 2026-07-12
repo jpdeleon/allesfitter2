@@ -48,7 +48,7 @@ def test_loader_legacy_3col(tmp_path):
 
 def test_loader_legacy_4col(tmp_path):
     p = tmp_path / "lc.csv"
-    p.write_text("0.0,1.0,0.001,1.21\n" "1.0,1.001,0.001,1.22\n" "2.0,0.999,0.001,1.23\n")
+    p.write_text("0.0,1.0,0.001,1.21\n1.0,1.001,0.001,1.22\n2.0,0.999,0.001,1.23\n")
     time, primary, primary_err, custom_series, covs = _load_inst_csv(str(p))
     # Legacy positional layout: 4th column → custom_series alias only,
     # no named-covariates dict (user never declared a name).
@@ -81,7 +81,7 @@ def test_loader_ignores_unrelated_hash_comment(tmp_path):
     header (no `time,flux,flux_err` schema tokens)."""
     p = tmp_path / "lc.csv"
     p.write_text(
-        "# This is a comment, not a header line\n" "0.0,1.0,0.001,1.21\n" "1.0,1.001,0.001,1.22\n"
+        "# This is a comment, not a header line\n0.0,1.0,0.001,1.21\n1.0,1.001,0.001,1.22\n"
     )
     time, primary, primary_err, custom_series, covs = _load_inst_csv(str(p))
     # No header → legacy 4-col positional behaviour.

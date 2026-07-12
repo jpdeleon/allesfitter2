@@ -13,7 +13,6 @@ Twitter: m_n_guenther
 Web: www.mnguenther.com
 """
 
-
 #::: modules
 import os
 
@@ -287,7 +286,6 @@ def estimate_period_old(
     #::: plots
     # ==========================================================================
     if options["show_plot"] or options["save_plot"] or options["return_plot"]:
-
         peak_loc = round(float(1.0 / best_frequency), 2)
         FAP_probabilities = [0.5, 0.1, 0.01]  # Enter FAP values you want to determine
         FAP_levels = ls.false_alarm_level(FAP_probabilities)  # Get corresponding LS Power values

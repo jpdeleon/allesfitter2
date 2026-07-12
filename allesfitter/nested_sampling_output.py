@@ -13,42 +13,34 @@ Twitter: m_n_guenther
 Web: www.mnguenther.com
 """
 
-
-#::: plotting settings
-import seaborn as sns
-
-sns.set(
-    context="paper",
-    style="ticks",
-    palette="deep",
-    font="sans-serif",
-    font_scale=1.5,
-    color_codes=True,
-)
-sns.set_style({"xtick.direction": "in", "ytick.direction": "in"})
-sns.set_context(rc={"lines.markeredgewidth": 1})
-
 #::: modules
 import gzip
 import os
-
-import matplotlib.pyplot as plt
-import numpy as np
-from matplotlib.ticker import MaxNLocator, ScalarFormatter
-
-try:
-    import cPickle as pickle
-except Exception:
-    import pickle
 from copy import deepcopy
 
-from dynesty import plotting as dyplot
-from dynesty import utils as dyutils
+import numpy as np
 
-try:
-    import corner as _corner  # used as backend-agnostic cornerplot fallback
-except ImportError:  # corner is a transitive dynesty dep, but guard anyway
-    _corner = None
+_HAS_PLOTTING = False
+
+
+def _init_plotting():
+    global _HAS_PLOTTING
+    if _HAS_PLOTTING:
+        return
+    _HAS_PLOTTING = True
+    import seaborn as sns
+
+    sns.set(
+        context="paper",
+        style="ticks",
+        palette="deep",
+        font="sans-serif",
+        font_scale=1.5,
+        color_codes=True,
+    )
+    sns.set_style({"xtick.direction": "in", "ytick.direction": "in"})
+    sns.set_context(rc={"lines.markeredgewidth": 1})
+
 
 #::: allesfitter modules
 from . import config, deriver
@@ -77,6 +69,8 @@ def draw_ns_posterior_samples(results, Nsamples=None, as_type="2d_array"):
     ! posterior samples are drawn as resampled weighted samples !
     ! do not confuse posterior_samples (weighted, resampled) with results['samples'] (unweighted) !
     """
+    from dynesty import utils as dyutils
+
     weights = np.exp(results["logwt"] - results["logz"][-1])
     np.random.seed(42)
     posterior_samples = dyutils.resample_equal(results["samples"], weights)
@@ -124,6 +118,9 @@ def _simple_traceplot(results, labels, truths):
     ``_MAX_TRACE_PLOT_SAMPLES`` points per panel (the weighted histogram
     uses all samples).
     """
+    _init_plotting()
+    import matplotlib.pyplot as plt
+
     samples = np.asarray(results["samples"])
     logwt = np.asarray(results["logwt"])
     logz_final = float(np.asarray(results["logz"])[-1])
@@ -229,6 +226,10 @@ def _corner_from_samples(eq_samples, labels, truths, fontsize, ndim):
     figsize at ``_MAX_CORNER_INCHES`` per side, and short-circuits to an
     empty grid when ``ndim > _HARD_NDIM_CAP``.
     """
+    _init_plotting()
+    import corner as _corner
+    import matplotlib.pyplot as plt
+
     eq = np.asarray(eq_samples)
     if eq.shape[0] > _MAX_CORNER_SAMPLES:
         rng = np.random.default_rng(42)
@@ -265,6 +266,8 @@ def _corner_from_results(results, labels, truths, fontsize, ndim):
     ``axes_2d`` matches dyplot.cornerplot's shape so existing title-
     setting code is unchanged.
     """
+    from dynesty import utils as dyutils
+
     samples = np.asarray(results["samples"])
     logwt = np.asarray(results["logwt"])
     logz_final = float(np.asarray(results["logz"])[-1])
@@ -334,6 +337,10 @@ def plot_chromatic_rr_histogram(posterior_samples, prefix="ns"):
     prefix : str
         Output filename prefix (``'ns'`` or ``'mcmc'``).
     """
+    _init_plotting()
+
+    import matplotlib.pyplot as plt
+
     if not config.BASEMENT.settings.get("chromatic", False):
         return
 
@@ -483,6 +490,9 @@ def plot_linear_baseline_components(posterior_samples=None, prefix="ns"):
     try/except so a plot failure never aborts the pipeline.
     """
     # Local imports to avoid pulling computer at module load.
+    _init_plotting()
+    import matplotlib.pyplot as plt
+
     from .computer import (
         _hybrid_linear_multi_solve,
         calculate_model,
@@ -604,6 +614,14 @@ def ns_output(datadir, backend=None, overwrite=None):
     This will output information into the console, and create a output files
     into datadir/results/ (or datadir/QL/ if QL==True)
     """
+    _init_plotting()
+    import pickle
+
+    import matplotlib.pyplot as plt
+    from dynesty import plotting as dyplot
+    from dynesty import utils as dyutils
+    from matplotlib.ticker import MaxNLocator, ScalarFormatter
+
     config.init(datadir)
 
     #::: security check
@@ -688,7 +706,6 @@ def ns_output(datadir, backend=None, overwrite=None):
     )  # params drawn form these posterior_samples; only needed for plots (subtract epoch offset)
     fittruths2 = config.BASEMENT.fittruths.copy()
     for companion in config.BASEMENT.settings["companions_all"]:
-
         if companion + "_epoch" in config.BASEMENT.fitkeys:
             ind = np.where(config.BASEMENT.fitkeys == companion + "_epoch")[0][0]
             results2["samples"][:, ind] -= int(
@@ -957,6 +974,8 @@ def ns_derive(datadir):  # emergency function if matplotlib and Mac OSX crash
 #::: get NS samples (for top-level user)
 ###############################################################################
 def get_ns_posterior_samples(datadir, Nsamples=None, as_type="dic"):
+    import pickle
+
     config.init(datadir)
 
     try:

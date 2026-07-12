@@ -182,8 +182,7 @@ def log_run(
     if announce:
         path = log_path or get_log_path()
         print(
-            f"[allesfitter.run_logger] {command} run_id={run_id} "
-            f"datadir={abs_datadir} log={path}",
+            f"[allesfitter.run_logger] {command} run_id={run_id} datadir={abs_datadir} log={path}",
             file=sys.stderr,
         )
     t0 = time.perf_counter()

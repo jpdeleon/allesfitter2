@@ -13,7 +13,6 @@ Email: maxgue@mit.edu
 Web: www.mnguenther.com
 """
 
-
 #::: plotting settings
 import seaborn as sns
 

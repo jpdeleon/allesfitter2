@@ -161,7 +161,7 @@ def broken_xaxis_subplots(
     """
     if not isinstance(position, _gridspec.SubplotSpec):
         raise TypeError(
-            "`position` must be a SubplotSpec (e.g. gs[i, j]); got " f"{type(position).__name__}"
+            f"`position` must be a SubplotSpec (e.g. gs[i, j]); got {type(position).__name__}"
         )
 
     segments = detect_time_gaps(time, gap_threshold_days)
@@ -178,7 +178,7 @@ def broken_xaxis_subplots(
     elif width_mode == "proportional":
         width_ratios = list(np.maximum(spans, np.median(spans) * 1e-3))
     else:
-        raise ValueError(f"width_mode must be 'uniform' or 'proportional', got " f"{width_mode!r}")
+        raise ValueError(f"width_mode must be 'uniform' or 'proportional', got {width_mode!r}")
 
     sub_gs = _gridspec.GridSpecFromSubplotSpec(
         1,

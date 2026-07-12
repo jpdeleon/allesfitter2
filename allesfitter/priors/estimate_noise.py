@@ -13,7 +13,6 @@ Twitter: m_n_guenther
 Web: www.mnguenther.com
 """
 
-
 #::: modules
 import os
 
@@ -68,7 +67,6 @@ def estimate_noise(datadir):
 
     #::: run
     for inst in config.BASEMENT.settings["inst_phot"]:
-
         key = "flux"
         print("\n###############################################################################")
         print(inst + " " + key)
@@ -96,7 +94,6 @@ def estimate_noise(datadir):
 
     #::: run
     for inst in config.BASEMENT.settings["inst_rv"]:
-
         key = "rv"
         print("\n###############################################################################")
         print(inst + " " + key)
@@ -148,7 +145,6 @@ def estimate_noise_out_of_transit(datadir, inst=None, **kwargs):
 
     #::: run
     for inst in instruments:
-
         key = "flux"
         print("\n###############################################################################")
         print(inst + " " + key)

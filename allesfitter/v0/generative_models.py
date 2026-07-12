@@ -14,7 +14,6 @@ GitHub: https://github.com/MNGuenther
 Web: www.mnguenther.com
 """
 
-
 #::: modules
 import os
 
@@ -298,7 +297,6 @@ def make_lc_model(
         flux2 = model_flux
 
     if show_plot or save_plot:
-
         #::: get phase-folded data
         phase, phaseflux, phaseflux_err, N, phi = lct.phase_fold(
             time,
@@ -638,7 +636,6 @@ def inject_rv_model(
     rv2 = rv + model_rv
 
     if show_plot or save_plot:
-
         #::: get phase
         phi = lct.calc_phase(time, period, epoch)
         phi[phi > 0.75] -= 1.0

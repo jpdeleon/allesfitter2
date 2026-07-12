@@ -13,32 +13,38 @@ Twitter: m_n_guenther
 Web: www.mnguenther.com
 """
 
-
-#::: plotting settings
-import seaborn as sns
-
-sns.set(
-    context="paper",
-    style="ticks",
-    palette="deep",
-    font="sans-serif",
-    font_scale=1.5,
-    color_codes=True,
-)
-sns.set_style({"xtick.direction": "in", "ytick.direction": "in"})
-sns.set_context(rc={"lines.markeredgewidth": 1})
-
 #::: modules
 import os
 import sys
 import warnings
 
-import matplotlib.pyplot as plt
 import numpy as np
 from astropy.time import Time
 
 # import pickle
 from tqdm import tqdm
+
+_HAS_PLOTTING = False
+
+
+def _init_plotting():
+    global _HAS_PLOTTING
+    if _HAS_PLOTTING:
+        return
+    _HAS_PLOTTING = True
+    import seaborn as sns
+
+    sns.set(
+        context="paper",
+        style="ticks",
+        palette="deep",
+        font="sans-serif",
+        font_scale=1.5,
+        color_codes=True,
+    )
+    sns.set_style({"xtick.direction": "in", "ytick.direction": "in"})
+    sns.set_context(rc={"lines.markeredgewidth": 1})
+
 
 warnings.filterwarnings("ignore", category=np.VisibleDeprecationWarning)
 warnings.filterwarnings("ignore", category=np.RankWarning)
@@ -118,7 +124,7 @@ def resolve_overwrite_append(save_path, overwrite=None, append=None):
     if overwrite is not None or append is not None:
         if bool(overwrite) and bool(append):
             raise ValueError(
-                "overwrite=True and append=True are mutually " "exclusive; pass only one."
+                "overwrite=True and append=True are mutually exclusive; pass only one."
             )
         if overwrite is False and append is False:
             raise ValueError(
@@ -232,6 +238,8 @@ def draw_initial_guess_samples(Nsamples=1):
 #::: plot all data in one panel
 ###############################################################################
 def plot_panel(datadir):
+    _init_plotting()
+    import matplotlib.pyplot as plt
 
     config.init(datadir)
 
@@ -311,6 +319,9 @@ def plot_panel_transits(
     yticks=None,
     fontscale=2,
 ):
+    _init_plotting()
+    import matplotlib.pyplot as plt
+    import seaborn as sns
 
     config.init(datadir)
 
@@ -353,7 +364,6 @@ def plot_panel_transits(
         axes = np.atleast_2d(ax).T
 
     for i, (companion, color) in enumerate(zip(companions, colors)):
-
         for j, inst in enumerate(insts):
             ax = axes[i, j]
 
@@ -500,12 +510,12 @@ def afplot(samples, companion, plot_midtransit=False, plot_ingress=False, plot_e
         predicted event times computed from the companion's epoch / period
         / transit-duration.
     """
-    #    global config.BASEMENT
+    _init_plotting()
+    import matplotlib.pyplot as plt
 
     print("Plotting collage for companion", companion + "...")
 
     if config.BASEMENT.settings["fit_ttvs"] is False:
-
         N_inst = len(config.BASEMENT.settings["inst_all"])
 
         if (
@@ -947,7 +957,6 @@ def plot_1(
     # plot each sampled model + its baseline
     # ==========================================================================
     if style in ["full", "full_minus_offset", "full_residuals"]:
-
         #::: set it up
         x = base.data[inst]["time"]
 
@@ -1026,7 +1035,6 @@ def plot_1(
 
         #::: plot model + baseline, not phased
         if (style in ["full", "full_minus_offset"]) and (samples is not None):
-
             # if <1 day of photometric data: plot with 2 min resolution
             if dt is None:
                 if (x[-1] - x[0]) < 1:
@@ -1139,7 +1147,6 @@ def plot_1(
         "phasezoom_occ_residuals",
         "phase_curve_residuals",
     ]:
-
         #::: data - baseline_median
         x = 1.0 * base.data[inst]["time"]
         baseline_median = calculate_baseline(params_median, inst, key)  # evaluated on x (!)
@@ -1165,7 +1172,6 @@ def plot_1(
         #::: need to take care of multiple companions
         # ----------------------------------------------------------------------
         if (inst in base.settings["inst_rv"]) or (inst in base.settings["inst_rv2"]):
-
             #::: get key
             if inst in base.settings["inst_rv"]:
                 i_return = 0
@@ -1244,7 +1250,6 @@ def plot_1(
         #::: Photometry
         # ----------------------------------------------------------------------
         elif inst in base.settings["inst_phot"]:
-
             #::: remove other companions
             for other_companion in base.settings["companions_phot"]:
                 if companion != other_companion:
@@ -1342,7 +1347,6 @@ def plot_1(
 
             #::: plot model, phased (if wished)
             if style in ["phase", "phasezoom", "phasezoom_occ", "phase_curve"]:
-
                 if style in ["phase", "phase_curve"]:
                     xx = np.linspace(-0.25, 0.75, 1000)
                     xx2 = (
@@ -1585,6 +1589,8 @@ def _draw_event_axvlines(
 #::: plot individual transits
 ###############################################################################
 def afplot_per_transit(samples, inst, companion, base=None, kwargs_dict=None):
+    _init_plotting()
+    import matplotlib.pyplot as plt
 
     print("Plotting individual transits for companion", companion, "and instrument", inst + "...")
 
@@ -1897,7 +1903,6 @@ def save_latex_table(samples, mode):
     with open(os.path.join(config.BASEMENT.outdir, mode + "_latex_table.txt"), "w") as f, open(
         os.path.join(config.BASEMENT.outdir, mode + "_latex_cmd.txt"), "w"
     ) as f_cmd:
-
         f.write("Parameter & Value & Unit & Fit/Fixed \\\\ \n")
         f.write("\\hline \n")
         f.write("\\multicolumn{4}{c}{\\textit{Fitted parameters}} \\\\ \n")
@@ -2093,6 +2098,8 @@ def logprint_initial_guess():
 def plot_initial_guess(
     return_figs=False, kwargs_dict=None, plot_midtransit=True, plot_ingress=False, plot_egress=False
 ):
+    _init_plotting()
+    import matplotlib.pyplot as plt
 
     samples = draw_initial_guess_samples()
 
@@ -2170,6 +2177,9 @@ def plot_initial_guess(
 #::: plot initial guess
 ###############################################################################
 def plot_ttv_results(params_median, params_ll, params_ul):
+    _init_plotting()
+    import matplotlib.pyplot as plt
+
     for companion in config.BASEMENT.settings["companions_all"]:
         fig, axes = plt.subplots()
         axes.axhline(0, color="grey", ls="--")

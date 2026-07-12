@@ -13,7 +13,6 @@ Twitter: m_n_guenther
 Web: www.mnguenther.com
 """
 
-
 #::: modules
 try:
     import emcee

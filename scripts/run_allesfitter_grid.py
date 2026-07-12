@@ -18,6 +18,7 @@ Examples:
     python run_allesfitter_grid.py DATADIR --sampler mcmc --all  # re-run with MCMC
     python run_allesfitter_grid.py DATADIR --dry-run             # show what would run
 """
+
 from __future__ import annotations
 
 import argparse

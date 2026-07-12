@@ -14,7 +14,6 @@ Module-Level Constants:
     DEFAULT_LD_CODES: Mapping of limb darkening law integer codes to strings.
 """
 
-
 import collections
 import fnmatch
 import os
@@ -26,8 +25,8 @@ from typing import Any
 
 import numpy as np
 
-warnings.formatwarning = (
-    lambda msg, *args, **kwargs: f"\n! WARNING:\n {msg}\ntype: {args[0]}, file: {args[1]}, line: {args[2]}\n"
+warnings.formatwarning = lambda msg, *args, **kwargs: (
+    f"\n! WARNING:\n {msg}\ntype: {args[0]}, file: {args[1]}, line: {args[2]}\n"
 )
 warnings.filterwarnings("ignore", category=np.VisibleDeprecationWarning)
 warnings.filterwarnings("ignore", category=np.RankWarning)
@@ -1356,7 +1355,6 @@ class Basement:
         #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
         for companion in self.settings["companions_all"]:
             for inst in self.settings["inst_all"]:
-
                 if "host_grid_" + inst not in self.settings:
                     self.settings["host_grid_" + inst] = "default"
 
@@ -1543,8 +1541,9 @@ class Basement:
                 # legal aliasing — refuse before they shadow real instruments.
                 if len(set(members)) != len(members):
                     raise ValueError(
-                        "baseline_share_{k}: group '{g}' contains duplicate "
-                        "members.".format(k=key, g=":".join(members))
+                        "baseline_share_{k}: group '{g}' contains duplicate members.".format(
+                            k=key, g=":".join(members)
+                        )
                     )
                 # A singleton group shares nothing (joint-GP path collapses to
                 # the legacy per-inst path). Almost always a user typo where
@@ -1595,12 +1594,10 @@ class Basement:
                     )
                 for f in followers:
                     if f not in self.settings[key2]:
-                        raise ValueError(
-                            f"baseline_share_{key}: follower '{f}' is not in " f"{key2}."
-                        )
+                        raise ValueError(f"baseline_share_{key}: follower '{f}' is not in {key2}.")
                     if f in leader_of:
                         raise ValueError(
-                            f"baseline_share_{key}: '{f}' appears in more than " "one share group."
+                            f"baseline_share_{key}: '{f}' appears in more than one share group."
                         )
                     f_base = self.settings.get("baseline_" + key + "_" + f, "none")
                     if f_base not in ("none", leader_base):
@@ -1706,7 +1703,6 @@ class Basement:
                 and "t_exp_n_int_" + inst in self.settings
                 and len(self.settings["t_exp_n_int_" + inst])
             ):
-
                 self.settings["t_exp_n_int_" + inst] = int(self.settings["t_exp_n_int_" + inst])
                 if self.settings["t_exp_n_int_" + inst] < 1:
                     raise ValueError(
@@ -2372,7 +2368,6 @@ class Basement:
         self.params["automatically set:"] = ""  # just for pretty printing
         for companion in self.settings["companions_all"]:
             for inst in self.settings["inst_all"]:
-
                 # rr-key bandpass: respects the chromatic flag so an
                 # explicit `chromatic,False` override collapses rr keys
                 # back to the achromatic `<companion>_rr`.
@@ -2759,7 +2754,6 @@ class Basement:
         # ==========================================================================
         # TODO: make this part of the validate() function
         for th, b, key in zip(self.theta_0, self.bounds, self.fitkeys):
-
             #:::: test bounds
             if (b[0] == "uniform") and not (b[1] <= th <= b[2]):
                 raise ValueError("The initial guess for " + key + " lies outside of its bounds.")
@@ -3114,7 +3108,6 @@ class Basement:
 
         #::: for all companions
         for companion in self.settings["companions_all"]:
-
             self.logprint("Companion", companion)
             self.logprint("\tinput epoch:", self.params[companion + "_epoch"])
 
@@ -3574,7 +3567,7 @@ class Basement:
             # Defensive: this method needs the global BASEMENT to point at us
             # so the calculate_* helpers see the right data/settings.
             warnings.warn(
-                "apply_flat_clip(): config.BASEMENT is not this Basement; " "skipping flat clip.",
+                "apply_flat_clip(): config.BASEMENT is not this Basement; skipping flat clip.",
                 stacklevel=2,
             )
             return

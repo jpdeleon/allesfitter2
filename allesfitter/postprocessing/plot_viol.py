@@ -24,7 +24,6 @@ from allesfitter import config
 
 
 class gdatstrt:
-
     def __init__(self):
         self.boollockmodi = False
         pass

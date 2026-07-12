@@ -13,7 +13,6 @@ Currently shared here:
     - ``write_priors_latex_table`` : LaTeX prior table built from ``params.csv``
 """
 
-
 import os
 
 import matplotlib.pyplot as plt

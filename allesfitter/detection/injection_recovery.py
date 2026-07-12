@@ -13,7 +13,6 @@ Twitter: m_n_guenther
 Web: www.mnguenther.com
 """
 
-
 #::: modules
 import itertools
 import multiprocessing
@@ -351,7 +350,6 @@ def inject_and_tls_search(
 
         #::: check if it already exists; if not, proceed
         if to_do_or_not_to_do_that_is_the_question(ex, period, r_companion_earth):
-
             #::: draw a random period
             epoch = time[0] + np.random.random() * period
 

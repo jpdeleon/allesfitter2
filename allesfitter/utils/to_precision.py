@@ -3,7 +3,6 @@
 Credit & source: https://bitbucket.org/william_rusnack/to-precision/src/master/
 """
 
-
 __author__ = """William Rusnack github.com/BebeSparkelSparkel linkedin.com/in/williamrusnack williamrusnack@gmail.com
 Eric Moyer github.com/epmoyer eric@lemoncrab.com"""
 

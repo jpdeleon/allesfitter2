@@ -13,7 +13,6 @@ Twitter: m_n_guenther
 Web: www.mnguenther.com
 """
 
-
 #::: plotting settings
 import seaborn as sns
 
@@ -183,7 +182,6 @@ def plot_publication_spots_from_posteriors(datadir, Nsamples=20, command="save",
 
     for inst in config.BASEMENT.settings["inst_all"]:
         if config.BASEMENT.settings["host_N_spots_" + inst] > 0:
-
             if mode == "default":
                 xx = np.linspace(
                     config.BASEMENT.data[inst]["time"][0],
@@ -194,7 +192,6 @@ def plot_publication_spots_from_posteriors(datadir, Nsamples=20, command="save",
                 xx = np.linspace(0, 2, 10000)
 
             for i_sample, sample in tqdm(enumerate(posterior_samples)):
-
                 params = allesfitter.computer.update_params(sample)
 
                 spots = [
@@ -421,13 +418,11 @@ def plot_spots_from_posteriors(datadir, Nsamples=10, command="save"):
     posterior_samples_dic = allesfitter.get_ns_posterior_samples(datadir, Nsamples=Nsamples)
 
     for sample in tqdm(range(Nsamples)):
-
         params = {}
         for key in posterior_samples_dic:
             params[key] = posterior_samples_dic[key][sample]
 
         for inst in config.BASEMENT.settings["inst_all"]:
-
             if config.BASEMENT.settings["host_N_spots_" + inst] > 0:
                 spots = [
                     [

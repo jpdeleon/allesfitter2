@@ -3,7 +3,6 @@
 Credit & source: https://gist.github.com/salotz/4f585aac1adb6b14305c
 """
 
-
 """ new colormaps from old: stack, truncate builtin cmaps / files / numpy arrays
 What's a colormap or cmap in matplotlib ?
 Mainly a bar or array of 256 colors, rgb or rgba values 0 .. 1,

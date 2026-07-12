@@ -174,9 +174,9 @@ class TestSingleBandEqualsAchromatic:
             if isinstance(va, list):
                 np.testing.assert_array_equal(va, vc, err_msg=f"shared key {key!r} differs")
             else:
-                assert va == vc, (
-                    f"shared key {key!r}: achromatic={va!r}, " f"chromatic-single-band={vc!r}"
-                )
+                assert (
+                    va == vc
+                ), f"shared key {key!r}: achromatic={va!r}, chromatic-single-band={vc!r}"
 
     def test_chromatic_single_band_backfills_achromatic_rr(self, tmp_path, synthetic_truth_data):
         # The chromatic path stores `b_rr_tess` but also backfills `b_rr`

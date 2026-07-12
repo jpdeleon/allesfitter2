@@ -34,7 +34,7 @@ DATA_PATH = get_package_data_path()
 
 def get_tfop_info(target_name: str) -> dict:
     base_url = "https://exofop.ipac.caltech.edu/tess"
-    url = f"{base_url}/target.php?id={target_name.replace(' ','')}&json"
+    url = f"{base_url}/target.php?id={target_name.replace(' ', '')}&json"
     response = urlopen(url)
     assert response.code == 200, "Failed to get data from ExoFOP-TESS"
     try:
@@ -361,7 +361,7 @@ def get_resonant_pairs(periods, order=1, tol=0.01):
             delta = abs((Pout / Pin) * (i / j) - 1)
             if delta <= tol:
                 # text = f"{j}:{i} | P=({Pout:.2f},{Pin:.2f}) n=({n+1},{n+2}) (delta={delta*100:.2f}%)"
-                text = f"{j}:{i} | P=({Pin:.2f},{Pout:.2f}) (delta={delta*100:.2f}%)"
+                text = f"{j}:{i} | P=({Pin:.2f},{Pout:.2f}) (delta={delta * 100:.2f}%)"
                 resonant.append(text)
                 deltas.append(delta)
                 break

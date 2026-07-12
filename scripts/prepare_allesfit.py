@@ -22,6 +22,7 @@ creates a directory with the files needed to run allesfitter:
 https://exoplanetarchive.ipac.caltech.edu/docs/sysaliases.html
 ======
 """
+
 import math
 import sys
 from argparse import ArgumentParser
@@ -510,7 +511,7 @@ def _update_params_gp_bounds(params_csv_path, inst, bounds, logger=None):
     if logger is not None:
         logger.info(
             f"params.csv: refined GP/noise priors for {inst} from data "
-            f"(RMS={bounds['_rms']:.2e}, cadence={bounds['_cadence_days']*86400:.0f}s, "
+            f"(RMS={bounds['_rms']:.2e}, cadence={bounds['_cadence_days'] * 86400:.0f}s, "
             f"baseline={bounds['_baseline_days']:.2f}d) — {replaced} row(s) updated"
         )
     return replaced
@@ -640,18 +641,22 @@ def _default_prior_bounds(rprs_max, rsuma_min, rsuma_max):
 
 
 def catalog_info_name(df) -> Tuple:
-    Teff, Teff_err = df["st_teff"].astype(float), np.sqrt(
-        df["st_tefferr1"] ** 2 + df["st_tefferr2"] ** 2
+    Teff, Teff_err = (
+        df["st_teff"].astype(float),
+        np.sqrt(df["st_tefferr1"] ** 2 + df["st_tefferr2"] ** 2),
     )
-    logg, logg_err = df["st_logg"].astype(float), np.sqrt(
-        df["st_loggerr1"] ** 2 + df["st_loggerr2"] ** 2
+    logg, logg_err = (
+        df["st_logg"].astype(float),
+        np.sqrt(df["st_loggerr1"] ** 2 + df["st_loggerr2"] ** 2),
     )
     feh, feh_err = 0, 0.1
-    radius, radius_err = df["st_rad"].astype(float), np.sqrt(
-        df["st_raderr1"] ** 2 + df["st_raderr2"] ** 2
+    radius, radius_err = (
+        df["st_rad"].astype(float),
+        np.sqrt(df["st_raderr1"] ** 2 + df["st_raderr2"] ** 2),
     )
-    mass, mass_err = df["st_mass"].astype(float), np.sqrt(
-        df["st_masserr1"] ** 2 + df["st_masserr2"] ** 2
+    mass, mass_err = (
+        df["st_mass"].astype(float),
+        np.sqrt(df["st_masserr1"] ** 2 + df["st_masserr2"] ** 2),
     )
     return (
         Teff,
@@ -1110,7 +1115,7 @@ def main():
                     if dist == "normal":
                         l_err, mid, u_err = ll[name], median[name], ul[name]
                         sig = np.sqrt(l_err**2 + u_err**2)
-                        text += f"{name},{mid:6f},1,normal {mid:6f} {sig:6f}," f"{label},{unit},\n"
+                        text += f"{name},{mid:6f},1,normal {mid:6f} {sig:6f},{label},{unit},\n"
                         if debug:
                             logger.info(f"{name}: {mid:.6f} +{u_err:.6f} -{l_err:.6f} (normal)")
                     elif dist == "uniform":
@@ -1118,8 +1123,7 @@ def main():
                             alles.posterior_params[name], q=[1, 50, 99]
                         )
                         text += (
-                            f"{name},{mid:6f},1,uniform {l_limit:6f} {u_limit:6f},"
-                            f"{label},{unit},\n"
+                            f"{name},{mid:6f},1,uniform {l_limit:6f} {u_limit:6f},{label},{unit},\n"
                         )
                         if debug:
                             logger.info(
@@ -1227,8 +1231,8 @@ def main():
                 text += f"#TTV companion {_c},,,,,\n"
                 for _j in range(_n_obs):
                     text += (
-                        f"{_c}_ttv_transit_{_j+1},0,1,uniform -0.05 0.05,"
-                        f"TTV$_\\mathrm{{ttv;{_j+1}}}$,d,\n"
+                        f"{_c}_ttv_transit_{_j + 1},0,1,uniform -0.05 0.05,"
+                        f"TTV$_\\mathrm{{ttv;{_j + 1}}}$,d,\n"
                     )
         if debug:
             logger.info(text)
@@ -1545,7 +1549,7 @@ def main():
             if str(rprs) == "nan" or str(rprserr) == "nan":
                 if interactive:
                     logger.info(
-                        f"rprs={row['Depth (ppm)']/1e3:.3f}, rprserr={row['Depth (ppm) err']/1e3:.3f} ppt"
+                        f"rprs={row['Depth (ppm)'] / 1e3:.3f}, rprserr={row['Depth (ppm) err'] / 1e3:.3f} ppt"
                     )
                     try:
                         rprs = input(f"Planet {pl} Rp/Rs (ppt): ")
@@ -1668,9 +1672,7 @@ def main():
             _rsuma_hi = _bounds["rsuma_hi"]
             _cosi_max = _bounds["cosi_max"]
             if not rr_suffixes:
-                text += (
-                    f"{pl}_rr,{rprs:.4f},1,uniform 0 {_rr_upper:.4f}," f"$R_{pl} / R_\\star$,,\n"
-                )
+                text += f"{pl}_rr,{rprs:.4f},1,uniform 0 {_rr_upper:.4f},$R_{pl} / R_\\star$,,\n"
             else:
                 for _bp in rr_suffixes:
                     text += (
@@ -1745,7 +1747,7 @@ def main():
                 # transit S/N are of order minutes, so a narrower default
                 # is fine and converges faster.
                 for i in range(5):
-                    text += f"#{pl}_ttv_transit_{i+1},0,1,uniform -0.05 0.05,TTV$_\\mathrm{{ttv;{i+1}}}$,d,\n"
+                    text += f"#{pl}_ttv_transit_{i + 1},0,1,uniform -0.05 0.05,TTV$_\\mathrm{{ttv;{i + 1}}}$,d,\n"
         if debug:
             logger.info(text)
         fp = outdir.joinpath("params.csv")
@@ -2103,7 +2105,7 @@ fig = allesfitter.show_initial_guess(dir_path)
 # General settings,
 ###############################################################################,\n"""
 
-        text2 += f"companions_phot,{' '.join(planets[:len(target_df)])}"
+        text2 += f"companions_phot,{' '.join(planets[: len(target_df)])}"
         # When --bandpass is provided, emit a real `bandpass,...` row so the
         # parser activates chromatic mode (one rr per unique bandpass). When
         # omitted, leave a commented stub so users can see where to add one.
@@ -2113,7 +2115,7 @@ fig = allesfitter.show_initial_guess(dir_path)
             _bandpass_row = f"#bandpass,{' '.join(fns)}"
         text2 += f"""
 companions_rv,
-inst_phot,{' '.join(fns)}
+inst_phot,{" ".join(fns)}
 inst_rv,
 time_format,BJD_TDB
 {_bandpass_row}
@@ -2290,8 +2292,8 @@ fit_ttvs,False
                         # ±0.05 d = ±72 min — matches the comment-out
                         # default and the early-TTV emission block.
                         ttv_text += (
-                            f"{_c}_ttv_transit_{_j+1},0,1,uniform -0.05 0.05,"
-                            f"TTV$_\\mathrm{{ttv;{_j+1}}}$,d,\n"
+                            f"{_c}_ttv_transit_{_j + 1},0,1,uniform -0.05 0.05,"
+                            f"TTV$_\\mathrm{{ttv;{_j + 1}}}$,d,\n"
                         )
                 if ttv_text:
                     params_fp = outdir.joinpath("params.csv")
@@ -2300,7 +2302,7 @@ fit_ttvs,False
                     logger.info(f"Appended TTV rows to {params_fp}")
                 else:
                     logger.error(
-                        "TTV: no companion had observed transits; " "nothing appended to params.csv"
+                        "TTV: no companion had observed transits; nothing appended to params.csv"
                     )
             except Exception as e:
                 logger.error(f"TTV append via allesclass failed: {e}")

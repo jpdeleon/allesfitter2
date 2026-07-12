@@ -13,7 +13,6 @@ Twitter: m_n_guenther
 Web: www.mnguenther.com
 """
 
-
 #::: modules
 import colorsys
 import os
@@ -214,7 +213,6 @@ def chunkplot(time, y, yerr=None, chunk_size=30.0, clip=False, sharey=False, axe
 
     #::: if this is a brand new figure, match the init_time to TESS orbits and sectors and then set up all the axes
     if axes is None:
-
         #::: select which months are covered by the data
         chunks, xlims0, xlims1 = (
             [],
@@ -247,13 +245,11 @@ def chunkplot(time, y, yerr=None, chunk_size=30.0, clip=False, sharey=False, axe
 
     #::: iterate over all existing, set-up axes and plot
     for _, ax1 in enumerate(np.atleast_1d(axes)):
-
         #::: check if there is data to be plotted on this axis
         ind = np.where((time > ax1.get_xlim()[0]) & (time <= ax1.get_xlim()[1]))[0]
 
         #::: only proceed if there is actually data in this range
         if len(ind) > 0:
-
             #::: plot (check if it should be a scatter or errorbar plot)
             _plot1(ax1, ind, time, y, yerr, mask_upper, mask_lower, clip, **kwargs)
 
@@ -314,7 +310,6 @@ def monthplot(time, y, yerr=None, clip=False, sharey=False, axes=None, **kwargs)
 
     #::: if this is a brand new figure, match the init_time to TESS orbits and sectors and then set up all the axes
     if axes is None:
-
         #::: select which months are covered by the data
         months, xlims0, xlims1 = (
             [],
@@ -347,13 +342,11 @@ def monthplot(time, y, yerr=None, clip=False, sharey=False, axes=None, **kwargs)
 
     #::: iterate over all existing, set-up axes and plot
     for _, ax1 in enumerate(np.atleast_1d(axes)):
-
         #::: check if there is data to be plotted on this axis
         ind = np.where((time > ax1.get_xlim()[0]) & (time <= ax1.get_xlim()[1]))[0]
 
         #::: only proceed if there is actually data in this range
         if len(ind) > 0:
-
             #::: plot (check if it should be a scatter or errorbar plot)
             _plot1(ax1, ind, time, y, yerr, mask_upper, mask_lower, clip, **kwargs)
 
@@ -415,7 +408,6 @@ def tessplot(time, y, yerr=None, clip=False, sharey=False, axes=None, **kwargs):
 
     #::: if this is a brand new figure, match the init_time to TESS orbits and sectors and then set up all the axes
     if axes is None:
-
         #::: count which sectors are covered by init_time
         sectors, xlims0, xlims1 = [], [], []
         for s in range(1, max(df["Sector"])):
@@ -468,13 +460,11 @@ def tessplot(time, y, yerr=None, clip=False, sharey=False, axes=None, **kwargs):
 
     #::: iterate over all existing, set-up axes and plot
     for _, ax1 in enumerate(np.atleast_1d(axes)):
-
         #::: check if there is data to be plotted on this axis
         ind = np.where((time > ax1.get_xlim()[0]) & (time <= ax1.get_xlim()[1]))[0]
 
         #::: only proceed if there is actually data in this range
         if len(ind) > 0:
-
             #::: plot (check if it should be a scatter or errorbar plot)
             _plot1(ax1, ind, time, y, yerr, mask_upper, mask_lower, clip, **kwargs)
 

@@ -152,8 +152,7 @@ def check_values_numeric(rows: Sequence[Sequence[str]]) -> list[str]:
         if value == "":
             if fitted:
                 errors.append(
-                    f"params.csv row '{row[0]}' is fitted (fit=1) but has an "
-                    f"empty initial value."
+                    f"params.csv row '{row[0]}' is fitted (fit=1) but has an empty initial value."
                 )
             continue
         try:
@@ -196,15 +195,13 @@ def check_bounds_wellformed(rows: Sequence[Sequence[str]]) -> list[str]:
             lo, hi = nums
             if not lo < hi:
                 errors.append(
-                    f"params.csv row '{name}' uniform bounds require lo < hi, "
-                    f"got lo={lo}, hi={hi}."
+                    f"params.csv row '{name}' uniform bounds require lo < hi, got lo={lo}, hi={hi}."
                 )
         elif kind == "normal":
             _mean, sigma = nums
             if not sigma > 0:
                 errors.append(
-                    f"params.csv row '{name}' normal prior requires sigma > 0, "
-                    f"got sigma={sigma}."
+                    f"params.csv row '{name}' normal prior requires sigma > 0, got sigma={sigma}."
                 )
         elif kind == "trunc_normal":
             lo, hi, _mean, sigma = nums

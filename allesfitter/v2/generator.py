@@ -14,7 +14,6 @@ GitHub: https://github.com/MNGuenther
 Web: www.mnguenther.com
 """
 
-
 #::: modules
 import os
 
@@ -175,7 +174,6 @@ def make_transit_model(time, inst, params, settings, **kwargs):
         flux2 = model_flux
 
     if options.get("show_plot", False) or options.get("save_plot", False):
-
         #::: get model on fine grid
         time_grid = np.linspace(time[0], time[-1], 10001)
         model_flux_grid = fct(time_grid)
@@ -411,7 +409,6 @@ def make_rv_model(
     rv += model_rv
 
     if show_plot or save_plot:
-
         #::: get phase
         phi = lct.calc_phase(time, period, epoch)
         phi[phi > 0.75] -= 1.0

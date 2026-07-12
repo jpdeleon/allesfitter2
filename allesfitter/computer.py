@@ -19,34 +19,36 @@ Module-Level Constants:
     FCTs: List of supported baseline function types.
 """
 
-
-#::: plotting settings
-import seaborn as sns
-
-sns.set(
-    context="paper",
-    style="ticks",
-    palette="deep",
-    font="sans-serif",
-    font_scale=1.5,
-    color_codes=True,
-)
-sns.set_style({"xtick.direction": "in", "ytick.direction": "in"})
-sns.set_context(rc={"lines.markeredgewidth": 1})
-
 #::: modules
 import warnings
 
-import ellc
 import numpy as np
-import numpy.polynomial.polynomial as poly
-from astropy import units as u
-from scipy.interpolate import UnivariateSpline
-from scipy.optimize import minimize
 
 warnings.filterwarnings("ignore", category=np.VisibleDeprecationWarning)
 warnings.filterwarnings("ignore", category=np.RankWarning)
 warnings.filterwarnings("ignore", category=RuntimeWarning)
+
+_HAS_PLOTTING = False
+
+
+def _init_plotting():
+    global _HAS_PLOTTING
+    if _HAS_PLOTTING:
+        return
+    _HAS_PLOTTING = True
+    import seaborn as sns
+
+    sns.set(
+        context="paper",
+        style="ticks",
+        palette="deep",
+        font="sans-serif",
+        font_scale=1.5,
+        color_codes=True,
+    )
+    sns.set_style({"xtick.direction": "in", "ytick.direction": "in"})
+    sns.set_context(rc={"lines.markeredgewidth": 1})
+
 
 #::: for now, only use the original celerite
 try:
@@ -151,6 +153,7 @@ def divide(a, b):
 #::: convert input params into ellc params
 ###############################################################################
 def update_params(theta):
+    from astropy import units as u
 
     params = config.BASEMENT.params.copy()
 
@@ -246,7 +249,6 @@ def update_params(theta):
     # =========================================================================
     for inst in config.BASEMENT.settings["inst_all"]:
         for obj in ["host"] + config.BASEMENT.settings["companions_all"]:
-
             # LDC keys are bandpass-only when settings.csv carries a
             # bandpass row, regardless of the chromatic flag — limb
             # darkening depends on wavelength, not on the rr-naming
@@ -261,7 +263,6 @@ def update_params(theta):
 
             #::: if we sampled in q-space, convert the params to u-space for ellc
             if config.BASEMENT.settings[obj + "_ld_space_" + inst] == "q":
-
                 if config.BASEMENT.settings[obj + "_ld_law_" + inst] is None:
                     params[obj + "_ldc_" + inst] = None
 
@@ -310,7 +311,6 @@ def update_params(theta):
 
             #::: if we sampled in u-space, just stack them into a list for ellc
             elif config.BASEMENT.settings[obj + "_ld_space_" + inst] == "u":
-
                 if config.BASEMENT.settings[obj + "_ld_law_" + inst] is None:
                     params[obj + "_ldc_" + inst] = None
 
@@ -396,7 +396,6 @@ def update_params(theta):
     # =========================================================================
     for companion in config.BASEMENT.settings["companions_all"]:
         for inst in config.BASEMENT.settings["inst_all"]:
-
             # ---------------------------------------------------------------------
             #::: host spots
             # ---------------------------------------------------------------------
@@ -461,9 +460,7 @@ def update_params(theta):
     if (config.BASEMENT.settings["use_host_density_prior"] is True) and (
         "host_density" in config.BASEMENT.external_priors
     ):
-
         for companion in config.BASEMENT.settings["companions_phot"]:
-
             # """
             # If we have transit and RV data, we can constrain each companion's mass
             # and density directly during sampling
@@ -474,7 +471,6 @@ def update_params(theta):
                 and (params[companion + "_K"] is not None)
                 and (params[companion + "_K"] > 0)
             ):
-
                 M_comp = calc_M_comp_from_RV(
                     K=params[companion + "_K"],
                     P=params[companion + "_period"],
@@ -509,7 +505,6 @@ def update_params(theta):
                 and (params[companion + "_rr"] > 0)
                 and (params[companion + "_rr"] ** 3 < 0.01)
             ):
-
                 params[companion + "_host_density"] = calc_rho_host(
                     P=params[companion + "_period"],
                     radius_1=params[companion + "_radius_1"],
@@ -644,6 +639,8 @@ def flux_fct_full(params, inst, companion, xx=None, settings=None):
 def flux_subfct_ellc(
     params, inst, companion, xx=None, settings=None, t_exp=None, n_int=None, return_fluxes=False
 ):
+    import ellc
+
     """
     ! params must be updated via update_params() before calling this function !
     """
@@ -762,6 +759,8 @@ def flux_subfct_ellc(
 def flux_subfct_sinusoidal_phase_curves(
     params, inst, companion, model_flux2, xx=None, settings=None
 ):
+    _init_plotting()
+
     """
     ! params must be updated via update_params() before calling this function !
     """
@@ -798,7 +797,6 @@ def flux_subfct_sinusoidal_phase_curves(
     #::: the standard sine/cosine definition, e.g. used by Shporer and Wong
     # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     if settings["phase_curve_style"] == "sine_series":
-
         if params[companion + "_phase_curve_A1_" + inst] is not None:  # A1 (beaming)
             model_flux += (
                 (1.0 - params["dil_" + inst])
@@ -944,7 +942,6 @@ def flux_subfct_sinusoidal_phase_curves(
     #::: the additive sine/cosine definition, e.g. used by Daylan
     # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     elif settings["phase_curve_style"] == "sine_physical":
-
         if params[companion + "_phase_curve_beaming_" + inst] is not None:  # A1, rescaled
             model_flux += (
                 (1.0 - params["dil_" + inst])
@@ -1168,6 +1165,8 @@ def flux_subfct_bumps(params, inst, companion, xx=None, settings=None, return_fl
 #::: flux sub-fct: ellc lightcurves piecewise (for TTVs; no phase curve)
 # ==============================================================================
 def flux_fct_piecewise(params, inst, companion, xx=None, settings=None):
+    import ellc
+
     """
     ! params must be updated via update_params() before calling this function !
     """
@@ -1191,7 +1190,6 @@ def flux_fct_piecewise(params, inst, companion, xx=None, settings=None):
     #::: go through the time series transit by transit to fit for TTVs
     # --------------------------------------------------------------------------
     for n_transit in range(len(config.BASEMENT.data[companion + "_tmid_observed_transits"])):
-
         if xx is None:
             ind = config.BASEMENT.data[inst][companion + "_ind_time_transit_" + str(n_transit + 1)]
             xx_piecewise = config.BASEMENT.data[inst][
@@ -1204,7 +1202,6 @@ def flux_fct_piecewise(params, inst, companion, xx=None, settings=None):
             xx_piecewise = xx[ind]
 
         if len(xx_piecewise) > 0:
-
             #::: FutureMax warning: one does not simply replace this with flux_subfct_ellc, because it needs the additive term after epoch
             # model_flux_piecewise = flux_subfct_ellc(params, inst, companion, xx=xx_piecewise, settings=settings, t_exp=t_exp, n_int=n_int)
 
@@ -1456,6 +1453,8 @@ def flux_subfct_ellc_phase_curve_hack(params, inst, companion, xx, t_exp, n_int)
 #::: rv fct
 ###############################################################################
 def rv_fct(params, inst, companion, xx=None, settings=None):
+    import ellc
+
     """
     ! params must be updated via update_params() before calling this function !
     """
@@ -1535,14 +1534,12 @@ def calculate_external_priors(params):
     if (config.BASEMENT.settings["use_host_density_prior"] is True) and (
         "host_density" in config.BASEMENT.external_priors
     ):
-
         for companion in config.BASEMENT.settings["companions_phot"]:
             """
             The stellar density computed from R_host and M_host
             can be directly compared with the stellar density computed from the orbital motions (see e.g. Winn 2010)
             """
             if params[companion + "_host_density"] is not None:
-
                 b = config.BASEMENT.external_priors["host_density"]
                 if b[0] == "uniform":
                     if not (b[1] <= params[companion + "_host_density"] <= b[2]):
@@ -1724,7 +1721,6 @@ def calculate_lnlike_total(params):
         ):
             #            print('CASE 1')
             for inst in config.BASEMENT.settings[key2]:
-
                 #::: calculate the model; if there are any NaN, return -np.inf
                 model = calculate_model(params, inst, key)
                 if any(np.isnan(model)) or any(np.isinf(model)):
@@ -1772,7 +1768,6 @@ def calculate_lnlike_total(params):
             # collapse to today's per-inst path inside _stack_and_sort.
             _gp_groups = {}  # dict preserves insertion order on Python 3.7+
             for inst in config.BASEMENT.settings[key2]:
-
                 #::: calculate the model; if there are any NaN, return -np.inf
                 model = calculate_model(params, inst, key)
                 if any(np.isnan(model)) or any(np.isinf(model)):
@@ -1854,7 +1849,6 @@ def calculate_lnlike_total(params):
             #            print('CASE 3')
             y, yerr_w = [], []
             for inst in config.BASEMENT.settings[key2]:
-
                 #::: calculate the model. if there are any NaN, return -np.inf
                 model_i = calculate_model(params, inst, key)
                 if any(np.isnan(model_i)) or any(np.isinf(model_i)):
@@ -2150,6 +2144,9 @@ def baseline_hybrid_offset(*args):
 #::: calculate baseline: hybrid_poly (like Gillon+2012)
 # ==============================================================================
 def baseline_hybrid_poly(*args):
+    _init_plotting()
+    import numpy.polynomial.polynomial as poly
+
     x, y, yerr_w, xx, params, inst, key = args
     polyorder = int(config.BASEMENT.settings["baseline_" + key + "_" + inst][-1])
     xx = (xx - x[0]) / x[-1]  # polyfit needs the xx-axis scaled to [0,1], otherwise it goes nuts
@@ -2179,6 +2176,10 @@ def baseline_hybrid_poly(*args):
 #::: calculate baseline: hybrid_spline (like Gillon+2012, but with a cubic spline)
 # ==============================================================================
 def baseline_hybrid_spline(*args):
+    from scipy.interpolate import UnivariateSpline
+
+    _init_plotting()
+
     x, y, yerr_w, xx, params, inst, key = args
     yerr_weights = yerr_w / np.nanmean(yerr_w)
     weights = 1.0 / yerr_weights
@@ -2208,6 +2209,8 @@ def baseline_hybrid_spline(*args):
 #::: (like Gillon+2012, but with a cubic spline, here with a manually given s value)
 # ==============================================================================
 def baseline_hybrid_spline_s(*args):
+    from scipy.interpolate import UnivariateSpline
+
     x, y, yerr_w, xx, params, inst, key = args
     yerr_weights = yerr_w / np.nanmean(yerr_w)
     weights = 1.0 / yerr_weights
@@ -2227,6 +2230,8 @@ def baseline_hybrid_spline_s(*args):
 #::: calculate baseline: hybrid_GP (like Gillon+2012, but with a GP)
 # ==============================================================================
 def baseline_hybrid_GP(*args):
+    from scipy.optimize import minimize
+
     x, y, yerr_w, xx, params, inst, key = args
 
     if celerite_version == 2:
@@ -2541,6 +2546,8 @@ def _collect_joint_residuals(params, members, key):
 #::: calculate baseline: sample_GP
 # ==============================================================================
 def baseline_sample_GP(*args):
+    _init_plotting()
+
     x, y, yerr_w, xx, params, inst, key = args
     leader = _share_leader_of(inst, key)
     members = _share_members_of(leader, key)

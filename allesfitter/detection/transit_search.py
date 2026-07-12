@@ -13,7 +13,6 @@ Twitter: m_n_guenther
 Web: www.mnguenther.com
 """
 
-
 #::: modules
 # import time as timer
 import contextlib
@@ -513,7 +512,6 @@ def tls_search(time, flux, flux_err, plot=True, plot_type="brokenplot", **kwargs
         and (FAP <= kwargs["FAP_threshold"])
         and (not FOUND_SIGNAL)
     ):
-
         #::: run once
         results = _run1(time, flux, flux_err)
 

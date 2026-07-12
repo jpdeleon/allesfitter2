@@ -13,7 +13,6 @@ Email: maxgue@mit.edu
 Web: www.mnguenther.com
 """
 
-
 #::: plotting settings
 import seaborn as sns
 
@@ -35,7 +34,6 @@ from . import defaults, translator
 
 
 class allesclass2:
-
     def __init__(self, datadir=None):
         if datadir is None:
             self.settings = {}

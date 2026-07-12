@@ -13,7 +13,6 @@ Twitter: m_n_guenther
 Web: www.mnguenther.com
 """
 
-
 #::: modules
 import os
 import sys
@@ -522,7 +521,7 @@ def gp_decor(
     )
     for i, name in enumerate(names):
         logprint(
-            "\t", f"{name: <30}", f"{tau[i]: <20}", f"{(total_steps-burn_steps) / tau[i]: <20}"
+            "\t", f"{name: <30}", f"{tau[i]: <20}", f"{(total_steps - burn_steps) / tau[i]: <20}"
         )
 
     def gp_predict_in_chunks(ybuf, xbuf, quiet=False):

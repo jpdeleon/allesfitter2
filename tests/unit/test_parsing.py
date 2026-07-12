@@ -26,9 +26,7 @@ def test_read_csv_rows_returns_empty_for_missing_file(tmp_path):
 
 def test_read_csv_rows_skips_blanks_and_comments_and_strips(tmp_path):
     p = tmp_path / "data.csv"
-    p.write_text(
-        "# a comment\n" "\n" "  a , 1 , uniform 0 1 \n" "   \n" "#another comment\n" "b,2\n"
-    )
+    p.write_text("# a comment\n\n  a , 1 , uniform 0 1 \n   \n#another comment\nb,2\n")
 
     rows = read_csv_rows(p)
 

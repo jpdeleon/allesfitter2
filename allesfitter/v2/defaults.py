@@ -13,7 +13,6 @@ Email: maxgue@mit.edu
 Web: www.mnguenther.com
 """
 
-
 #::: plotting settings
 import seaborn as sns
 
@@ -95,7 +94,6 @@ def fill_params(params=None, settings=None):
 
     for companion in companions_all:
         for inst in inst_all:
-
             # Get bandpass suffix for this instrument
             bandpass = settings.get("bandpass", {}).get(inst)
             if bandpass:
@@ -292,7 +290,6 @@ def fill_settings(settings=None):
 
     for companion in companions_all:
         for inst in inst_all:
-
             if "host_ld_law_" + inst not in settings:
                 settings["host_ld_law_" + inst] = None
 

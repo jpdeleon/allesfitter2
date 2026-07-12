@@ -174,9 +174,9 @@ class TestLDCScope:
             # Expected shape: ['host','ldc','qN','<suffix>']
             assert len(tail) == 4, f"unexpected LDC key shape: {k}"
             suffix = tail[3]
-            assert suffix in known_bands, (
-                f"LDC key {k!r} suffix {suffix!r} is not a known bandpass " f"{sorted(known_bands)}"
-            )
+            assert (
+                suffix in known_bands
+            ), f"LDC key {k!r} suffix {suffix!r} is not a known bandpass {sorted(known_bands)}"
         # And the user-supplied q1/q2 must still be there for both bands.
         for bp in known_bands:
             assert f"host_ldc_q1_{bp}" in params

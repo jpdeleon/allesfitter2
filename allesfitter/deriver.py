@@ -13,7 +13,6 @@ Twitter: m_n_guenther
 Web: www.mnguenther.com
 """
 
-
 #::: plotting settings
 import seaborn as sns
 
@@ -132,7 +131,6 @@ def calculate_values_from_model_curves(p, inst, companion):
     elif (config.BASEMENT.settings["phase_curve"] is True) and (
         config.BASEMENT.settings["phase_curve_style"] in ["sine_series", "sine_physical"]
     ):
-
         #::: 0: epoch, 1: epoch_occ
         xx0 = [p[companion + "_epoch"], epoch_occ]
 
@@ -175,7 +173,6 @@ def calculate_values_from_model_curves(p, inst, companion):
 
         #::: compute
         if config.BASEMENT.settings["secondary_eclipse"] is True:
-
             #::: compute occultation / secondary eclipse depth
             depth_occ = 1e3 * (phase_curve_no_dips[1] - phase_curve_dips[1])  # in ppt; 1: epoch_occ
 
@@ -543,7 +540,6 @@ def derive(samples, mode):
         #::: / transit and occultation depths (per inst)
         # ----------------------------------------------------------------------
         for ii in config.BASEMENT.settings["inst_phot"]:
-
             # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
             #::: setup
             # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -684,7 +680,6 @@ def derive(samples, mode):
         #::: limb darkening
         # ----------------------------------------------------------------------
         for inst in config.BASEMENT.settings["inst_all"]:
-
             # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
             #::: host
             # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -748,7 +743,6 @@ def derive(samples, mode):
     names = []
     labels = []
     for companion in companions:
-
         names.append(companion + "_R_star/a")
         labels.append(
             "Host radius over semi-major axis "
@@ -903,7 +897,6 @@ def derive(samples, mode):
         )
 
         for inst in config.BASEMENT.settings["inst_phot"]:
-
             names.append(companion + "_depth_tr_undil_" + inst)
             labels.append(
                 "Transit depth (undil.) "
@@ -1033,7 +1026,6 @@ def derive(samples, mode):
     #::: if any meaningful values are left, go output them
     ###############################################################################
     if len(names) > 0:
-
         # =====================================================================
         #::: save all in pickle
         # =====================================================================
@@ -1052,7 +1044,6 @@ def derive(samples, mode):
         ) as f, open(
             os.path.join(config.BASEMENT.outdir, mode + "_derived_latex_cmd.txt"), "w"
         ) as f_cmd:
-
             outfile.write("#property,value,lower_error,upper_error,source\n")
 
             f.write("Parameter & Value & Source \\\\ \n")
@@ -1137,7 +1128,6 @@ def derive(samples, mode):
 
         #::: set allesfitter titles
         for i, name in enumerate(names):
-
             ll, median, ul = np.nanpercentile(derived_samples[name], [15.865, 50.0, 84.135])
             value = round_tex(median, median - ll, ul - median)
             ctitle = r"" + labels[i] + "\n" + r"$=" + value + "$"

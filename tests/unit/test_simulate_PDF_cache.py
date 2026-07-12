@@ -107,7 +107,7 @@ def test_cache_speedup_is_real(cache_file):
     spdf.calculate_skewed_normal_params(5.0, 0.4, 0.5)
     dt_hit = time.perf_counter() - t0
     # 100 ms is comfortable; cache hit is typically <5 ms.
-    assert dt_hit < 0.1, f"cache hit took {dt_hit*1000:.1f} ms"
+    assert dt_hit < 0.1, f"cache hit took {dt_hit * 1000:.1f} ms"
 
 
 def test_repr_key_stability_across_processes(cache_file, monkeypatch):

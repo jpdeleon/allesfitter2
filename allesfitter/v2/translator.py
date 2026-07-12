@@ -14,7 +14,6 @@ GitHub: https://github.com/MNGuenther
 Web: www.mnguenther.com
 """
 
-
 #::: plotting settings
 import seaborn as sns
 
@@ -85,7 +84,6 @@ def translate_alles_to_ellc(params, settings):
     #::: limb darkening, per instrument (per-bandpass in chromatic mode)
     # =========================================================================
     for inst in inst_all:
-
         # Get bandpass suffix for this instrument
         bandpass = settings.get("bandpass", {}).get(inst)
         if bandpass:
@@ -126,7 +124,6 @@ def translate_alles_to_ellc(params, settings):
         #::: companion
         # ---------------------------------------------------------------------
         for companion in companions_all:
-
             if settings[companion + "_ld_law_" + inst] is None:
                 params2[companion + "_ldc_" + inst] = None
 

@@ -13,7 +13,6 @@ Twitter: m_n_guenther
 Web: www.mnguenther.com
 """
 
-
 #::: modules
 import numpy as np
 from astropy.stats import sigma_clip as sigma_clip_

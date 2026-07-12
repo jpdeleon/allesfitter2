@@ -15,7 +15,6 @@ Functions:
     read_pickle: Read a pickle file into an object.
 """
 
-
 #::: modules
 import json
 from typing import Any, Dict, Tuple

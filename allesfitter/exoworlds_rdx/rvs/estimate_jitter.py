@@ -13,7 +13,6 @@ Twitter: m_n_guenther
 Web: www.mnguenther.com
 """
 
-
 #::: modules
 import multiprocessing
 import os
@@ -252,7 +251,9 @@ def estimate_jitter(
         "{: <20}".format("Chain length (in multiples of tau)"),
     )
     for i, key in enumerate(names):
-        logprint("\t", f"{key: <30}", f"{tau[i]: <20}", f"{(total_steps-burn_steps) / tau[i]: <20}")
+        logprint(
+            "\t", f"{key: <30}", f"{tau[i]: <20}", f"{(total_steps - burn_steps) / tau[i]: <20}"
+        )
 
     ###########################################################################
     #::: Output

@@ -13,7 +13,6 @@ Twitter: m_n_guenther
 Web: www.mnguenther.com
 """
 
-
 #::: modules
 import gzip
 import os
@@ -179,7 +178,6 @@ def get_logZ(datadirs, quiet=False):
     logZ_err = []
 
     for dirname in np.atleast_1d(datadirs):
-
         # new version
         fname = os.path.join(dirname, "results", "save_ns.pickle.gz")
         if os.path.exists(fname):

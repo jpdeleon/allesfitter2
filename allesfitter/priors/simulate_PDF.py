@@ -172,7 +172,7 @@ def _cache_save(cache_dict):
                 os.unlink(tmp)
     except OSError as exc:
         warnings.warn(
-            f"simulate_PDF cache write to {path} failed ({exc}); next call will " "recompute.",
+            f"simulate_PDF cache write to {path} failed ({exc}); next call will recompute.",
             stacklevel=2,
         )
 

@@ -13,7 +13,6 @@ Email: maxgue@mit.edu
 Web: www.mnguenther.com
 """
 
-
 #::: plotting settings
 import seaborn as sns
 
@@ -588,7 +587,6 @@ def plot_top_down_view(
     )  # color=[sns.color_palette('deep')[i] for i in [0,1,3]],
 
     for i, companion in enumerate(config.BASEMENT.settings["companions_all"]):
-
         # Get first band's rr for R_companion (Option A: use first bandpass)
         rr_key = config.BASEMENT.get_rr_key(companion, config.BASEMENT.settings["inst_phot"][0])
         R_companion = params_star["R_star"] * params_median[rr_key]  # in Rsun

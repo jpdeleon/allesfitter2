@@ -281,9 +281,7 @@ def test_tdur_helper_missing_inputs_returns_none(tmp_path):
 
     # b has period but no rsuma → skipped; nothing else qualifies → None.
     (tmp_path / "params.csv").write_text(
-        "b_period,3.0,1,uniform 2 4,,,\n"
-        "b_cosi,0.0,1,uniform 0 1,,,\n"
-        "b_rr,0.1,1,uniform 0 1,,,\n"
+        "b_period,3.0,1,uniform 2 4,,,\nb_cosi,0.0,1,uniform 0 1,,,\nb_rr,0.1,1,uniform 0 1,,,\n"
     )
     assert transit_duration_hours_by_companion(tmp_path) is None
 
