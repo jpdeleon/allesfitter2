@@ -20,6 +20,8 @@ Module-Level Constants:
 """
 
 #::: modules
+import contextlib
+import os
 import warnings
 
 import numpy as np
@@ -29,6 +31,20 @@ warnings.filterwarnings("ignore", category=np.RankWarning)
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 _HAS_PLOTTING = False
+
+
+@contextlib.contextmanager
+def _suppress_c_stderr():
+    """Temporarily redirect C-level stderr (fprintf etc.) to /dev/null."""
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    saved = os.dup(2)
+    os.dup2(devnull, 2)
+    os.close(devnull)
+    try:
+        yield
+    finally:
+        os.dup2(saved, 2)
+        os.close(saved)
 
 
 def _init_plotting():
@@ -591,31 +607,35 @@ def flux_fct_full(params, inst, companion, xx=None, settings=None):
     # spots, rotation,
     # and physical phase curve models; but no phase shift and no thermal vs reflected
     # --------------------------------------------------------------------------
-    model_flux, model_flux1, model_flux2 = flux_subfct_ellc(
-        params,
-        inst,
-        companion,
-        xx=xx,
-        settings=settings,
-        t_exp=t_exp,
-        n_int=n_int,
-        return_fluxes=True,
-    )
-
-    # --------------------------------------------------------------------------
-    #::: flux sub-fct: ellc hacked phase curves
-    # allowing phase shifts and thermal vs reflected
-    # --------------------------------------------------------------------------
-    """
-    if (companion+'_thermal_emission_amplitude_'+inst in params) and (params[companion+'_thermal_emission_amplitude_'+inst]>0):
-        model_flux += calc_thermal_curve(params, inst, companion, xx, t_exp, n_int)
-    """
+    _needs_flux2 = settings.get("phase_curve_style") in ("sine_series", "sine_physical")
+    if _needs_flux2:
+        model_flux, _model_flux1, model_flux2 = flux_subfct_ellc(
+            params,
+            inst,
+            companion,
+            xx=xx,
+            settings=settings,
+            t_exp=t_exp,
+            n_int=n_int,
+            return_fluxes=True,
+        )
+    else:
+        model_flux = flux_subfct_ellc(
+            params,
+            inst,
+            companion,
+            xx=xx,
+            settings=settings,
+            t_exp=t_exp,
+            n_int=n_int,
+            return_fluxes=False,
+        )
 
     # --------------------------------------------------------------------------
     #::: flux sub-fct: sinusoidal phase curves
     # allowing phase shifts and thermal vs reflected
     # --------------------------------------------------------------------------
-    if settings["phase_curve_style"] in ["sine_series", "sine_physical"]:
+    if _needs_flux2:
         model_flux += (
             flux_subfct_sinusoidal_phase_curves(
                 params, inst, companion, model_flux2, xx=xx, settings=settings
@@ -665,31 +685,16 @@ def flux_subfct_ellc(
         xx = config.BASEMENT.data[inst]["time"]
         t_exp = settings["t_exp_" + inst]
         n_int = settings["t_exp_n_int_" + inst]
-    # else:
-    #     t_exp = None
-    #     n_int = None
-
-    # --------------------------------------------------------------------------
-    #::: index transits and occultations
-    # --------------------------------------------------------------------------
-    # ind_ecl1, ind_ecl2, ind_out = index_eclipses_smart(xx, params[companion+'_epoch'], params[companion+'_period'], params[companion+'_rr'], params[companion+'_rsuma'], params[companion+'_cosi'], params[companion+'_f_s'], params[companion+'_f_c'], extra_factor=1.5)
-    # TODO: possible future speed improvement
 
     # --------------------------------------------------------------------------
     #::: if: planet and EB lightcurve model
     # --------------------------------------------------------------------------
-    # Get bandpass-specific rr key for chromatic mode
     rr_key = config.BASEMENT.get_rr_key(companion, inst)
     rr = params.get(rr_key)
-
-    # Fall back to achromatic key if chromatic key doesn't exist in params
     if rr is None:
         rr = params.get(f"{companion}_rr")
 
     if (rr is not None) and (rr > 0):
-        # Recompute radius_1/radius_2 per-band so rsuma = radius_1 + radius_2
-        # holds for this bandpass (required for chromatic mode; reduces to the
-        # achromatic value when rr == params[companion+'_rr']).
         rsuma = params[companion + "_rsuma"]
         if rsuma is not None:
             radius_1 = rsuma / (1.0 + rr)
@@ -698,13 +703,13 @@ def flux_subfct_ellc(
             radius_1 = params[companion + "_radius_1"]
             radius_2 = radius_1 * rr
 
-        model_flux1, model_flux2 = ellc.fluxes(
+        # build shared ellc kwargs once
+        _ellc_kwargs = dict(
             t_obs=xx,
             radius_1=radius_1,
             radius_2=radius_2,
             sbratio=params[companion + "_sbratio_" + inst],
             incl=params[companion + "_incl"],
-            # light_3 =     _calc_light_3(params.get('dil_'+inst)), #fluxes does not take light_3
             t_zero=params[companion + "_epoch"],
             period=params[companion + "_period"],
             a=params[companion + "_a"],
@@ -719,8 +724,8 @@ def flux_subfct_ellc(
             domdt=params["domdt_" + inst],
             rotfac_1=params["host_rotfac_" + inst],
             rotfac_2=params[companion + "_rotfac_" + inst],
-            hf_1=params["host_hf_" + inst],  # 1.5,
-            hf_2=params[companion + "_hf_" + inst],  # 1.5,
+            hf_1=params["host_hf_" + inst],
+            hf_2=params[companion + "_hf_" + inst],
             bfac_1=params["host_bfac_" + inst],
             bfac_2=params[companion + "_bfac_" + inst],
             heat_1=divide(params["host_heat_" + inst], 2.0),
@@ -743,20 +748,24 @@ def flux_subfct_ellc(
             verbose=False,
         )
 
-        #::: combine the host and companion fluxes, and account for dilution
-        model_flux = 1.0 + ((model_flux1 + model_flux2 - 1.0) * (1.0 - params["dil_" + inst]))
+        with _suppress_c_stderr():
+            if not return_fluxes:
+                light_3_val = _calc_light_3(params.get("dil_" + inst))
+                if light_3_val != 0.0:
+                    _ellc_kwargs["light_3"] = light_3_val
+                model_flux = ellc.lc(**_ellc_kwargs)
+            else:
+                model_flux1, model_flux2 = ellc.fluxes(**_ellc_kwargs)
+                model_flux = 1.0 + (
+                    (model_flux1 + model_flux2 - 1.0) * (1.0 - params["dil_" + inst])
+                )
 
-    # --------------------------------------------------------------------------
-    #::: else: constant 1
-    # --------------------------------------------------------------------------
     else:
-        model_flux1 = np.ones_like(xx)
-        model_flux2 = np.zeros_like(xx)
         model_flux = np.ones_like(xx)
+        if return_fluxes:
+            model_flux1 = np.ones_like(xx)
+            model_flux2 = np.zeros_like(xx)
 
-    # --------------------------------------------------------------------------
-    #::: return
-    # --------------------------------------------------------------------------
     if not return_fluxes:
         return model_flux
     else:
