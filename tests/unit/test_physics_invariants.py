@@ -12,9 +12,12 @@ import pytest
 
 from tests.chromatic._helpers import (
     NOISE_SIGMA,
+    TRUE_COSI,
     TRUE_EPOCH,
     TRUE_PERIOD,
+    TRUE_RR_KEPLER,
     TRUE_RR_TESS,
+    TRUE_RSUMA,
     common_orbital_rows,
     dilution_rows,
     err_baseline_rows,
@@ -395,3 +398,393 @@ class TestLnlikeTotalNumericalCorrectness:
         assert lnlike == pytest.approx(
             expected_lnlike, rel=1e-10
         ), f"lnlike={lnlike}, expected={expected_lnlike}"
+
+
+# ============================================================================
+# Chromatic update_params invariants
+# ============================================================================
+class TestUpdateParamsChromatic:
+    """update_params with a two-band chromatic datadir: per-band rr values,
+    shared orbital params, per-instrument LDC/error/dilution keys."""
+
+    @pytest.fixture
+    def datadir(self, tmp_path):
+        d = tmp_path / "chromatic_update_params"
+        d.mkdir()
+        rng = np.random.default_rng(RNG_SEED + 10)
+        for inst, rr in [("tess", TRUE_RR_TESS), ("kepler", TRUE_RR_KEPLER)]:
+            time = phase_sampled_time(100, TRUE_PERIOD, TRUE_EPOCH, rng=rng)
+            flux, err = simulate_lightcurve(time, rr, NOISE_SIGMA, rng)
+            write_data_csv(d / f"{inst}.csv", time, flux, err)
+        write_settings(d, inst_phot=["tess", "kepler"], bandpass="tess kepler")
+        rows = (
+            [
+                {
+                    "name": "b_rr_tess",
+                    "value": TRUE_RR_TESS,
+                    "fit": 1,
+                    "bounds": "uniform 0.0 0.3",
+                    "label": "rr_tess",
+                },
+                {
+                    "name": "b_rr_kepler",
+                    "value": TRUE_RR_KEPLER,
+                    "fit": 1,
+                    "bounds": "uniform 0.0 0.3",
+                    "label": "rr_kepler",
+                },
+            ]
+            + common_orbital_rows()
+            + dilution_rows(["tess", "kepler"])
+            + err_baseline_rows(["tess", "kepler"])
+            + ldc_rows("tess")
+            + ldc_rows("kepler")
+        )
+        write_params(d / "params.csv", rows=rows)
+        return d
+
+    def _get_params(self, datadir):
+        from allesfitter import computer, config
+
+        config.init(str(datadir), quiet=True)
+        theta = np.array([config.BASEMENT.params[k] for k in config.BASEMENT.fitkeys], dtype=float)
+        return computer.update_params(theta)
+
+    def test_per_band_rr_values(self, datadir):
+        """b_rr_tess and b_rr_kepler are present and match truth"""
+        params = self._get_params(datadir)
+        assert params["b_rr_tess"] == pytest.approx(TRUE_RR_TESS, rel=1e-12)
+        assert params["b_rr_kepler"] == pytest.approx(TRUE_RR_KEPLER, rel=1e-12)
+
+    def test_shared_orbital_params(self, datadir):
+        """rsuma, cosi, period, epoch are identical across bands"""
+        params = self._get_params(datadir)
+        c = "b"
+        for key in ("rsuma", "cosi", "period", "epoch"):
+            val = params[f"{c}_{key}"]
+            assert val is not None
+            assert np.isfinite(val)
+
+    def test_incl_and_ecc_independent_of_bandpass(self, datadir):
+        """incl and ecc are companion-level, not per-band"""
+        params = self._get_params(datadir)
+        c = "b"
+        incl = params[f"{c}_incl"]
+        ecc = params[f"{c}_ecc"]
+        assert incl is not None and ecc is not None
+        assert incl == pytest.approx(np.degrees(np.arccos(TRUE_COSI)), rel=1e-12)
+        assert ecc == pytest.approx(0.0, abs=1e-12)
+
+    def test_per_instrument_ldc_lists(self, datadir):
+        """Each instrument has its own LDC list of length 2"""
+        params = self._get_params(datadir)
+        for inst in ("tess", "kepler"):
+            ldc = params.get("host_ldc_" + inst)
+            assert ldc is not None, f"missing host_ldc_{inst}"
+            assert len(ldc) == 2
+            assert all(np.isfinite(v) for v in ldc)
+
+    def test_per_instrument_error_keys(self, datadir):
+        """err_flux_tess and err_flux_kepler are both > 0"""
+        params = self._get_params(datadir)
+        for inst in ("tess", "kepler"):
+            err_key = "err_flux_" + inst
+            assert err_key in params and params[err_key] is not None
+            assert params[err_key] > 0
+
+    def test_per_instrument_dilution_keys(self, datadir):
+        """dil_tess and dil_kepler are present"""
+        params = self._get_params(datadir)
+        for inst in ("tess", "kepler"):
+            dil_key = "dil_" + inst
+            assert dil_key in params
+            assert np.isfinite(params[dil_key])
+
+    def test_all_numeric_finite(self, datadir):
+        """No NaN or Inf in any params entry"""
+        params = self._get_params(datadir)
+        for k, v in params.items():
+            if isinstance(v, (float, np.floating)):
+                assert np.isfinite(v), f"non-finite {k}={v}"
+            elif isinstance(v, np.ndarray):
+                assert np.all(np.isfinite(v)), f"non-finite entries in {k}"
+
+    def test_radius_1_from_achromatic_fallback(self, datadir):
+        """radius_1 is computed from the achromatic rr fallback (first band)"""
+        params = self._get_params(datadir)
+        c = "b"
+        r1 = params[f"{c}_radius_1"]
+        expected = TRUE_RSUMA / (1.0 + TRUE_RR_TESS)
+        assert r1 is not None and r1 > 0
+        assert r1 == pytest.approx(expected, rel=1e-12)
+
+
+# ============================================================================
+# Chromatic flux model invariants
+# ============================================================================
+class TestFluxModelChromatic:
+    """With a chromatic (two-band) config, each instrument's flux model must
+    use its own per-band rr and produce a physically plausible transit."""
+
+    @pytest.fixture
+    def datadir(self, tmp_path):
+        d = tmp_path / "chromatic_flux"
+        d.mkdir()
+        rng = np.random.default_rng(RNG_SEED + 11)
+        for inst, rr in [("tess", TRUE_RR_TESS), ("kepler", TRUE_RR_KEPLER)]:
+            time = phase_sampled_time(200, TRUE_PERIOD, TRUE_EPOCH, rng=rng)
+            flux, err = simulate_lightcurve(time, rr, NOISE_SIGMA, rng)
+            write_data_csv(d / f"{inst}.csv", time, flux, err)
+        write_settings(d, inst_phot=["tess", "kepler"], bandpass="tess kepler")
+        rows = (
+            [
+                {
+                    "name": "b_rr_tess",
+                    "value": TRUE_RR_TESS,
+                    "fit": 0,
+                    "bounds": "uniform 0.0 0.3",
+                    "label": "rr_tess",
+                },
+                {
+                    "name": "b_rr_kepler",
+                    "value": TRUE_RR_KEPLER,
+                    "fit": 0,
+                    "bounds": "uniform 0.0 0.3",
+                    "label": "rr_kepler",
+                },
+            ]
+            + common_orbital_rows(fit_orbital=False)
+            + dilution_rows(["tess", "kepler"])
+            + err_baseline_rows(["tess", "kepler"])
+            + ldc_rows("tess")
+            + ldc_rows("kepler")
+        )
+        write_params(d / "params.csv", rows=rows)
+        return d
+
+    @pytest.fixture
+    def params_and_time(self, datadir):
+        from allesfitter import computer, config
+
+        config.init(str(datadir), quiet=True)
+        theta = np.array(config.BASEMENT.theta_0, dtype=float)
+        params = computer.update_params(theta)
+        t = phase_sampled_time(
+            2000, TRUE_PERIOD, TRUE_EPOCH, rng=np.random.default_rng(RNG_SEED + 12)
+        )
+        return params, t
+
+    def _band_depth(self, params, t, inst):
+        from allesfitter import computer
+
+        flux = computer.flux_fct(params, inst=inst, companion="b", xx=t)
+        return 1.0 - flux.min(), flux
+
+    def test_both_bands_produce_valid_flux(self, params_and_time):
+        """Both tess and kepler flux models are finite and bounded"""
+        params, t = params_and_time
+        for inst in ("tess", "kepler"):
+            depth, flux = self._band_depth(params, t, inst)
+            assert np.all(np.isfinite(flux)), f"{inst} flux has NaN/Inf"
+            assert 0.0 < depth < 0.5, f"{inst} depth={depth} out of range"
+            assert np.nanmean(flux) == pytest.approx(1.0, abs=0.01), f"{inst} mean off"
+
+    def test_transit_depth_differs_per_band(self, params_and_time):
+        """Kepler has larger rr → deeper transit than TESS"""
+        params, t = params_and_time
+        depth_tess, _ = self._band_depth(params, t, "tess")
+        depth_kepler, _ = self._band_depth(params, t, "kepler")
+        assert (
+            depth_kepler > depth_tess
+        ), f"expected kepler depth ({depth_kepler:.6f}) > tess depth ({depth_tess:.6f})"
+
+    def test_depth_scales_with_rr_squared_per_band(self, params_and_time):
+        """Each band's transit depth ≈ that band's rr² (50% rel tol)"""
+        params, t = params_and_time
+        for inst, true_rr in [("tess", TRUE_RR_TESS), ("kepler", TRUE_RR_KEPLER)]:
+            depth, _ = self._band_depth(params, t, inst)
+            assert depth == pytest.approx(
+                true_rr**2, rel=0.50
+            ), f"{inst}: depth={depth:.6f}, rr^2={true_rr**2:.6f}"
+
+    def test_rsuma_invariant_per_band(self, params_and_time):
+        """Each instrument's ellc call satisfies radius_1+radius_2 == rsuma"""
+        from unittest.mock import patch
+
+        import ellc as _ellc
+
+        params, t = params_and_time
+        original_lc = _ellc.lc
+        captured = []
+
+        def _capture(*a, **kw):
+            captured.append(kw.copy())
+            return original_lc(*a, **kw)
+
+        with patch("ellc.lc", side_effect=_capture):
+            for inst in ("tess", "kepler"):
+                from allesfitter import computer
+
+                computer.flux_fct(params, inst=inst, companion="b", xx=t)
+
+        assert len(captured) == 2, f"expected 2 ellc calls, got {len(captured)}"
+        for kw in captured:
+            rsuma = kw["radius_1"] + kw["radius_2"]
+            assert rsuma == pytest.approx(
+                TRUE_RSUMA, rel=1e-12
+            ), f"radius_1+radius_2={rsuma} != rsuma={TRUE_RSUMA}"
+
+    def test_each_band_uses_correct_rr_in_ellc(self, params_and_time):
+        """Each instrument's ellc call receives radius_1,radius_2 matching its rr"""
+        from unittest.mock import patch
+
+        import ellc as _ellc
+
+        params, t = params_and_time
+        original_lc = _ellc.lc
+        captured = []
+
+        def _capture(*a, **kw):
+            captured.append(kw.copy())
+            return original_lc(*a, **kw)
+
+        with patch("ellc.lc", side_effect=_capture):
+            for inst in ("tess", "kepler"):
+                from allesfitter import computer
+
+                computer.flux_fct(params, inst=inst, companion="b", xx=t)
+
+        for kw in captured:
+            r1 = kw["radius_1"]
+            r2 = kw["radius_2"]
+            computed_rr = r2 / r1
+            assert computed_rr in (
+                pytest.approx(TRUE_RR_TESS, rel=0.01),
+                pytest.approx(TRUE_RR_KEPLER, rel=0.01),
+            ), f"unexpected rr={computed_rr} in ellc call (r1={r1}, r2={r2})"
+
+
+# ============================================================================
+# Shared-bandpass (one-band-two-inst) physics invariants
+# ============================================================================
+class TestSharedBandpassPhysics:
+    """When two instruments share one bandpass (chromatic=False), they must
+    use the same rr and LDC, producing identical transit depths."""
+
+    @pytest.fixture
+    def datadir(self, tmp_path):
+        d = tmp_path / "shared_bp_physics"
+        d.mkdir()
+        rng = np.random.default_rng(RNG_SEED + 13)
+        for inst in ("tess_pdcsap", "tess_qlp"):
+            time = phase_sampled_time(100, TRUE_PERIOD, TRUE_EPOCH, rng=rng)
+            flux, err = simulate_lightcurve(time, TRUE_RR_TESS, NOISE_SIGMA, rng)
+            write_data_csv(d / f"{inst}.csv", time, flux, err)
+        write_settings(
+            d,
+            inst_phot=["tess_pdcsap", "tess_qlp"],
+            bandpass="tess tess",
+        )
+        rows = (
+            [
+                {
+                    "name": "b_rr_tess",
+                    "value": TRUE_RR_TESS,
+                    "fit": 0,
+                    "bounds": "uniform 0.0 0.3",
+                    "label": "rr_tess",
+                },
+            ]
+            + common_orbital_rows(fit_orbital=False)
+            + dilution_rows(["tess_pdcsap", "tess_qlp"])
+            + err_baseline_rows(["tess_pdcsap", "tess_qlp"])
+            + ldc_rows("tess")
+        )
+        write_params(d / "params.csv", rows=rows)
+        return d
+
+    @pytest.fixture
+    def params_and_time(self, datadir):
+        from allesfitter import computer, config
+
+        config.init(str(datadir), quiet=True)
+        theta = np.array(config.BASEMENT.theta_0, dtype=float)
+        params = computer.update_params(theta)
+        t = phase_sampled_time(
+            2000, TRUE_PERIOD, TRUE_EPOCH, rng=np.random.default_rng(RNG_SEED + 14)
+        )
+        return params, t
+
+    def test_same_rr_across_instruments(self, params_and_time):
+        """Both instruments use the same rr value"""
+        from unittest.mock import patch
+
+        import ellc as _ellc
+
+        params, t = params_and_time
+        original_lc = _ellc.lc
+        captured = []
+
+        def _capture(*a, **kw):
+            captured.append(kw.copy())
+            return original_lc(*a, **kw)
+
+        with patch("ellc.lc", side_effect=_capture):
+            for inst in ("tess_pdcsap", "tess_qlp"):
+                from allesfitter import computer
+
+                computer.flux_fct(params, inst=inst, companion="b", xx=t)
+
+        assert len(captured) == 2
+        rr_0 = captured[0]["radius_2"] / captured[0]["radius_1"]
+        rr_1 = captured[1]["radius_2"] / captured[1]["radius_1"]
+        assert rr_0 == pytest.approx(rr_1, rel=1e-12)
+        assert rr_0 == pytest.approx(TRUE_RR_TESS, rel=1e-12)
+
+    def test_same_ldc_across_instruments(self, params_and_time):
+        """Both instruments receive the same LDC list"""
+        from unittest.mock import patch
+
+        import ellc as _ellc
+
+        params, t = params_and_time
+        original_lc = _ellc.lc
+        captured = []
+
+        def _capture(*a, **kw):
+            captured.append(kw.copy())
+            return original_lc(*a, **kw)
+
+        with patch("ellc.lc", side_effect=_capture):
+            for inst in ("tess_pdcsap", "tess_qlp"):
+                from allesfitter import computer
+
+                computer.flux_fct(params, inst=inst, companion="b", xx=t)
+
+        assert len(captured) == 2
+        np.testing.assert_array_equal(captured[0]["ldc_1"], captured[1]["ldc_1"])
+
+    def test_same_transit_depth(self, params_and_time):
+        """Both instruments produce the same transit depth"""
+        params, t = params_and_time
+        from allesfitter import computer
+
+        depth_0 = depth_1 = None
+        for inst in ("tess_pdcsap", "tess_qlp"):
+            flux = computer.flux_fct(params, inst=inst, companion="b", xx=t)
+            depth = 1.0 - flux.min()
+            if inst == "tess_pdcsap":
+                depth_0 = depth
+            else:
+                depth_1 = depth
+        assert depth_0 is not None and depth_1 is not None
+        assert depth_0 == pytest.approx(depth_1, rel=1e-12)
+
+    def test_shared_rr_in_params_dict(self, params_and_time):
+        """The params dict contains a single b_rr_tess key (not per-inst)"""
+        params, t = params_and_time
+        assert "b_rr_tess" in params
+        assert params["b_rr_tess"] == pytest.approx(TRUE_RR_TESS, rel=1e-12)
+        # There should be no b_rr_tess_pdcsap / b_rr_tess_qlp keys
+        assert "b_rr_tess_pdcsap" not in params
+        assert "b_rr_tess_qlp" not in params
