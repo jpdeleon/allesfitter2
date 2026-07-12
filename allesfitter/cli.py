@@ -180,7 +180,7 @@ def grid(
 
 @app.command()
 def show_initial_guess(
-    dir_path: str = typer.Argument(".", help="path to the data directory"),
+    dir_path: str = typer.Argument(..., help="path to the data directory"),
     quiet: bool = typer.Option(False, "--quiet", "-q"),
     no_plot: bool = typer.Option(False, "--no-plot", help="skip generating PDFs"),
     midtransit: bool = typer.Option(True, "--midtransit/--no-midtransit"),
@@ -202,7 +202,7 @@ def show_initial_guess(
 
 @app.command()
 def optimize(
-    dir_path: str = typer.Argument(".", help="path to the data directory"),
+    dir_path: str = typer.Argument(..., help="path to the data directory"),
     method: str = typer.Option(
         "cmaes",
         "--method",
@@ -229,7 +229,7 @@ def optimize(
 
 @app.command()
 def mcmc_fit(
-    dir_path: str = typer.Argument(".", help="path to the data directory"),
+    dir_path: str = typer.Argument(..., help="path to the data directory"),
     append: bool = typer.Option(False, "--append", help="append to existing chains"),
 ):
     """Run MCMC sampling (emcee)."""
@@ -242,7 +242,7 @@ def mcmc_fit(
 
 @app.command()
 def mcmc_output(
-    dir_path: str = typer.Argument(".", help="path to the data directory"),
+    dir_path: str = typer.Argument(..., help="path to the data directory"),
     overwrite: bool = typer.Option(False, "--overwrite", "-o"),
     quiet: bool = typer.Option(False, "--quiet", "-q"),
 ):
@@ -254,7 +254,7 @@ def mcmc_output(
 
 @app.command()
 def ns_fit(
-    dir_path: str = typer.Argument(".", help="path to the data directory"),
+    dir_path: str = typer.Argument(..., help="path to the data directory"),
     overwrite: bool = typer.Option(False, "--overwrite", "-o"),
 ):
     """Run nested sampling (dynesty)."""
@@ -267,7 +267,7 @@ def ns_fit(
 
 @app.command()
 def ns_output(
-    dir_path: str = typer.Argument(".", help="path to the data directory"),
+    dir_path: str = typer.Argument(..., help="path to the data directory"),
     overwrite: bool = typer.Option(False, "--overwrite", "-o"),
 ):
     """Process nested sampling results (posteriors, evidence, plots)."""
@@ -278,7 +278,7 @@ def ns_output(
 
 @app.command()
 def show_settings(
-    dir_path: str = typer.Argument(".", help="path to the data directory"),
+    dir_path: str = typer.Argument(..., help="path to the data directory"),
 ):
     """Print settings.csv as a formatted table."""
     from rich import box
@@ -340,7 +340,7 @@ def show_settings(
 
 @app.command()
 def show_params(
-    dir_path: str = typer.Argument(".", help="path to the data directory"),
+    dir_path: str = typer.Argument(..., help="path to the data directory"),
     star: bool = typer.Option(False, "--star", help="only show params_star.csv"),
 ):
     """Print params.csv (and params_star.csv) as formatted tables."""
