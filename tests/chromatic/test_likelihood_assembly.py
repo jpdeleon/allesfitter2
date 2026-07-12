@@ -58,6 +58,7 @@ class TestPerBandRR:
     def test_radius_2_over_radius_1_matches_per_band_rr(
         self, two_band_two_inst_datadir, captured_fluxes_calls, truth
     ):
+        captured_fluxes_calls.clear()
         config.init(str(two_band_two_inst_datadir), quiet=True)
         params = _prepared_params()
 
@@ -66,10 +67,10 @@ class TestPerBandRR:
         for inst in ("tess", "kepler"):
             computer.flux_subfct_ellc(params, inst=inst, companion="b", xx=xx)
 
-        {kw["t_obs"][0]: kw for tag, kw in captured_fluxes_calls if tag == "fluxes"}
+        {kw["t_obs"][0]: kw for tag, kw in captured_fluxes_calls if tag == "lc"}
         # We made 2 ellc.fluxes calls, one per inst, with identical xx[0] —
         # so re-key by inst via call order.
-        inst_calls = [kw for tag, kw in captured_fluxes_calls if tag == "fluxes"]
+        inst_calls = [kw for tag, kw in captured_fluxes_calls if tag == "lc"]
         assert len(inst_calls) == 2
 
         expected_rr = {0: truth["rr_tess"], 1: truth["rr_kepler"]}
@@ -88,13 +89,14 @@ class TestPerInstLDC:
     def test_ldc_lists_match_per_band_scalars(
         self, two_band_two_inst_datadir, captured_fluxes_calls
     ):
+        captured_fluxes_calls.clear()
         config.init(str(two_band_two_inst_datadir), quiet=True)
         params = _prepared_params()
         xx = np.linspace(2459000.5 - 0.05, 2459000.5 + 0.05, 5)
         for inst in ("tess", "kepler"):
             computer.flux_subfct_ellc(params, inst=inst, companion="b", xx=xx)
 
-        inst_calls = [kw for tag, kw in captured_fluxes_calls if tag == "fluxes"]
+        inst_calls = [kw for tag, kw in captured_fluxes_calls if tag == "lc"]
         # ellc receives ldc_1 = the per-inst assembled list, sourced from
         # bandpass-suffixed q1/q2 → converted to u-space.
         ldc_tess = inst_calls[0]["ldc_1"]
@@ -109,13 +111,14 @@ class TestPerInstLDC:
     def test_shared_bandpass_yields_identical_ldc_across_instruments(
         self, one_band_two_inst_datadir, captured_fluxes_calls
     ):
+        captured_fluxes_calls.clear()
         config.init(str(one_band_two_inst_datadir), quiet=True)
         params = _prepared_params()
         xx = np.linspace(2459000.5 - 0.05, 2459000.5 + 0.05, 5)
         for inst in ("tess_pdcsap", "tess_qlp"):
             computer.flux_subfct_ellc(params, inst=inst, companion="b", xx=xx)
 
-        inst_calls = [kw for tag, kw in captured_fluxes_calls if tag == "fluxes"]
+        inst_calls = [kw for tag, kw in captured_fluxes_calls if tag == "lc"]
         assert len(inst_calls) == 2
         np.testing.assert_allclose(inst_calls[0]["ldc_1"], inst_calls[1]["ldc_1"], rtol=0, atol=0)
 
@@ -127,13 +130,14 @@ class TestSharedOrbitalParams:
     def test_orbital_kwargs_bit_equal_across_insts(
         self, two_band_two_inst_datadir, captured_fluxes_calls
     ):
+        captured_fluxes_calls.clear()
         config.init(str(two_band_two_inst_datadir), quiet=True)
         params = _prepared_params()
         xx = np.linspace(2459000.5 - 0.05, 2459000.5 + 0.05, 5)
         for inst in ("tess", "kepler"):
             computer.flux_subfct_ellc(params, inst=inst, companion="b", xx=xx)
 
-        inst_calls = [kw for tag, kw in captured_fluxes_calls if tag == "fluxes"]
+        inst_calls = [kw for tag, kw in captured_fluxes_calls if tag == "lc"]
         for key in SHARED_ORBITAL_KWARGS:
             v_tess = inst_calls[0].get(key)
             v_kepler = inst_calls[1].get(key)
@@ -147,13 +151,14 @@ class TestSharedOrbitalParams:
         # rsuma is globally shared; per-band rr means radius_1+radius_2 may
         # equal rsuma exactly per band. Pin: radius_1+radius_2 == rsuma for each
         # call (the chromatic invariant from computer.py:538-542).
+        captured_fluxes_calls.clear()
         config.init(str(two_band_two_inst_datadir), quiet=True)
         params = _prepared_params()
         xx = np.linspace(2459000.5 - 0.05, 2459000.5 + 0.05, 5)
         for inst in ("tess", "kepler"):
             computer.flux_subfct_ellc(params, inst=inst, companion="b", xx=xx)
 
-        inst_calls = [kw for tag, kw in captured_fluxes_calls if tag == "fluxes"]
+        inst_calls = [kw for tag, kw in captured_fluxes_calls if tag == "lc"]
         for kw in inst_calls:
             assert kw["radius_1"] + kw["radius_2"] == pytest.approx(truth["rsuma"], rel=1e-12)
 
@@ -248,13 +253,15 @@ class TestSharedBandpassLDCPropagation:
             q1=q1,
             q2=q2,
         )
+        # Clear any ellc calls from simulate_lightcurve during datadir construction
+        captured_fluxes_calls.clear()
         config.init(str(datadir), quiet=True)
         params = _prepared_params()
         xx = np.linspace(2459000.5 - 0.05, 2459000.5 + 0.05, 5)
         for inst in ("tess_pdcsap", "tess_qlp"):
             computer.flux_subfct_ellc(params, inst=inst, companion="b", xx=xx)
 
-        inst_calls = [kw for tag, kw in captured_fluxes_calls if tag == "fluxes"]
+        inst_calls = [kw for tag, kw in captured_fluxes_calls if tag == "lc"]
         assert len(inst_calls) == 2
         expected_u = q_to_u([q1, q2], law="quad")
         for kw in inst_calls:
@@ -272,11 +279,12 @@ class TestSharedBandpassLDCPropagation:
             q1=0.50,
             q2=0.30,
         )
+        captured_fluxes_calls.clear()
         config.init(str(datadir_a), quiet=True)
         params_a = _prepared_params()
         xx = np.linspace(2459000.5 - 0.05, 2459000.5 + 0.05, 5)
         computer.flux_subfct_ellc(params_a, inst="tess_pdcsap", companion="b", xx=xx)
-        ldc_a = [kw for tag, kw in captured_fluxes_calls if tag == "fluxes"][-1]["ldc_1"]
+        ldc_a = [kw for tag, kw in captured_fluxes_calls if tag == "lc"][-1]["ldc_1"]
 
         # Reset BASEMENT and rebuild with q1=0.47
         config.BASEMENT = None
@@ -286,10 +294,11 @@ class TestSharedBandpassLDCPropagation:
             q1=0.47,
             q2=0.30,
         )
+        captured_fluxes_calls.clear()
         config.init(str(datadir_b), quiet=True)
         params_b = _prepared_params()
         computer.flux_subfct_ellc(params_b, inst="tess_pdcsap", companion="b", xx=xx)
-        ldc_b = [kw for tag, kw in captured_fluxes_calls if tag == "fluxes"][-1]["ldc_1"]
+        ldc_b = [kw for tag, kw in captured_fluxes_calls if tag == "lc"][-1]["ldc_1"]
 
         # Sanity: the two ldc lists must differ — editing the value column
         # in params.csv must actually propagate through to ellc.
@@ -311,6 +320,7 @@ class TestAchromaticFallback:
     ):
         # Remove the chromatic key and inject an achromatic b_rr → the
         # fallback at computer.py:529-530 must kick in and use b_rr.
+        captured_fluxes_calls.clear()
         config.init(str(two_band_two_inst_datadir), quiet=True)
         params = _prepared_params()
         params.pop("b_rr_tess", None)
@@ -318,7 +328,7 @@ class TestAchromaticFallback:
         xx = np.linspace(truth["epoch"] - 0.05, truth["epoch"] + 0.05, 5)
         computer.flux_subfct_ellc(params, inst="tess", companion="b", xx=xx)
 
-        kw = [kw for tag, kw in captured_fluxes_calls if tag == "fluxes"][0]
+        kw = [kw for tag, kw in captured_fluxes_calls if tag == "lc"][0]
         rr = kw["radius_2"] / kw["radius_1"]
         assert rr == pytest.approx(0.123, rel=1e-10)
 

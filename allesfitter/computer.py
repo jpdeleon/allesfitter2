@@ -413,7 +413,7 @@ def update_params(theta):
         if params[companion + "_a"] is None:
             radius_1 = params.get(companion + "_radius_1")
             if radius_1 is not None and radius_1 > 0:
-                R_star = config.BASEMENT.params_star.get("R_star_median")
+                R_star = getattr(config.BASEMENT, "params_star", {}).get("R_star_median")
                 if R_star is not None:
                     params[companion + "_a"] = R_star / radius_1
 
@@ -496,6 +496,7 @@ def update_params(theta):
                 and (params[companion + "_rr"] > 0)
                 and (params[companion + "_K"] is not None)
                 and (params[companion + "_K"] > 0)
+                and hasattr(config.BASEMENT, "params_star")
             ):
                 M_comp = calc_M_comp_from_RV(
                     K=params[companion + "_K"],

@@ -43,7 +43,7 @@ def _init_plotting():
 
 
 #::: allesfitter modules
-from . import config, deriver
+from . import config
 from ._output_shared import save_per_transit_plots, write_priors_latex_table
 from .computer import calculate_baseline, calculate_model, calculate_stellar_var
 from .general_output import (
@@ -622,6 +622,8 @@ def ns_output(datadir, backend=None, overwrite=None):
     from dynesty import utils as dyutils
     from matplotlib.ticker import MaxNLocator, ScalarFormatter
 
+    from . import deriver
+
     config.init(datadir)
 
     #::: security check
@@ -966,6 +968,8 @@ def ns_output(datadir, backend=None, overwrite=None):
 
 
 def ns_derive(datadir):  # emergency function if matplotlib and Mac OSX crash
+    from . import deriver
+
     posterior_samples = get_ns_posterior_samples(datadir, as_type="2d_array")
     deriver.derive(posterior_samples, "ns")
 

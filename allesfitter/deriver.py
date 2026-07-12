@@ -13,32 +13,34 @@ Twitter: m_n_guenther
 Web: www.mnguenther.com
 """
 
-#::: plotting settings
-import seaborn as sns
-
-sns.set(
-    context="paper",
-    style="ticks",
-    palette="deep",
-    font="sans-serif",
-    font_scale=1.5,
-    color_codes=True,
-)
-sns.set_style({"xtick.direction": "in", "ytick.direction": "in"})
-sns.set_context(rc={"lines.markeredgewidth": 1})
-
 #::: modules
 import copy
 import os
-import pickle
 
-import matplotlib.pyplot as plt
-
-# import collections
 import numpy as np
 from astropy.constants import M_earth, M_jup, M_sun, R_earth, R_jup, R_sun, au
-from corner import corner
-from matplotlib.ticker import ScalarFormatter
+
+_HAS_PLOTTING = False
+
+
+def _init_plotting():
+    global _HAS_PLOTTING
+    if _HAS_PLOTTING:
+        return
+    _HAS_PLOTTING = True
+    import seaborn as sns
+
+    sns.set(
+        context="paper",
+        style="ticks",
+        palette="deep",
+        font="sans-serif",
+        font_scale=1.5,
+        color_codes=True,
+    )
+    sns.set_style({"xtick.direction": "in", "ytick.direction": "in"})
+    sns.set_context(rc={"lines.markeredgewidth": 1})
+
 
 #::: allesfitter modules
 from . import config
@@ -1029,6 +1031,8 @@ def derive(samples, mode):
         # =====================================================================
         #::: save all in pickle
         # =====================================================================
+        import pickle
+
         pickle.dump(
             derived_samples,
             open(os.path.join(config.BASEMENT.outdir, mode + "_derived_samples.pickle"), "wb"),
@@ -1100,6 +1104,11 @@ def derive(samples, mode):
         # =====================================================================
         #::: plot corner
         # =====================================================================
+        _init_plotting()
+        import matplotlib.pyplot as plt
+        from corner import corner
+        from matplotlib.ticker import ScalarFormatter
+
         if "combined_host_density" in names:
             names.remove(
                 "combined_host_density"
