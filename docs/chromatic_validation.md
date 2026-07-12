@@ -43,8 +43,7 @@ companion. `{bandpass}` is the user-supplied bandpass label (e.g. `tess`,
   (`computer.py:538-542`).
 - The LDC assembly at `computer.py:148-165` builds the per-instrument LDC list
   consumed by `ellc.fluxes` from bandpass-scoped scalars when chromatic and
-  from instrument-scoped scalars otherwise. The same logic mirrors in
-  `v2/translator.py:75-105`.
+  from instrument-scoped scalars otherwise.
 - Shared orbital parameters (period, epoch, cosi, rsuma, f_c, f_s, K) are
   validated as single keys with no per-inst or per-bandpass suffix
   (`basement.py:1117-1124`).
@@ -71,9 +70,9 @@ companion. `{bandpass}` is the user-supplied bandpass label (e.g. `tess`,
    - **Fix:** in chromatic mode, scan `<companion>_rr_*` rows and raise if the
      suffix is not in `set(bandpass.values())`. (`load_params`).
    - **Pinned by:** `TestUnknownBandpass`.
-4. **No structured helper for LDC scope.** Five sites in `computer.py` and
-   `v2/translator.py` repeated `if bandpass: suffix='_'+bandpass else
-   suffix='_'+inst`, easy to drift apart.
+4. **No structured helper for LDC scope.** Five sites in `computer.py`
+   repeated `if bandpass: suffix='_'+bandpass else suffix='_'+inst`, easy to
+   drift apart.
    - **Fix:** add `Basement.get_ldc_key(role, n, inst, space='u'|'q')` mirroring
      `get_rr_key`. The new helper is the single source of truth for LDC-scalar
      keys; existing call sites remain valid because they already encode the same

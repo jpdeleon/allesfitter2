@@ -27,7 +27,7 @@ dependencies = [
     "lightkurve==2.4.2",
     "tess-point",
     "scipy>=1.11.3",
-    "numpy>=1.26.0,<2.0",
+    "numpy>=1.26.0,<3.0",
     "seaborn==0.12",
     "statsmodels>=0.14.0",
     "celerite==0.4.2",
@@ -153,13 +153,6 @@ ignore = [
 "allesfitter/prepare_ttv_fit.py" = ["E402"]
 "allesfitter/spots.py" = ["E402"]
 "allesfitter/utils/colormaputil.py" = ["E402"]
-"allesfitter/v2/classes.py" = ["E402"]
-"allesfitter/v2/defaults.py" = ["E402"]
-"allesfitter/v2/detection/injection_recovery_output.py" = ["E402"]
-"allesfitter/v2/detection/injection_recovery.py" = ["E402"]
-"allesfitter/v2/detection/transit_search.py" = ["E402"]
-"allesfitter/v2/simulate.py" = ["E402"]
-"allesfitter/v2/translator.py" = ["E402"]
 
 # Mypy: start lenient (the codebase is largely untyped). Tighten per-module by
 # adding stricter overrides as type annotations are introduced.
