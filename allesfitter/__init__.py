@@ -40,86 +40,169 @@ import os
 import pickle
 import warnings
 from shutil import copyfile
-from typing import Any, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 warnings.filterwarnings("ignore", message=".*pkg_resources is deprecated.*")
 
-import matplotlib.pyplot as plt
-import numpy as np
+# All third-party imports and submodule imports are lazy via __getattr__ below.
+# This makes `import allesfitter` (~0.1s) instead of ~17s.
+import importlib as _importlib
 
-try:
+if TYPE_CHECKING:
     import emcee
-except ImportError:
-    emcee = None
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import seaborn as sns
 
-#::: plotting settings
-import seaborn as sns
+    from allesfitter import config, general_output, nested_sampling_output
+    from allesfitter.computer import (
+        calculate_baseline,
+        calculate_model,
+        calculate_stellar_var,
+        calculate_yerr_w,
+        update_params,
+    )
+    from allesfitter.general_output import draw_initial_guess_samples, get_labels
+    from allesfitter.mcmc_output import (
+        draw_mcmc_posterior_samples,
+        draw_mcmc_posterior_samples_at_maximum_likelihood,
+    )
 
-sns.set(
-    context="paper",
-    style="ticks",
-    palette="deep",
-    font="sans-serif",
-    font_scale=1.5,
-    color_codes=True,
-)
-sns.set_style({"xtick.direction": "in", "ytick.direction": "in"})
-sns.set_context(rc={"lines.markeredgewidth": 1})
+_LAZY_NAMES: dict[str, tuple[str, str | None]] = {
+    "np": ("numpy", None),
+    "plt": ("matplotlib.pyplot", None),
+    "sns": ("seaborn", None),
+    "calculate_baseline": ("allesfitter.computer", "calculate_baseline"),
+    "calculate_model": ("allesfitter.computer", "calculate_model"),
+    "calculate_stellar_var": ("allesfitter.computer", "calculate_stellar_var"),
+    "calculate_yerr_w": ("allesfitter.computer", "calculate_yerr_w"),
+    "update_params": ("allesfitter.computer", "update_params"),
+    "draw_initial_guess_samples": (
+        "allesfitter.general_output",
+        "draw_initial_guess_samples",
+    ),
+    "get_data": ("allesfitter.general_output", "get_data"),
+    "get_labels": ("allesfitter.general_output", "get_labels"),
+    "get_settings": ("allesfitter.general_output", "get_settings"),
+    "show_initial_guess": ("allesfitter.general_output", "show_initial_guess"),
+    "q_to_u": (
+        "allesfitter.lightcurves",
+        "translate_limb_darkening_from_q_to_u",
+    ),
+    "u_to_q": (
+        "allesfitter.lightcurves",
+        "translate_limb_darkening_from_u_to_q",
+    ),
+    "mcmc_fit": ("allesfitter.mcmc", "mcmc_fit"),
+    "draw_mcmc_posterior_samples": (
+        "allesfitter.mcmc_output",
+        "draw_mcmc_posterior_samples",
+    ),
+    "draw_mcmc_posterior_samples_at_maximum_likelihood": (
+        "allesfitter.mcmc_output",
+        "draw_mcmc_posterior_samples_at_maximum_likelihood",
+    ),
+    "get_mcmc_posterior_samples": (
+        "allesfitter.mcmc_output",
+        "get_mcmc_posterior_samples",
+    ),
+    "mcmc_output": ("allesfitter.mcmc_output", "mcmc_output"),
+    "ns_fit": ("allesfitter.nested_sampling", "ns_fit"),
+    "get_ns_params": ("allesfitter.nested_sampling_output", "get_ns_params"),
+    "get_ns_posterior_samples": (
+        "allesfitter.nested_sampling_output",
+        "get_ns_posterior_samples",
+    ),
+    "ns_derive": ("allesfitter.nested_sampling_output", "ns_derive"),
+    "ns_output": ("allesfitter.nested_sampling_output", "ns_output"),
+    "OptimizeResult": ("allesfitter.optimize", "OptimizeResult"),
+    "optimize": ("allesfitter.optimize", "optimize"),
+    "broken_xaxis_subplots": ("allesfitter.plot_utils", "broken_xaxis_subplots"),
+    "detect_time_gaps": ("allesfitter.plot_utils", "detect_time_gaps"),
+    "brokenplot": ("allesfitter.plotting", "brokenplot"),
+    "brokenplot_csv": ("allesfitter.plotting", "brokenplot_csv"),
+    "fullplot": ("allesfitter.plotting", "fullplot"),
+    "fullplot_csv": ("allesfitter.plotting", "fullplot_csv"),
+    "tessplot": ("allesfitter.plotting", "tessplot"),
+    "tessplot_csv": ("allesfitter.plotting", "tessplot_csv"),
+    "get_logZ": (
+        "allesfitter.postprocessing.nested_sampling_compare_logZ",
+        "get_logZ",
+    ),
+    "ns_plot_bayes_factors": (
+        "allesfitter.postprocessing.nested_sampling_compare_logZ",
+        "ns_plot_bayes_factors",
+    ),
+    "plot_histograms": ("allesfitter.postprocessing.plot_histograms", "plot_histograms"),
+    "mcmc_plot_violins": ("allesfitter.postprocessing.plot_violins", "mcmc_plot_violins"),
+    "ns_plot_violins": ("allesfitter.postprocessing.plot_violins", "ns_plot_violins"),
+    "prepare_ttv_fit": ("allesfitter.prepare_ttv_fit", "prepare_ttv_fit"),
+    "transform_priors": ("allesfitter.priors", "transform_priors"),
+    "estimate_noise": ("allesfitter.priors.estimate_noise", "estimate_noise"),
+    "estimate_noise_out_of_transit": (
+        "allesfitter.priors.estimate_noise",
+        "estimate_noise_out_of_transit",
+    ),
+    "get_run_log_path": ("allesfitter.run_logger", "get_log_path"),
+    "log_event": ("allesfitter.run_logger", "log_event"),
+    "log_run": ("allesfitter.run_logger", "log_run"),
+    "run_log_tail": ("allesfitter.run_logger", "tail"),
+}
+
+_SEABORN_CONFIGURED = False
 
 
-#:::: allesfitter modules
-from . import config, general_output, nested_sampling_output
-from .computer import (
-    calculate_baseline,
-    calculate_model,
-    calculate_stellar_var,
-    calculate_yerr_w,
-    update_params,
-)
-from .general_output import (
-    draw_initial_guess_samples,
-    get_data,
-    get_labels,
-    get_settings,
-    show_initial_guess,
-)
-from .lightcurves import translate_limb_darkening_from_q_to_u as q_to_u
-from .lightcurves import translate_limb_darkening_from_u_to_q as u_to_q
-from .mcmc import mcmc_fit
-from .mcmc_output import (
-    draw_mcmc_posterior_samples,
-    draw_mcmc_posterior_samples_at_maximum_likelihood,
-    get_mcmc_posterior_samples,
-    mcmc_output,
-)
-from .nested_sampling import ns_fit
-from .nested_sampling_output import get_ns_params, get_ns_posterior_samples, ns_derive, ns_output
-from .optimize import OptimizeResult, optimize
+def __getattr__(name: str) -> Any:
+    if name == "emcee":
+        try:
+            mod = _importlib.import_module("emcee")
+        except ImportError:
+            mod = None
+        globals()["emcee"] = mod
+        return mod
 
-# Plot composition helpers (broken x-axis layout, etc.)
-from .plot_utils import broken_xaxis_subplots, detect_time_gaps
-from .plotting import brokenplot, brokenplot_csv, fullplot, fullplot_csv, tessplot, tessplot_csv
-from .postprocessing.nested_sampling_compare_logZ import get_logZ, ns_plot_bayes_factors
-from .postprocessing.plot_histograms import plot_histograms
-from .postprocessing.plot_violins import mcmc_plot_violins, ns_plot_violins
-from .prepare_ttv_fit import prepare_ttv_fit
-from .priors import transform_priors
-from .priors.estimate_noise import estimate_noise, estimate_noise_out_of_transit
-from .run_logger import get_log_path as get_run_log_path
+    if name in _LAZY_NAMES:
+        module_path, attr = _LAZY_NAMES[name]
+        mod = _importlib.import_module(module_path)
 
-# Centralized run logger — see allesfitter/run_logger.py and run.py template.
-from .run_logger import log_event, log_run
-from .run_logger import tail as run_log_tail
+        if name == "sns":
+            global _SEABORN_CONFIGURED
+            if not _SEABORN_CONFIGURED:
+                mod.set(
+                    context="paper",
+                    style="ticks",
+                    palette="deep",
+                    font="sans-serif",
+                    font_scale=1.5,
+                    color_codes=True,
+                )
+                mod.set_style({"xtick.direction": "in", "ytick.direction": "in"})
+                mod.set_context(rc={"lines.markeredgewidth": 1})
+                _SEABORN_CONFIGURED = True
+
+        result = getattr(mod, attr) if attr else mod
+        globals()[name] = result
+        return result
+
+    try:
+        mod = _importlib.import_module(f"allesfitter.{name}")
+        globals()[name] = mod
+        return mod
+    except ImportError:
+        pass
+
+    msg = f"module 'allesfitter' has no attribute {name!r}"
+    raise AttributeError(msg)
 
 
-def GUI() -> None:
-    """Launch the allesfitter Jupyter-based GUI.
+def __dir__() -> list[str]:
+    names = set(globals().keys())
+    names.update(_LAZY_NAMES)
+    names.add("emcee")
+    return sorted(names)
 
-    Opens the GUI notebook in a Jupyter environment for interactive
-    fitting and visualization of photometric and RV data.
-    """
-    allesfitter_path = os.path.dirname(os.path.realpath(__file__))
-    os.system('jupyter notebook "' + os.path.join(allesfitter_path, "GUI.ipynb") + '"')
+
+# ::::: allesclass
 
 
 class allesclass:
@@ -148,22 +231,18 @@ class allesclass:
 
         print("working")
 
-        #::: nested sampling fit?
         if os.path.exists(os.path.join(config.BASEMENT.outdir, "save_ns.pickle.gz")):
             f = gzip.GzipFile(os.path.join(config.BASEMENT.outdir, "save_ns.pickle.gz"), "rb")
             results = pickle.load(f)
             f.close()
-            self.posterior_samples = nested_sampling_output.draw_ns_posterior_samples(
-                results
-            )  # all weighted posterior_samples
+            self.posterior_samples = nested_sampling_output.draw_ns_posterior_samples(results)
             self.posterior_params = nested_sampling_output.draw_ns_posterior_samples(
                 results, as_type="dic"
-            )  # all weighted posterior_samples
+            )
             self.posterior_params_median, self.posterior_params_ll, self.posterior_params_ul = (
                 general_output.get_params_from_samples(self.posterior_samples)
             )
 
-        #::: mcmc fit?
         elif os.path.exists(os.path.join(config.BASEMENT.outdir, "mcmc_save.h5")):
             copyfile(
                 os.path.join(config.BASEMENT.outdir, "mcmc_save.h5"),
@@ -172,12 +251,8 @@ class allesclass:
             reader = emcee.backends.HDFBackend(
                 os.path.join(config.BASEMENT.outdir, "mcmc_save_tmp.h5"), read_only=True
             )
-            self.posterior_samples = draw_mcmc_posterior_samples(
-                reader
-            )  # all weighted posterior_samples
-            self.posterior_params = draw_mcmc_posterior_samples(
-                reader, as_type="dic"
-            )  # all weighted posterior_samples
+            self.posterior_samples = draw_mcmc_posterior_samples(reader)
+            self.posterior_params = draw_mcmc_posterior_samples(reader, as_type="dic")
             self.posterior_samples_at_maximum_likelihood = (
                 draw_mcmc_posterior_samples_at_maximum_likelihood(reader)
             )
@@ -189,27 +264,21 @@ class allesclass:
             )
             os.remove(os.path.join(config.BASEMENT.outdir, "mcmc_save_tmp.h5"))
 
-        #::: else
         else:
             warnings.warn("No NS nor MCMC save file detected.", stacklevel=2)
 
-        #::: nested sampling derived results?
         if os.path.exists(os.path.join(config.BASEMENT.outdir, "ns_derived_samples.pickle")):
             self.posterior_derived_params = pickle.load(
                 open(os.path.join(config.BASEMENT.outdir, "ns_derived_samples.pickle"), "rb")
             )
 
-        #::: mcmc derived results?
         elif os.path.exists(os.path.join(config.BASEMENT.outdir, "mcmc_derived_samples.pickle")):
             self.posterior_derived_params = pickle.load(
                 open(os.path.join(config.BASEMENT.outdir, "mcmc_derived_samples.pickle"), "rb")
             )
 
-        #::: else
         else:
             warnings.warn("No NS nor MCMC derived file detected.", stacklevel=2)
-
-    #::: plot
 
     def plot(
         self,
@@ -228,37 +297,6 @@ class allesclass:
         kwargs_model=None,
         kwargs_ax=None,
     ):
-        """
-        Required input:
-        ---------------
-        inst: str
-            Name of the instrument (e.g. 'TESS')
-
-        companion : None or str
-            'b' / 'c' / ...
-
-        style:
-            'full' / 'phase' / 'phasezoom'
-
-
-        Optional input:
-        ---------------
-        fig : matplotlib figure object
-
-        ax : matplotlib axis object
-
-        mode : str
-            'posterior' / 'initial guess'
-
-        Nsamples : int
-            If mode=='posterior', this is the number of posterior curves to be plotted
-
-        samples : array
-            Prior or posterior samples to plot the fit from
-
-        timelabel:
-            'Time' / 'Time_since'
-        """
         if ax is None:
             fig, ax = plt.subplots(1, 1)
         if (samples is None) and (Nsamples > 0) and (mode != "data"):
@@ -284,8 +322,6 @@ class allesclass:
             kwargs_ax=kwargs_ax,
         )
         return fig, ax
-
-    #::: posterior median
 
     def get_posterior_median_model(self, inst, key, xx=None, phased=False, settings=None):
         if not phased:
@@ -316,8 +352,6 @@ class allesclass:
 
     def get_posterior_median_yerr(self, inst, key):
         return calculate_yerr_w(self.posterior_params_median, inst, key)
-
-    #::: posterior at maximum likelihood
 
     def get_posterior_at_maximum_likelihood_model(
         self, inst, key, xx=None, phased=False, settings=None
@@ -357,8 +391,6 @@ class allesclass:
     def get_posterior_at_maximum_likelihood_yerr(self, inst, key):
         return calculate_yerr_w(self.posterior_params_median, inst, key)
 
-    #::: initial guess
-
     def get_initial_guess_model(self, inst, key, xx=None, phased=False):
         if not phased:
             return calculate_model(self.initial_guess_params_median, inst, key, xx=xx)
@@ -378,8 +410,6 @@ class allesclass:
             return calculate_stellar_var(self.initial_guess_params_median, inst, key, xx=xx)
         elif phased:
             raise ValueError("Not yet implemented.")
-
-    #::: one posterior sample
 
     def get_one_posterior_curve_set(self, inst, key, xx=None, sample_id=None, phased=False):
         if sample_id is None:
@@ -434,6 +464,9 @@ class allesclass:
         return calculate_stellar_var(buf, key, xx=xx)
 
 
-#::: version
-#::: single source of truth lives in allesfitter/_version.py; bump it there.
+def GUI() -> None:
+    allesfitter_path = os.path.dirname(os.path.realpath(__file__))
+    os.system('jupyter notebook "' + os.path.join(allesfitter_path, "GUI.ipynb") + '"')
+
+
 from ._version import __version__
