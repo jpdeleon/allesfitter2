@@ -178,6 +178,104 @@ def grid(
     _run_script("run_allesfitter_grid.py", argv)
 
 
+@app.command()
+def show_initial_guess(
+    dir_path: str = typer.Argument(".", help="path to the data directory"),
+    quiet: bool = typer.Option(False, "--quiet", "-q"),
+    no_plot: bool = typer.Option(False, "--no-plot", help="skip generating PDFs"),
+    midtransit: bool = typer.Option(True, "--midtransit/--no-midtransit"),
+    ingress: bool = typer.Option(False, "--ingress/--no-ingress"),
+    egress: bool = typer.Option(False, "--egress/--no-egress"),
+):
+    """Plot data with the initial guess model."""
+    from allesfitter.general_output import show_initial_guess as _show
+
+    _show(
+        dir_path,
+        quiet=quiet,
+        do_plot=not no_plot,
+        plot_midtransit=midtransit,
+        plot_ingress=ingress,
+        plot_egress=egress,
+    )
+
+
+@app.command()
+def optimize(
+    dir_path: str = typer.Argument(".", help="path to the data directory"),
+    method: str = typer.Option(
+        "cmaes",
+        "--method",
+        "-m",
+        help="optimizer: cmaes, dual_annealing, differential_evolution, L-BFGS-B, ...",
+    ),
+    no_refine: bool = typer.Option(False, "--no-refine", help="skip L-BFGS-B refinement"),
+    restarts: int = typer.Option(1, "--restarts", "-n", help="number of multistart restarts"),
+    seed: int = typer.Option(42, "--seed", help="random seed"),
+    quiet: bool = typer.Option(False, "--quiet", "-q"),
+):
+    """Global optimization to warm-start MCMC / nested sampling."""
+    from allesfitter.optimize import optimize as _optimize
+
+    _optimize(
+        dir_path,
+        method=method,
+        refine=not no_refine,
+        n_restarts=restarts,
+        seed=seed,
+        quiet=quiet,
+    )
+
+
+@app.command()
+def mcmc_fit(
+    dir_path: str = typer.Argument(".", help="path to the data directory"),
+    append: bool = typer.Option(False, "--append", help="append to existing chains"),
+):
+    """Run MCMC sampling (emcee)."""
+    from allesfitter.mcmc import mcmc_fit as _mcmc_fit
+    from allesfitter.run_logger import log_run
+
+    with log_run("mcmc_fit", dir_path):
+        _mcmc_fit(dir_path, append=append)
+
+
+@app.command()
+def mcmc_output(
+    dir_path: str = typer.Argument(".", help="path to the data directory"),
+    overwrite: bool = typer.Option(False, "--overwrite", "-o"),
+    quiet: bool = typer.Option(False, "--quiet", "-q"),
+):
+    """Process MCMC results (posteriors, plots, summaries)."""
+    from allesfitter.mcmc_output import mcmc_output as _mcmc_output
+
+    _mcmc_output(dir_path, overwrite=overwrite, quiet=quiet)
+
+
+@app.command()
+def ns_fit(
+    dir_path: str = typer.Argument(".", help="path to the data directory"),
+    overwrite: bool = typer.Option(False, "--overwrite", "-o"),
+):
+    """Run nested sampling (dynesty)."""
+    from allesfitter.nested_sampling import ns_fit as _ns_fit
+    from allesfitter.run_logger import log_run
+
+    with log_run("ns_fit", dir_path):
+        _ns_fit(dir_path, overwrite=overwrite)
+
+
+@app.command()
+def ns_output(
+    dir_path: str = typer.Argument(".", help="path to the data directory"),
+    overwrite: bool = typer.Option(False, "--overwrite", "-o"),
+):
+    """Process nested sampling results (posteriors, evidence, plots)."""
+    from allesfitter.nested_sampling_output import ns_output as _ns_output
+
+    _ns_output(dir_path, overwrite=overwrite)
+
+
 def _run_script(script_name: str, argv: list[str]) -> None:
     """Run a legacy script via runpy with the given argv."""
     import runpy
