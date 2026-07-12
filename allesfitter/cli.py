@@ -276,6 +276,196 @@ def ns_output(
     _ns_output(dir_path, overwrite=overwrite)
 
 
+@app.command()
+def show_settings(
+    dir_path: str = typer.Argument(".", help="path to the data directory"),
+):
+    """Print settings.csv as a formatted table."""
+    from rich import box
+    from rich.console import Console
+    from rich.table import Table
+
+    _console = Console()
+    path = Path(dir_path).resolve() / "settings.csv"
+    if not path.exists():
+        _console.print(f"[red]Error:[/] {path} not found")
+        raise typer.Exit(1)
+
+    raw = path.read_text().splitlines()
+    sec_rows: list[tuple[str, list[tuple[str, str]]]] = []
+    current_sec = ""
+    current_rows: list[tuple[str, str]] = []
+    after_sep = False
+    for line in raw:
+        s = line.strip()
+        if not s:
+            continue
+        if s.startswith("###"):
+            if current_rows:
+                sec_rows.append((current_sec, current_rows))
+                current_rows = []
+                current_sec = ""
+            after_sep = True
+            continue
+        if s.startswith("#") and not s.startswith("##"):
+            rest = s.lstrip("# ").rstrip(",").strip()
+            if after_sep and rest:
+                is_section_title = (
+                    "," not in rest
+                    or not rest.split(",")[0].replace("_", "").replace(".", "").isalnum()
+                )
+                if is_section_title:
+                    current_sec = rest
+                    after_sep = False
+            continue
+        after_sep = False
+        if s.startswith("#"):
+            continue
+        k, _, v = s.partition(",")
+        current_rows.append((k.strip(), v.strip()))
+    if current_rows:
+        sec_rows.append((current_sec, current_rows))
+
+    for sec_name, rows in sec_rows:
+        table = Table(
+            title=sec_name, box=box.ROUNDED, title_justify="left", header_style="bold cyan"
+        )
+        table.add_column("Key", style="green", no_wrap=True)
+        table.add_column("Value", style="white")
+        for k, v in rows:
+            table.add_row(k, v)
+        _console.print(table)
+        _console.print()
+
+
+@app.command()
+def show_params(
+    dir_path: str = typer.Argument(".", help="path to the data directory"),
+    star: bool = typer.Option(False, "--star", help="only show params_star.csv"),
+):
+    """Print params.csv (and params_star.csv) as formatted tables."""
+    from rich import box
+    from rich.console import Console
+    from rich.table import Table
+
+    _console = Console()
+    base = Path(dir_path).resolve()
+
+    # ── params_star.csv ──
+    star_path = base / "params_star.csv"
+    if star_path.exists():
+        lines = star_path.read_text().splitlines()
+        if len(lines) >= 3:
+            headers = [h.strip("# ").strip() for h in lines[0].split(",")]
+            units = [u.strip() for u in lines[1].split(",")]
+            vals = [v.strip() for v in lines[2].split(",")]
+            table = Table(
+                title="Stellar Parameters",
+                box=box.ROUNDED,
+                title_justify="left",
+                header_style="bold magenta",
+            )
+            table.add_column("Parameter", style="cyan", no_wrap=True)
+            table.add_column("Value", style="white", justify="right")
+            table.add_column("Unit", style="yellow")
+            for h, v, u in zip(headers, vals, units):
+                table.add_row(h, v, u)
+            _console.print(table)
+            _console.print()
+
+    if star:
+        return
+
+    # ── params.csv ──
+    params_path = base / "params.csv"
+    if not params_path.exists():
+        _console.print(f"[red]Error:[/] {params_path} not found")
+        raise typer.Exit(1)
+
+    cols = None
+    sections: list[tuple[str, list[list[str]]]] = []
+    current_sec = ""
+    current_rows: list[list[str]] = []
+    first = True
+    for line in params_path.read_text().splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("###"):
+            if first:
+                first = False
+            elif current_rows and cols:
+                sections.append((current_sec, current_rows))
+                current_rows = []
+            current_sec = stripped.strip("# ")
+            continue
+        if stripped.startswith("#") and not first:
+            continue
+        if stripped.startswith("#") and first:
+            cols = [c.strip("# ").strip() for c in stripped.split(",")]
+            first = False
+            continue
+        current_rows.append([c.strip() for c in stripped.split(",")])
+    if current_rows and cols:
+        sections.append((current_sec, current_rows))
+
+    if not cols:
+        _console.print("[red]Error:[/] params.csv has no header row")
+        raise typer.Exit(1)
+
+    fit_col = cols.index("fit") if "fit" in cols else -1
+    name_col = 0
+    bound_col = cols.index("bounds") if "bounds" in cols else -1
+
+    for sec_name, rows in sections:
+        table = Table(
+            title=sec_name,
+            box=box.SIMPLE_HEAVY,
+            title_justify="left",
+            header_style="bold green",
+            collapse_padding=True,
+        )
+        table.add_column("name", style="cyan", no_wrap=True)
+        table.add_column("value", justify="right", no_wrap=True)
+        table.add_column("", width=3)
+        table.add_column("bounds", overflow="fold")
+        for row in rows:
+            if len(row) <= name_col or row[name_col].startswith("#"):
+                continue
+            name = row[name_col]
+            value = row[1] if len(row) > 1 else ""
+            is_fitted = fit_col >= 0 and fit_col < len(row) and row[fit_col] == "1"
+            status = "[green]✓[/]" if is_fitted else "[dim]✗[/]"
+            bounds = row[bound_col] if bound_col >= 0 and bound_col < len(row) else ""
+            table.add_row(
+                name, value, status, bounds, style="green" if is_fitted else "bright_black"
+            )
+        _console.print(table)
+        _console.print()
+
+    fitted = sum(
+        1
+        for _, rows in sections
+        for r in rows
+        if len(r) > name_col
+        and not r[name_col].startswith("#")
+        and fit_col >= 0
+        and fit_col < len(r)
+        and r[fit_col] == "1"
+    )
+    fixed = sum(
+        1
+        for _, rows in sections
+        for r in rows
+        if len(r) > name_col
+        and not r[name_col].startswith("#")
+        and fit_col >= 0
+        and fit_col < len(r)
+        and r[fit_col] == "0"
+    )
+    _console.print(f"[dim]{fitted} fitted, {fixed} fixed parameters[/]")
+
+
 def _run_script(script_name: str, argv: list[str]) -> None:
     """Run a legacy script via runpy with the given argv."""
     import runpy
