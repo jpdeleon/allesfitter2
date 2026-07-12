@@ -391,6 +391,16 @@ def update_params(theta):
         if params[companion + "_a"] == 0.0:
             params[companion + "_a"] = None
 
+        # fallback: compute a from transit params for photometry-only fits
+        # a = R_star / radius_1, where radius_1 = rsuma/(1+rr) is the
+        # dimensionless fractional radius (units of a)
+        if params[companion + "_a"] is None:
+            radius_1 = params.get(companion + "_radius_1")
+            if radius_1 is not None and radius_1 > 0:
+                R_star = config.BASEMENT.params_star.get("R_star_median")
+                if R_star is not None:
+                    params[companion + "_a"] = R_star / radius_1
+
     # =========================================================================
     #::: stellar spots, per companion and instrument
     # =========================================================================
@@ -1545,13 +1555,8 @@ def calculate_external_priors(params):
                     if not (b[1] <= params[companion + "_host_density"] <= b[2]):
                         return -np.inf
                 elif b[0] == "normal":
-                    lnp += np.log(
-                        1.0
-                        / (np.sqrt(2 * np.pi) * b[2])
-                        * np.exp(
-                            -((params[companion + "_host_density"] - b[1]) ** 2) / (2.0 * b[2] ** 2)
-                        )
-                    )
+                    x = params[companion + "_host_density"]
+                    lnp += -0.5 * ((x - b[1]) / b[2]) ** 2 - np.log(b[2]) - 0.5 * np.log(2 * np.pi)
                 else:
                     raise ValueError(
                         'Bounds have to be "uniform" or "normal". Input was "' + b[0] + '".'
