@@ -101,6 +101,9 @@ def prepare(
     ),
 ):
     """Download TESS/Kepler/K2 data and prepare config files."""
+    if not any([toi, ctoi, tic, name]):
+        typer.echo("Error: one of -toi, -ctoi, -tic, -name is required.")
+        raise typer.Exit(1)
     argv = ["prepare_allesfit"]
     if toi is not None:
         argv += ["-toi", str(toi)]

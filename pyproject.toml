@@ -178,5 +178,8 @@ no-binary-package = ["ellc"]
 [dependency-groups]
 dev = [
     "httpx>=0.28.1",
+    "pre-commit>=4.3.0",
+    "pytest>=8.4.2",
+    "pytest-timeout>=2.4.0",
     "ruff>=0.15.16",
 ]
