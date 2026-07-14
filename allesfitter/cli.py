@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import math
 import sys
 from pathlib import Path
 
@@ -479,6 +481,210 @@ def show_params(
         and r[fit_col] == "0"
     )
     _console.print(f"[dim]{fitted} fitted, {fixed} fixed parameters[/]")
+
+
+def _find_result_table(base: Path, sampler: str) -> Path | None:
+    """Prefer sampler-specific output, then fall back to legacy results/."""
+    filename = f"{sampler}_table.csv"
+    for directory in (base / f"{sampler}_results", base / "results"):
+        candidate = directory / filename
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _read_result_rows(path: Path, first_column: str) -> list[dict[str, str]]:
+    """Read an allesfitter result CSV whose header is prefixed with ``#``."""
+    header: list[str] | None = None
+    rows: list[dict[str, str]] = []
+    with path.open(newline="", encoding="utf-8") as handle:
+        for fields in csv.reader(handle):
+            if not fields or not any(field.strip() for field in fields):
+                continue
+            first = fields[0].strip()
+            if first.startswith("#"):
+                candidate = first.lstrip("# ").strip()
+                if candidate == first_column:
+                    fields[0] = candidate
+                    header = [field.strip() for field in fields]
+                continue
+            if header is None:
+                continue
+            values = [field.strip() for field in fields]
+            # Historical tables were written without CSV quoting. Rebuild the
+            # two known schemas explicitly so commas inside LaTeX labels do
+            # not shift numeric fields into the wrong columns.
+            if first_column == "name" and len(values) >= 6:
+                rows.append(
+                    {
+                        "name": values[0],
+                        "median": values[1],
+                        "lower_error": values[2],
+                        "upper_error": values[3],
+                        "label": ",".join(values[4:-1]),
+                        "unit": values[-1],
+                    }
+                )
+            elif first_column == "property" and len(values) >= 5:
+                rows.append(
+                    {
+                        "property": ",".join(values[:-4]),
+                        "value": values[-4],
+                        "lower_error": values[-3],
+                        "upper_error": values[-2],
+                        "source": values[-1],
+                    }
+                )
+            else:
+                rows.append(dict(zip(header, values)))
+    return rows
+
+
+def _as_finite_float(value: str) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _format_result_values(
+    value: str, lower_error: str, upper_error: str
+) -> tuple[str, str, str, bool]:
+    """Format a posterior triplet with precision set by its uncertainty."""
+    median = _as_finite_float(value)
+    lower = _as_finite_float(lower_error)
+    upper = _as_finite_float(upper_error)
+    fixed = lower is None or upper is None
+    if fixed:
+        formatted = f"{median:.12g}" if median is not None else value
+        return formatted, "—", "—", True
+
+    positive_errors = [abs(error) for error in (lower, upper) if error != 0]
+    if not positive_errors:
+        formatted = f"{median:.12g}" if median is not None else value
+        return formatted, "−0", "+0", False
+    else:
+        exponent = math.floor(math.log10(min(positive_errors)))
+        decimals = max(0, 1 - exponent)  # two significant digits in the errors
+
+    use_scientific = decimals > 10 or (median is not None and median != 0 and abs(median) < 1e-5)
+    if use_scientific:
+        formatted_value = f"{median:.6e}" if median is not None else value
+        formatted_lower = f"−{abs(lower):.2e}"
+        formatted_upper = f"+{abs(upper):.2e}"
+    else:
+        decimals = min(decimals, 10)
+        formatted_value = f"{median:.{decimals}f}" if median is not None else value
+        formatted_lower = f"−{abs(lower):.{decimals}f}"
+        formatted_upper = f"+{abs(upper):.{decimals}f}"
+    return formatted_value, formatted_lower, formatted_upper, False
+
+
+@app.command()
+def show_results(
+    dir_path: str = typer.Argument(..., help="path to the data directory"),
+):
+    """Print processed MCMC and nested-sampling results as formatted tables."""
+    from rich import box
+    from rich.console import Console
+    from rich.table import Table
+
+    console = Console()
+    base = Path(dir_path).resolve()
+    discovered = False
+
+    for sampler, label, color in (
+        ("mcmc", "MCMC", "magenta"),
+        ("ns", "Nested Sampling", "cyan"),
+    ):
+        table_path = _find_result_table(base, sampler)
+        if table_path is None:
+            continue
+        discovered = True
+        rows = _read_result_rows(table_path, "name")
+        relative_path = table_path.relative_to(base)
+        table = Table(
+            title=f"{label} Posterior Results",
+            caption=str(relative_path),
+            caption_style="dim",
+            box=box.ROUNDED,
+            title_justify="left",
+            header_style=f"bold {color}",
+            collapse_padding=True,
+        )
+        table.add_column("Parameter", style="cyan", no_wrap=True)
+        table.add_column("Median", justify="right", style="bold white", no_wrap=True)
+        table.add_column("− error", justify="right", style="yellow", no_wrap=True)
+        table.add_column("+ error", justify="right", style="green", no_wrap=True)
+        table.add_column("Unit", style="yellow")
+        table.add_column("Status", justify="center", no_wrap=True)
+
+        fixed_count = 0
+        for row in rows:
+            value, lower, upper, fixed = _format_result_values(
+                row.get("median", ""),
+                row.get("lower_error", ""),
+                row.get("upper_error", ""),
+            )
+            if fixed:
+                fixed_count += 1
+            table.add_row(
+                row.get("name", ""),
+                value,
+                lower,
+                upper,
+                row.get("unit", ""),
+                "[dim]fixed[/]" if fixed else f"[{color}]posterior[/]",
+                style="bright_black" if fixed else None,
+            )
+        console.print(table)
+        console.print(
+            f"[dim]{len(rows) - fixed_count} posterior, {fixed_count} fixed parameters[/]"
+        )
+        console.print()
+
+        derived_path = table_path.with_name(f"{sampler}_derived_table.csv")
+        if not derived_path.is_file():
+            continue
+        derived_rows = _read_result_rows(derived_path, "property")
+        derived_table = Table(
+            title=f"{label} Derived Results",
+            caption=str(derived_path.relative_to(base)),
+            caption_style="dim",
+            box=box.SIMPLE_HEAVY,
+            title_justify="left",
+            header_style=f"bold {color}",
+            collapse_padding=True,
+        )
+        derived_table.add_column("Property", style="cyan", overflow="fold")
+        derived_table.add_column("Value", justify="right", style="bold white", no_wrap=True)
+        derived_table.add_column("− error", justify="right", style="yellow", no_wrap=True)
+        derived_table.add_column("+ error", justify="right", style="green", no_wrap=True)
+        derived_table.add_column("Source", style="dim", no_wrap=True)
+        for row in derived_rows:
+            value, lower, upper, _ = _format_result_values(
+                row.get("value", ""),
+                row.get("lower_error", ""),
+                row.get("upper_error", ""),
+            )
+            derived_table.add_row(
+                row.get("property", ""),
+                value,
+                lower,
+                upper,
+                row.get("source", ""),
+            )
+        console.print(derived_table)
+        console.print(f"[dim]{len(derived_rows)} derived quantities[/]")
+        console.print()
+
+    if not discovered:
+        console.print(f"[red]Error:[/] No processed result tables found under {base}")
+        console.print(
+            "[dim]Run `allesfitter mcmc-output <dir>` or `allesfitter ns-output <dir>` first.[/]"
+        )
+        raise typer.Exit(1)
 
 
 def _run_script(script_name: str, argv: list[str]) -> None:
