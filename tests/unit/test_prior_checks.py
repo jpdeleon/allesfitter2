@@ -182,6 +182,25 @@ baseline_gp_matern32_lnrho_flux_tess,-2,1,uniform -3 3,...,,
     assert len(msgs_with_tdur) >= len(msgs_default)
 
 
+def test_multi_planet_gp_check_uses_longest_transit(tmp_path):
+    """A shared GP must be too slow to fit every companion's transit."""
+    d = _make_datadir(
+        tmp_path,
+        params="""#name,value,fit,bounds,label,unit,coupled
+baseline_gp_matern32_lnrho_flux_tess,-1,1,uniform -2.17 3,...,,
+""",
+        settings="inst_phot,tess",
+        lc_csvs={"tess.csv": _clean_tess_lc_csv()},
+    )
+    # exp(-2.17)=0.1142 d: above half the median duration (0.1094 d),
+    # but below half the longest duration (5.7 h / 2 = 0.11875 d).
+    msgs = validate_gp_priors(
+        d,
+        tdur_hours_by_companion={"b": 4.8, "c": 5.7},
+    )
+    assert any("longest transit duration" in m for m in msgs), msgs
+
+
 # ---------------------------------------------------------------------------
 # 8) log= sink receives every message
 # ---------------------------------------------------------------------------

@@ -40,8 +40,8 @@ class TestDefaultPriorBounds:
         assert b["rsuma_lo"] == pytest.approx(0.10)
         # 2 * 0.18 = 0.36, < 0.5 cap
         assert b["rsuma_hi"] == pytest.approx(0.36)
-        # 1.2 * 0.18 * 1.12 = 0.24192, < 1 cap
-        assert b["cosi_max"] == pytest.approx(0.24192, rel=1e-5)
+        # Transit geometry gives cos(i) < rsuma; retain 20% headroom.
+        assert b["cosi_max"] == pytest.approx(0.216, rel=1e-5)
 
     def test_small_planet_long_period(self, prep):
         # Earth-size on a 50-day orbit (Kepler-like): depth tiny, rsuma small.
@@ -52,8 +52,8 @@ class TestDefaultPriorBounds:
         assert b["rsuma_lo"] == pytest.approx(0.005)
         # 2 * 0.015 = 0.030
         assert b["rsuma_hi"] == pytest.approx(0.030)
-        # 1.2 * 0.015 * 1.012 = 0.0182
-        assert b["cosi_max"] == pytest.approx(0.0182, rel=1e-3)
+        # 1.2 * 0.015 = 0.018
+        assert b["cosi_max"] == pytest.approx(0.018, rel=1e-3)
 
     def test_substellar_companion_hits_caps(self, prep):
         # Brown dwarf / M-dwarf eclipsing binary: rr huge, rsuma huge.
@@ -62,8 +62,8 @@ class TestDefaultPriorBounds:
         assert b["rr_upper"] == 0.5
         # 2 * 0.40 = 0.8 → clipped to 0.5
         assert b["rsuma_hi"] == 0.5
-        # 1.2 * 0.40 * 1.55 = 0.744, < 1
-        assert b["cosi_max"] == pytest.approx(0.744)
+        # 1.2 * 0.40 = 0.48, < 1
+        assert b["cosi_max"] == pytest.approx(0.48)
 
     def test_rsuma_lo_floor_prevents_divergence(self, prep):
         # Pathologically small rsuma_min — must clamp to 1e-3 to avoid
@@ -71,10 +71,10 @@ class TestDefaultPriorBounds:
         b = prep._default_prior_bounds(rprs_max=0.08, rsuma_min=1e-6, rsuma_max=0.10)
         assert b["rsuma_lo"] == pytest.approx(1e-3)
 
-    def test_cosi_clipped_when_rsuma_rr_exceed_unity(self, prep):
-        # Very large rsuma + deep companion → 1.2·rsuma·(1+rr) > 1.
-        b = prep._default_prior_bounds(rprs_max=0.40, rsuma_min=0.10, rsuma_max=0.80)
-        # raw cosi_max would be 1.2 * 0.80 * 1.40 = 1.344 → clamped to 1.
+    def test_cosi_clipped_when_rsuma_headroom_exceeds_unity(self, prep):
+        # Very large rsuma → 1.2·rsuma > 1.
+        b = prep._default_prior_bounds(rprs_max=0.40, rsuma_min=0.10, rsuma_max=0.90)
+        # raw cosi_max would be 1.2 * 0.90 = 1.08 → clamped to 1.
         assert b["cosi_max"] == 1.0
 
     def test_returns_floats(self, prep):

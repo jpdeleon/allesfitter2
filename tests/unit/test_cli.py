@@ -48,3 +48,21 @@ def test_gui_forwards_reload(monkeypatch):
 
     assert result.exit_code == 0
     assert "--reload" in received
+
+
+def test_show_params_labels_fit_status_column(tmp_path):
+    (tmp_path / "params.csv").write_text(
+        "#name,value,fit,bounds,label,unit,coupled_with\n"
+        "b_rr,0.0653,1,uniform 0 0.2500,$R_b/R_*$,,\n"
+        "b_f_c,0,0,uniform -1 1,$f_c$,,\n"
+    )
+
+    result = CliRunner().invoke(app, ["show-params", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    header = next(
+        line for line in result.output.splitlines() if "name" in line and "bounds" in line
+    )
+    assert "fit?" in header
+    assert "✓" in result.output
+    assert "✗" in result.output

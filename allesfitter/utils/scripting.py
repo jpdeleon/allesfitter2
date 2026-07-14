@@ -12,6 +12,8 @@ from astropy.time import Time
 from astroquery.ipac.nexsci.nasa_exoplanet_archive import NasaExoplanetArchive
 from tqdm import tqdm
 
+from ..orbits import circular_transit_duration
+
 G = 6.67e-11
 D_H = 24.0
 D_M = 60 * D_H
@@ -397,10 +399,25 @@ def d_from_pkaiews(p, k, a, i, e, w, tr_sign=1, kind=14):
 
 
 def get_tdur(per, rsuma, inc, k, b):
-    # transit duration in days
-    return per / np.pi * np.arcsin(rsuma / np.sin(inc) * np.sqrt(1 + k**2 - b**2))
+    """Circular-orbit T14 in days for a supplied, self-consistent geometry."""
+    cosi = np.cos(inc)
+    duration = circular_transit_duration(per, rsuma, cosi, k)
+
+    # Keep ``b`` in the API for compatibility, but reject a tuple in which it
+    # is not the impact parameter implied by rsuma and inclination.
+    implied_b = cosi * (1.0 + k) / rsuma
+    consistent = np.isclose(implied_b, b, rtol=1e-7, atol=1e-10)
+    return np.where(consistent, duration, np.nan)
 
 
 def get_rsuma(tdur, per, inc, k, b):
-    # Rstar/a
-    return np.sin(inc) * (np.sin(tdur * np.pi / per) / np.sqrt(1 + k**2 - b**2))
+    """Derive ``(Rstar + Rp) / a`` at fixed inclination and impact parameter."""
+    radius_sum = 1.0 + np.asarray(k, dtype=float)
+    chord_squared = radius_sum**2 - np.asarray(b, dtype=float) ** 2
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return (
+            radius_sum
+            * np.sin(inc)
+            * np.sin(np.asarray(tdur, dtype=float) * np.pi / np.asarray(per, dtype=float))
+            / np.sqrt(chord_squared)
+        )

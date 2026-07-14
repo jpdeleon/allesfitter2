@@ -47,6 +47,10 @@ from allesfitter import allesclass  # , config, nested_sampling_output, general_
 from allesfitter.exoworlds_rdx.lightcurves.index_transits import (
     get_tmid_observed_transits,
 )
+from allesfitter.orbits import (
+    circular_geometry_from_transit_duration,
+    circular_transit_duration,
+)
 from allesfitter.utils.scripting import (
     a_from_rhoprs,
     as_from_rhop,
@@ -54,8 +58,6 @@ from allesfitter.utils.scripting import (
     get_ctois,
     get_name_aliases,
     get_nexsci,
-    get_rsuma,
-    get_tdur,
     get_tfop_info,
     get_tois,
     rho_from_mr,
@@ -448,6 +450,19 @@ def _dataset_aware_gp_bounds(time, flux, tdur_days):
     }
 
 
+def _gp_protective_tdur_days(tdur_hours, fallback_days=0.1):
+    """Return the longest finite positive companion duration, in days.
+
+    A single instrument GP is shared by all photometric companions. Its
+    shortest allowed correlation timescale therefore has to protect the
+    longest transit; using the shortest or median duration leaves longer
+    transits exposed to the GP.
+    """
+    durations = np.asarray(list(tdur_hours), dtype=float)
+    valid = durations[np.isfinite(durations) & (durations > 0.0)]
+    return float(np.max(valid) / 24.0) if valid.size else float(fallback_days)
+
+
 def _update_params_gp_bounds(params_csv_path, inst, bounds, logger=None):
     """Rewrite ``ln_err_flux_<inst>`` and the GP rows for ``inst`` in
     ``params.csv`` with dataset-aware values from
@@ -597,6 +612,85 @@ def _percentile_3sig_safe(samples, fallback, label, planet, logger):
     return tuple(np.percentile(s, q=quartiles_3sig))
 
 
+def _duration_informed_geometry(
+    *,
+    period_days,
+    period_err_days,
+    tdur_hours,
+    tdur_err_hours,
+    radius_ratio,
+    radius_ratio_err,
+    nsamples=Nsamples,
+    rng=None,
+):
+    """Return circular orbital geometry initialized by catalog T14.
+
+    Transit duration does not uniquely determine both scaled separation and
+    inclination.  We use the transit-conditioned ``b ~ Uniform(0, 1)`` prior
+    for a non-grazing planet, and initialize at its median ``b=0.5``.  Each
+    Monte Carlo sample derives *both* rsuma and cos(i) from the same impact
+    parameter, so every retained tuple is physically coupled and reproduces
+    its sampled duration exactly.
+    """
+    rng = np.random if rng is None else rng
+
+    def _finite_error(value, fallback=0.0):
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return fallback
+        return value if math.isfinite(value) and value >= 0.0 else fallback
+
+    period_days = float(period_days)
+    tdur_hours = float(tdur_hours)
+    radius_ratio = float(radius_ratio)
+    period_err_days = _finite_error(period_err_days)
+    tdur_err_hours = _finite_error(tdur_err_hours, fallback=1.0)
+    radius_ratio_err = _finite_error(radius_ratio_err)
+
+    period_samples = rng.normal(period_days, period_err_days, size=nsamples)
+    duration_samples = rng.normal(tdur_hours, tdur_err_hours, size=nsamples) / 24.0
+    radius_ratio_samples = rng.normal(radius_ratio, radius_ratio_err, size=nsamples)
+    impact_parameter_samples = rng.uniform(0.0, 1.0, size=nsamples)
+    rsuma_samples, cosi_samples = circular_geometry_from_transit_duration(
+        duration_samples,
+        period_samples,
+        radius_ratio_samples,
+        impact_parameter_samples,
+    )
+    valid = (
+        np.isfinite(rsuma_samples)
+        & np.isfinite(cosi_samples)
+        & (rsuma_samples > 0.0)
+        & (rsuma_samples < 1.0)
+        & (cosi_samples >= 0.0)
+        & (cosi_samples < 1.0)
+    )
+    if not np.any(valid):
+        raise ValueError("catalog duration produced no physical circular-orbit samples")
+
+    impact_parameter = 0.5
+    rsuma, cosi = circular_geometry_from_transit_duration(
+        tdur_hours / 24.0,
+        period_days,
+        radius_ratio,
+        impact_parameter,
+    )
+    if not (math.isfinite(rsuma) and math.isfinite(cosi)):
+        raise ValueError("catalog duration cannot initialize a physical circular orbit")
+
+    rsuma_min, _, rsuma_max = np.percentile(rsuma_samples[valid], q=quartiles_3sig)
+    _, _, cosi_max = np.percentile(cosi_samples[valid], q=quartiles_3sig)
+    return {
+        "rsuma": float(rsuma),
+        "cosi": float(cosi),
+        "impact_parameter": impact_parameter,
+        "rsuma_min": float(rsuma_min),
+        "rsuma_max": float(rsuma_max),
+        "cosi_max": float(cosi_max),
+    }
+
+
 def _default_prior_bounds(rprs_max, rsuma_min, rsuma_max):
     """Compute the physics-informed default prior upper/lower bounds.
 
@@ -613,7 +707,7 @@ def _default_prior_bounds(rprs_max, rsuma_min, rsuma_max):
     * ``_rsuma_hi``  — upper bound. Covers ultra-short period planets at
       the wide end (``a ≈ 2 R★``) without over-extending.
     * ``_cosi_max``  — transit geometry requires ``cos i < (R★+Rp)/a =
-      rsuma·(1+rr)``. Outside that the likelihood is zero. Cap with a
+      rsuma``. Outside that the likelihood is zero. Cap with a
       1.2× safety factor, hard-bounded at 1.
 
     Parameters
@@ -632,7 +726,7 @@ def _default_prior_bounds(rprs_max, rsuma_min, rsuma_max):
     rr_upper = min(0.5, ceil(rprs_max * 10) / 10 + 0.05)
     rsuma_lo = max(1e-3, rsuma_min)
     rsuma_hi = min(0.5, 2.0 * rsuma_max)
-    cosi_max = min(1.0, 1.2 * rsuma_max * (1.0 + rprs_max))
+    cosi_max = min(1.0, 1.2 * rsuma_max)
     return {
         "rr_upper": rr_upper,
         "rsuma_lo": rsuma_lo,
@@ -1584,10 +1678,10 @@ def main():
 
         # ===== Create params.csv =====#
         text = """#name,value,fit,bounds,label,unit,coupled_with\n"""
-        # Track the shortest transit duration across all companions; used
-        # after each lightcurve download to set ln_ρ_GP lower bounds that
-        # the GP cannot use to fit the transit shape itself.
-        min_tdur_hours = float("inf")
+        # Track every catalog transit duration across all companions. After
+        # each lightcurve download, the longest sets the ln_ρ_GP lower bound
+        # so the GP cannot fit any companion's transit shape.
+        companion_tdur_hours = []
         for i, row in target_df.iterrows():
             pl = planets[i]
             if debug:
@@ -1600,11 +1694,6 @@ def main():
             epocherr = row["Epoch (BJD) err"]
             tdur = row["Duration (hours)"]
             tdurerr = row["Duration (hours) err"]
-            try:
-                if math.isfinite(float(tdur)) and float(tdur) > 0:
-                    min_tdur_hours = min(min_tdur_hours, float(tdur))
-            except (TypeError, ValueError):
-                pass
 
             if interactive and not np.all([Porb > 0, epoch > 0, tdur > 0]):
                 Porb = float(input("Porb: "))
@@ -1675,60 +1764,56 @@ def main():
                 planet=pl,
                 logger=logger,
             )
-            if True:
-                # uniformly distributed from inc_min to 90 deg
-                # nanmin (not min) so NaNs in a_over_Rs don't poison cosi; fall
-                # back to an uninformative cos i in [0, 1] when a/Rs is unusable.
-                _a_over_Rs_min = np.nanmin(a_over_Rs_samples)
-                if np.isfinite(_a_over_Rs_min) and _a_over_Rs_min > 0:
-                    cosi = np.random.uniform(0, 1 / _a_over_Rs_min, size=Nsamples)
-                else:
-                    cosi = np.random.uniform(0, 1, size=Nsamples)
-                inc_samples = np.arccos(cosi)
-            else:
-                # normally distributed
-                inc_samples = np.arcos(1 / a_over_Rs_samples)
-            inc_min, inc, inc_max = np.percentile(inc_samples, q=quartiles_3sig)
-            # FIXME: compute b taking into account ecc
-            b_samples = np.random.uniform(0, 1, size=Nsamples)
-            # FIXME: compute including grazing orbits
-            # b_samples = np.random.uniform(0, 1+max(rprs_samples), size=Nsamples)
-            b_min, b, b_max = np.percentile(b_samples, q=quartiles_3sig)
+
+            # A transit duration needs an impact-parameter assumption. Use the
+            # median of the transit-conditioned non-grazing prior, b~U(0,1),
+            # for the representative initial tuple.  Even the rho-star
+            # fallback must couple b and inclination through b=(a/R*) cos(i).
+            b = 0.5
+            cosi = b * rsuma / (1.0 + rprs)
+            inc = np.arccos(cosi)
 
             if str(tdur) != "nan":
-                # check if tdur derived from rhostar is consistent with tdur from tfop
-                tdur_rhostar = get_tdur(Porb, rsuma, inc, rprs, b) * 24
+                # Compare the stellar-density geometry to the catalog T14,
+                # using the exact circular equation used by the fit model.
+                tdur_rhostar = circular_transit_duration(Porb, rsuma, cosi, rprs) * 24
                 logger.info(
                     f"tdur={tdur:.1f}h ({source}) {tdur_rhostar:.1f}h (derived from rhostar)"
                 )
-                # check if tdur derived from orbit is consistent with tdur from tfop
                 try:
                     tdurerr = 1 if str(tdurerr) == "nan" else tdurerr
-                    tdur_samples = np.random.normal(tdur, tdurerr, size=Nsamples) / 24
-                    rsuma_samples = get_rsuma(
-                        tdur_samples, Porb, inc_samples, rprs_samples, b_samples
+                    geometry = _duration_informed_geometry(
+                        period_days=Porb,
+                        period_err_days=Porberr,
+                        tdur_hours=tdur,
+                        tdur_err_hours=tdurerr,
+                        radius_ratio=rprs,
+                        radius_ratio_err=rprserr,
                     )
-                    idx = (rsuma_samples > 0) & (rsuma_samples < 1)
-                    _valid = rsuma_samples[idx]
-                    _valid = _valid[np.isfinite(_valid)]
-                    _rsuma_med = np.median(_valid) if _valid.size else np.nan
-                    tdur_orbit = get_tdur(Porb, _rsuma_med, inc, rprs, b) * 24
+                    rsuma = geometry["rsuma"]
+                    cosi = geometry["cosi"]
+                    b = geometry["impact_parameter"]
+                    inc = np.arccos(cosi)
+                    rsuma_min = geometry["rsuma_min"]
+                    rsuma_max = geometry["rsuma_max"]
+                    tdur_orbit = circular_transit_duration(Porb, rsuma, cosi, rprs) * 24
                     logger.info(
-                        f"tdur={tdur:.1f}h ({source}) {tdur_orbit:.1f}h (derived from orbit)"
+                        f"tdur={tdur:.1f}h ({source}) {tdur_orbit:.1f}h "
+                        "(duration-informed circular orbit; b=0.5)"
                     )
-                    if np.nanargmin(np.abs(np.array([tdur_rhostar, tdur_orbit]) - tdur)) == 1:
-                        logger.info("Using Rstar/a derived from orbit.")
-                        rsuma_min, rsuma, rsuma_max = _percentile_3sig_safe(
-                            rsuma_samples[idx],
-                            fallback=(rsuma_min, rsuma, rsuma_max),
-                            label="(R*+Rp)/a from transit duration",
-                            planet=pl,
-                            logger=logger,
-                        )
-                    else:
-                        logger.info("Using Rstar/a derived from rhostar.")
+                    logger.info(
+                        "Using duration-informed (Rstar+Rp)/a and cos(i) "
+                        "under e=0 and b=0.5 initialization."
+                    )
                 except Exception as e:
-                    logger.error(f"Error: {e}")
+                    logger.warning(
+                        f"Could not derive circular geometry from catalog duration ({e}); "
+                        "using the stellar-density geometry."
+                    )
+
+            model_tdur_hours = circular_transit_duration(Porb, rsuma, cosi, rprs) * 24.0
+            if math.isfinite(model_tdur_hours) and model_tdur_hours > 0.0:
+                companion_tdur_hours.append(model_tdur_hours)
 
             if debug:
                 logger.info(f"rsuma={rsuma:.4f}")
@@ -1758,7 +1843,9 @@ def main():
                     )
             text += f"{pl}_rsuma,{rsuma:.4f},1,uniform {_rsuma_lo:.4f} {_rsuma_hi:.4f},$(R_\\star + R_{pl}) / a_{pl}$,,\n"
             # text += f"{pl}_rsuma,{rsuma:.4f},1,uniform 0 1,$(R_\star + R_{pl}) / a_{pl}$,,\n"
-            text += f"{pl}_cosi,0,1,uniform 0 {_cosi_max:.4f},$\\cos" + "{i_" + pl + "}$,,\n"
+            text += (
+                f"{pl}_cosi,{cosi:.4f},1,uniform 0 {_cosi_max:.4f},$\\cos" + "{i_" + pl + "}$,,\n"
+            )
             text += (
                 f"{pl}_epoch,{epoch:.6f},1,normal {epoch:.6f} {epocherr:.6f},$T_"
                 + "{0;"
@@ -2157,7 +2244,7 @@ fig = allesfitter.show_initial_guess(dir_path)
             # downloaded lightcurve. Replaces the generic, hardcoded
             # bounds with data-aware ones (see _dataset_aware_gp_bounds).
             try:
-                _tdur_d = (min_tdur_hours / 24.0) if math.isfinite(min_tdur_hours) else 0.1
+                _tdur_d = _gp_protective_tdur_days(companion_tdur_hours)
                 _gp = _dataset_aware_gp_bounds(
                     df2["time"].to_numpy(),
                     df2["flux"].to_numpy(),

@@ -48,6 +48,7 @@ from typing import Callable
 
 import numpy as np
 
+from ..orbits import circular_transit_duration
 from .parsing import parse_uniform_bounds, read_csv_rows, read_settings
 
 GP_LNSIGMA_PREFIX = "baseline_gp_matern32_lnsigma_flux_"
@@ -121,31 +122,10 @@ def _w(msg):
 def transit_duration_days(per, rsuma, cosi, k):
     """Transit duration from per, R/a sum, cos i, and Rp/Rs.
 
-    Uses the standard chord-length formula:
-
-        t_dur = (P / pi) * arcsin( rsuma * sqrt((1+k)^2 - b^2) / sin i )
-
-    with ``b = cos(i) * (1 + k) / rsuma`` (impact parameter from R/a sum).
-    Returns NaN when inputs are non-positive, when sin(i) collapses to 0,
-    or when the chord is imaginary (grazing / non-transiting geometries).
+    Delegates to the same circular-orbit equation used to initialize prepared
+    fits. Returns NaN for invalid or non-transiting geometries.
     """
-    per = float(per)
-    rsuma = float(rsuma)
-    cosi = float(cosi)
-    k = float(k)
-    if not (per > 0 and rsuma > 0 and 0.0 <= abs(cosi) <= 1.0 and k > 0):
-        return float("nan")
-    sini = math.sqrt(max(1.0 - cosi * cosi, 0.0))
-    if sini == 0.0:
-        return float("nan")
-    b = cosi * (1.0 + k) / rsuma
-    chord_sq = (1.0 + k) ** 2 - b * b
-    if chord_sq <= 0.0:
-        return float("nan")
-    arg = rsuma * math.sqrt(chord_sq) / sini
-    if arg <= 0.0 or arg > 1.0:
-        return float("nan")
-    return per / math.pi * math.asin(arg)
+    return circular_transit_duration(per, rsuma, cosi, k)
 
 
 def transit_duration_hours_by_companion(datadir):
@@ -536,7 +516,12 @@ def validate_gp_priors(
     if tdur_hours_by_companion is None:
         tdur_hours_by_companion = transit_duration_hours_by_companion(datadir)
     if tdur_hours_by_companion:
-        tdur_days = float(np.median([t / 24.0 for t in tdur_hours_by_companion.values() if t]))
+        valid_tdur_days = [
+            float(t) / 24.0
+            for t in tdur_hours_by_companion.values()
+            if t is not None and math.isfinite(float(t)) and float(t) > 0.0
+        ]
+        tdur_days = max(valid_tdur_days) if valid_tdur_days else 0.1
     else:
         tdur_days = 0.1  # ~2.4 h fallback when no orbital row could be parsed
 
@@ -610,7 +595,7 @@ def validate_gp_priors(
                 msgs.append(
                     _w(
                         f"{name}: lower bound exp({lo}) ≈ {rho_lo:.4f} d < "
-                        f"{_RHO_VS_TDUR_RATIO:.0%}× transit duration "
+                        f"{_RHO_VS_TDUR_RATIO:.0%}× longest transit duration "
                         f"(~{tdur_days:.4f} d) — GP could fit the transit shape."
                     )
                 )

@@ -128,8 +128,8 @@ def test_default_prior_bounds_typical_planet():
     assert out["rr_upper"] == pytest.approx(0.25)
     assert out["rsuma_lo"] == pytest.approx(0.02)
     assert out["rsuma_hi"] == pytest.approx(0.30)  # 2*0.15
-    # cosi_max = 1.2 * 0.15 * (1 + 0.12) = 0.2016
-    assert out["cosi_max"] == pytest.approx(1.2 * 0.15 * 1.12)
+    # b < 1 + k implies cos(i) < rsuma; retain 20% safety headroom.
+    assert out["cosi_max"] == pytest.approx(1.2 * 0.15)
 
 
 def test_default_prior_bounds_are_clamped():
@@ -139,6 +139,48 @@ def test_default_prior_bounds_are_clamped():
     assert out["rsuma_lo"] == pytest.approx(1e-3)  # floored
     assert out["rsuma_hi"] == 0.5  # capped
     assert out["cosi_max"] == 1.0  # hard-bounded at 1
+
+
+@pytest.mark.parametrize(
+    ("period_days", "period_err_days", "tdur_hours", "tdur_err_hours", "radius_ratio"),
+    [
+        (6.959473, 0.000003, 4.8, 0.2, 0.0653),
+        (14.334892, 0.000017, 5.7, 0.2, 0.0524),
+    ],
+)
+def test_duration_informed_geometry_writes_a_self_consistent_initial_tuple(
+    period_days,
+    period_err_days,
+    tdur_hours,
+    tdur_err_hours,
+    radius_ratio,
+):
+    from allesfitter.lightcurves import eclipse_width_smart
+
+    geometry = prep._duration_informed_geometry(
+        period_days=period_days,
+        period_err_days=period_err_days,
+        tdur_hours=tdur_hours,
+        tdur_err_hours=tdur_err_hours,
+        radius_ratio=radius_ratio,
+        radius_ratio_err=0.002,
+        nsamples=5_000,
+        rng=np.random.default_rng(20260714),
+    )
+
+    model_duration, _ = eclipse_width_smart(
+        period_days,
+        radius_ratio,
+        geometry["rsuma"],
+        geometry["cosi"],
+        0.0,
+        0.0,
+    )
+    assert float(model_duration) * 24.0 == pytest.approx(tdur_hours, abs=1e-10)
+    assert geometry["impact_parameter"] == pytest.approx(0.5)
+    assert 0.0 < geometry["cosi"] < geometry["rsuma"] < 1.0
+    assert geometry["rsuma_min"] < geometry["rsuma"] < geometry["rsuma_max"]
+    assert geometry["cosi_max"] > geometry["cosi"]
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +216,16 @@ def test_dataset_aware_gp_bounds_invariants():
     assert math.exp(b["lnrho_lo"]) > 0.5 * tdur
     # ...and the upper bound stays within the observation baseline.
     assert math.exp(b["lnrho_hi"]) <= (t[-1] - t[0])
+
+
+def test_gp_protective_duration_uses_longest_companion():
+    # One GP is shared by both planets, so its lower timescale bound must
+    # protect the longest transit, not the shortest or median transit.
+    assert prep._gp_protective_tdur_days([4.8, np.nan, 5.7]) == pytest.approx(5.7 / 24.0)
+
+
+def test_gp_protective_duration_falls_back_without_valid_catalog_values():
+    assert prep._gp_protective_tdur_days([np.nan, -1.0, 0.0]) == pytest.approx(0.1)
 
 
 # ---------------------------------------------------------------------------

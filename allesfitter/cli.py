@@ -442,7 +442,7 @@ def show_params(
         )
         table.add_column("name", style="cyan", no_wrap=True)
         table.add_column("value", justify="right", no_wrap=True)
-        table.add_column("", width=3)
+        table.add_column("fit?", justify="center", width=4, no_wrap=True)
         table.add_column("bounds", overflow="fold")
         for row in rows:
             if len(row) <= name_col or row[name_col].startswith("#"):
