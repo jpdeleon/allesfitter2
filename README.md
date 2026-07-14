@@ -200,6 +200,10 @@ Detailed per-feature walkthroughs and all advisory material now live in
 
 A browser-based GUI for configuring, launching, and reviewing **multi-band /
 multi-epoch transit fits** without hand-editing `settings.csv` / `params.csv`.
+The GUI is optional: a normal `pip install allesfitter` installs only the core
+package. Install the `webgui` extra when you want the browser interface; both
+`allesfitter-gui` and `allesfitter gui` print the required install command if
+that extra is absent.
 It is a thin FastAPI + Jinja2 shell over the existing engine
 (`allesfitter/webgui/`): a form generates a valid allesfitter datadir, stages the
 light curves, validates the config through `Basement` before launching, then runs

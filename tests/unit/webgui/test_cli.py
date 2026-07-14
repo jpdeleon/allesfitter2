@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import importlib
 import os
 import shutil
 import socket
 
 import pytest
 
-from allesfitter.webgui import app as web_app
 from allesfitter.webgui import cli
+
+WEBGUI_INSTALLED = all(
+    importlib.util.find_spec(module_name) is not None for module_name in cli._WEBGUI_DEPENDENCIES
+)
 
 
 def _free_tcp_port() -> int:
@@ -18,6 +22,23 @@ def _free_tcp_port() -> int:
     port = s.getsockname()[1]
     s.close()
     return port
+
+
+def test_missing_optional_dependency_has_install_instructions(monkeypatch):
+    real_import_module = importlib.import_module
+
+    def fail_for_fastapi(name):
+        if name == "fastapi":
+            raise ModuleNotFoundError("No module named 'fastapi'", name="fastapi")
+        return real_import_module(name)
+
+    monkeypatch.setattr(cli.importlib, "import_module", fail_for_fastapi)
+
+    with pytest.raises(SystemExit, match=r"uv sync --extra webgui") as exc_info:
+        cli._require_webgui_dependencies()
+
+    assert "allesfitter[webgui]" in str(exc_info.value)
+    assert "fastapi" in str(exc_info.value)
 
 
 def test_alive_true_for_self_and_false_for_bogus():
@@ -47,7 +68,10 @@ def test_detects_listener_excludes_self():
         srv.close()
 
 
+@pytest.mark.skipif(not WEBGUI_INSTALLED, reason="requires the webgui extra")
 def test_cli_passes_root_path_to_application(monkeypatch):
+    from allesfitter.webgui import app as web_app
+
     received = {}
     sentinel = object()
 
@@ -63,6 +87,7 @@ def test_cli_passes_root_path_to_application(monkeypatch):
     assert received["app"] is sentinel
 
 
+@pytest.mark.skipif(not WEBGUI_INSTALLED, reason="requires the webgui extra")
 def test_cli_reload_uses_import_string_and_factory(monkeypatch):
     received = {}
     monkeypatch.setattr("uvicorn.run", lambda app, **kwargs: received.update(app=app, **kwargs))

@@ -7,6 +7,7 @@ to terminating an existing listener with ``--kill-existing``.
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 import signal
@@ -14,6 +15,34 @@ import subprocess
 import time
 
 _RELOAD_CONFIG_ENV = "ALLESFITTER_GUI_RELOAD_CONFIG"
+_WEBGUI_DEPENDENCIES = {
+    "fastapi": "fastapi",
+    "jinja2": "jinja2",
+    "multipart": "python-multipart",
+    "uvicorn": "uvicorn",
+    "yaml": "pyyaml",
+}
+
+
+def _require_webgui_dependencies() -> None:
+    """Fail with an actionable message when the optional GUI is not installed."""
+    missing = []
+    for module_name, distribution_name in _WEBGUI_DEPENDENCIES.items():
+        try:
+            importlib.import_module(module_name)
+        except ModuleNotFoundError as exc:
+            if exc.name != module_name:
+                raise
+            missing.append(distribution_name)
+
+    if missing:
+        packages = ", ".join(sorted(missing))
+        raise SystemExit(
+            "The allesfitter web GUI is an optional install. "
+            "Install it with `uv sync --extra webgui` or "
+            "`pip install 'allesfitter[webgui]'`, then retry. "
+            f"Missing dependencies: {packages}."
+        )
 
 
 def _reload_app():
@@ -126,6 +155,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--max-concurrent-fits", type=int, default=1)
     parser.add_argument("--max-queued-fits-per-user", type=int, default=2)
     args = parser.parse_args(argv)
+
+    _require_webgui_dependencies()
 
     if args.kill_existing:
         free_port(args.host, args.port)
