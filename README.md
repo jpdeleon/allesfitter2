@@ -140,17 +140,32 @@ Compare nested-sampling evidences from Python with
 
 ## Command Line Options
 
-### Inspect configuration and results
+### CLI command reference
+
+Run commands from the project environment as `uv run allesfitter <command>`.
+Use `uv run allesfitter <command> --help` for the complete options of any
+command.
 
 | Command | Description |
 |---------|-------------|
-| `allesfitter show-settings <dir>` | Display `settings.csv` as grouped Rich tables |
-| `allesfitter show-params <dir>` | Display fitted and fixed parameters from `params.csv` |
-| `allesfitter show-results <dir>` | Display available MCMC/NS posterior and derived-result tables |
+| `gui` | Serve the allesfitter web GUI |
+| `prepare` | Download TESS/Kepler/K2 data and prepare configuration files |
+| `grid <grid-dir>` | Run models from a `grid.csv` manifest |
+| `show-initial-guess <dir>` | Plot data with the current `params.csv` values |
+| `optimize <dir>` | Globally optimize parameters to warm-start inference |
+| `mcmc-fit <dir>` | Run or resume emcee MCMC sampling |
+| `mcmc-output <dir>` | Generate MCMC posteriors, plots, and summaries |
+| `ns-fit <dir>` | Run nested sampling |
+| `ns-output <dir>` | Generate nested-sampling posteriors, evidence, and plots |
+| `show-settings <dir>` | Display `settings.csv` as grouped Rich tables |
+| `show-params <dir>` | Display fitted and fixed parameters from `params.csv` |
+| `show-results <dir>` | Display available MCMC/NS posterior and derived-result tables |
 
 `show-results` prefers `mcmc_results/` and `ns_results/`, falls back to the
 legacy shared `results/` directory, and shows both samplers when both outputs
 are available.
+
+The following option tables document the `prepare` command.
 
 ### Target selection (mutually exclusive, required)
 
