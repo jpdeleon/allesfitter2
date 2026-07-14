@@ -51,8 +51,37 @@ density prior and post-fit derivation. Strict validators catch mismatches at
 ```bash
 git clone https://github.com/jpdeleon/allesfitter2.git
 cd allesfitter2
-pip install .
 ```
+
+<details open>
+<summary><strong>Install with uv (recommended)</strong></summary>
+
+```bash
+uv sync --no-dev
+```
+
+To include the optional Web GUI:
+
+```bash
+uv sync --extra webgui --no-dev
+```
+
+</details>
+
+<details>
+<summary><strong>Install with pip</strong></summary>
+
+```bash
+python -m pip install .
+```
+
+To include the optional Web GUI:
+
+```bash
+python -m pip install ".[webgui]"
+```
+
+</details>
 
 If you encounter a problem with ellc, use the custom installation script, which clones ellc and builds the Fortran extension modules:
 ```bash
@@ -231,16 +260,34 @@ state. Open **Review** to inspect that preview and edit `params.csv` or
 `settings.csv` directly. **Run MCMC** and **Run Nested Sampling** each save the
 editors, validate the revised configuration, refresh the initial-guess preview,
 and only then launch the selected sampler through the same subprocess launcher as
-a manual fit. Requires network access (not `--no-network`).
+a manual fit. Requires network access (not `--no-network`). Choose the instructions
+for your package manager:
+
+<details open>
+<summary><strong>Run with uv (recommended)</strong></summary>
 
 ```bash
-pip install -e ".[webgui]"        # or: uv sync --extra webgui
+uv sync --extra webgui
+uv run allesfitter-gui             # serve at http://127.0.0.1:5100
+uv run allesfitter-gui --runs-root ./runs --toi-csv data/TOIs.csv --port 8080
+uv run allesfitter-gui --no-network
+uv run allesfitter gui --reload    # development server with automatic reload
+```
 
+</details>
+
+<details>
+<summary><strong>Run with pip</strong></summary>
+
+```bash
+python -m pip install -e ".[webgui]"
 allesfitter-gui                    # serve at http://127.0.0.1:5100
 allesfitter-gui --runs-root ./runs --toi-csv data/TOIs.csv --port 8080
 allesfitter-gui --no-network       # disable NASA Exoplanet Archive auto-fill
-uv run allesfitter gui --reload    # development server with automatic reload
+allesfitter gui --reload           # development server with automatic reload
 ```
+
+</details>
 
 For a standalone loopback deployment with an explicit runs directory:
 
