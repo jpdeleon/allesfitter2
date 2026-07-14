@@ -16,11 +16,14 @@ Coverage:
      rejected with the consistency-spread reason.
   8. CMA-ES path (skipped if `cma` is not installed) — strict improvement
      on the same fixture.
+  9. Accepted optima with ``shift_epoch=True`` persist in the original
+     params.csv epoch frame and reload with the correctly shifted prior.
 """
 
 from __future__ import annotations
 
 import json
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -53,9 +56,9 @@ _INSTS = ("muscat_g", "muscat_r", "muscat_i", "muscat_z")
 _BANDS = ("g", "r", "i", "z")
 
 
-def _lc_csv(seed: int, n: int = 200) -> str:
+def _lc_csv(seed: int, n: int = 200, time_offset: float = 0.0) -> str:
     rng = np.random.default_rng(seed)
-    t = np.linspace(0.0, 1.0, n)
+    t = time_offset + np.linspace(0.0, 1.0, n)
     f = 1.0 + rng.normal(0.0, 1e-3, n)
     e = np.full(n, 1e-3)
     lines = ["#time,flux,flux_err"]
@@ -114,6 +117,21 @@ def _make_datadir(tmp_path: Path) -> Path:
     (d / "settings.csv").write_text(_settings_csv())
     for k, inst in enumerate(_INSTS):
         (d / f"{inst}.csv").write_text(_lc_csv(seed=k))
+    return d
+
+
+def _make_shift_epoch_datadir(tmp_path: Path) -> Path:
+    d = _make_datadir(tmp_path)
+    settings = (d / "settings.csv").read_text().replace("shift_epoch,False", "shift_epoch,True")
+    (d / "settings.csv").write_text(settings)
+    params = (
+        (d / "params.csv")
+        .read_text()
+        .replace("b_epoch,0.5,1,uniform 0.0 1.0", "b_epoch,0.5,1,normal 0.5 0.1")
+    )
+    (d / "params.csv").write_text(params)
+    for k, inst in enumerate(_INSTS):
+        (d / f"{inst}.csv").write_text(_lc_csv(seed=k, time_offset=100.0))
     return d
 
 
@@ -211,6 +229,67 @@ def test_accepted_optimize_persists_to_params_csv(datadir):
     reloaded = dict(zip(config.BASEMENT.fitkeys, config.BASEMENT.theta_0))
     for key, value in zip(res.fitkeys, res.theta_opt):
         assert reloaded[key] == pytest.approx(value)
+
+
+def test_accepted_optimize_persists_shifted_epoch_in_input_frame(tmp_path, monkeypatch):
+    """Optimizer coordinates are data-centered, while params.csv stores the
+    reference epoch from which Basement derives that centered coordinate.
+
+    Persisting the centered value directly makes the next config.init infer a
+    zero-cycle shift, leaving the normal prior about 100 days away. The writer
+    must undo the integer epoch shift using the optimized period.
+    """
+    d = _make_shift_epoch_datadir(tmp_path)
+    config.init(str(d))
+    fitkeys = [str(key) for key in config.BASEMENT.fitkeys]
+    epoch_idx = fitkeys.index("b_epoch")
+    period_idx = fitkeys.index("b_period")
+    theta_initial = np.asarray(config.BASEMENT.theta_0, dtype=float)
+    assert theta_initial[epoch_idx] > 90.0  # shifted into the data window
+
+    theta_opt = theta_initial.copy()
+    theta_opt[epoch_idx] += 0.02
+    theta_opt[period_idx] += 0.005
+
+    def fake_run_local(method, x0, bounds, maxiter=None):
+        return theta_opt.copy(), 1, True
+
+    def fake_lnprob(theta):
+        return 1.0 if np.allclose(theta, theta_opt) else 0.0
+
+    monkeypatch.setitem(optimize.__globals__, "_run_local", fake_run_local)
+    monkeypatch.setitem(optimize.__globals__, "mcmc_lnprob", fake_lnprob)
+
+    res = optimize(
+        str(d),
+        method="L-BFGS-B",
+        refine=False,
+        save=False,
+        quiet=True,
+        improvement_threshold=0.0,
+        skip_bounds_check=True,
+    )
+    assert res.accepted
+
+    params_line = next(
+        line for line in (d / "params.csv").read_text().splitlines() if line.startswith("b_epoch,")
+    )
+    persisted_epoch = float(params_line.split(",")[1])
+    assert persisted_epoch < 10.0  # original params.csv reference frame
+    assert "normal 0.5 0.1" in params_line  # prior definition is unchanged
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        config.init(str(d))
+    assert not any("more than 3 sigma" in str(w.message) for w in caught)
+
+    reloaded = {
+        str(key): value for key, value in zip(config.BASEMENT.fitkeys, config.BASEMENT.theta_0)
+    }
+    assert reloaded["b_epoch"] == pytest.approx(theta_opt[epoch_idx])
+    assert reloaded["b_period"] == pytest.approx(theta_opt[period_idx])
+    epoch_prior = config.BASEMENT.bounds[epoch_idx]
+    assert abs(reloaded["b_epoch"] - epoch_prior[1]) < 3.0 * epoch_prior[2]
 
 
 # ---------------------------------------------------------------------------

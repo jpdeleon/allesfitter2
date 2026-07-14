@@ -339,6 +339,42 @@ def _write_theta_to_params_csv(datadir, fitkeys, theta) -> None:
         f.writelines(out)
 
 
+def _theta_in_params_frame(basement, theta):
+    """Convert optimized internal coordinates back to the params.csv frame.
+
+    With ``shift_epoch=True``, :meth:`Basement.change_epoch` moves every
+    fitted epoch into the data window and shifts its prior by the same number
+    of periods. The CSV remains in the original reference frame so that a
+    future ``config.init`` can repeat both transformations. Persisting the
+    internal epoch directly would make that future shift zero and leave the
+    prior behind in the original frame.
+
+    Undo each recorded integer shift with the *optimized* period. This keeps
+    the optimized ephemeris exactly cycle-equivalent after a fresh reload,
+    including when both epoch and period changed during optimization.
+    """
+    theta_params = np.asarray(theta, dtype=float).copy()
+    if not basement.settings.get("shift_epoch", False):
+        return theta_params
+
+    fitkey_index = {str(key): i for i, key in enumerate(basement.fitkeys)}
+    for companion, n_shift in getattr(basement, "epoch_shift_periods", {}).items():
+        epoch_key = f"{companion}_epoch"
+        epoch_idx = fitkey_index.get(epoch_key)
+        if epoch_idx is None or n_shift == 0:
+            continue
+
+        period_key = f"{companion}_period"
+        period_idx = fitkey_index.get(period_key)
+        if period_idx is None:
+            period = float(basement.params[period_key])
+        else:
+            period = float(theta_params[period_idx])
+        theta_params[epoch_idx] -= int(n_shift) * period
+
+    return theta_params
+
+
 def _refine(theta, bounds, maxiter=30):
     """L-BFGS-B finite-diff refinement within `maxiter` steps. Catches and
     returns the input theta unchanged if the refinement fails."""
@@ -618,8 +654,9 @@ def optimize(
     accepted = (reject == "") and any_success
 
     if accepted and mutate_basement:
+        theta_params = _theta_in_params_frame(b, theta_best)
         b.theta_0 = np.asarray(theta_best, dtype=float)
-        _write_theta_to_params_csv(datadir, b.fitkeys, theta_best)
+        _write_theta_to_params_csv(datadir, b.fitkeys, theta_params)
 
     result = OptimizeResult(
         method=method,

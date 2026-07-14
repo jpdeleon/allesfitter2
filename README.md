@@ -130,6 +130,9 @@ preliminary run, loosen `ns_tol` (e.g. `10` or `100`); use `ns_tol,0.01` only fo
 the final run. The recommended workflow — warm-start with `optimize()`, iterate
 cheap→expensive, let the data set GP priors — is in
 [Effective use of allesfitter2](notes.md#effective-use-of-allesfitter2).
+Accepted optimizer results are written back in the original `params.csv`
+epoch frame; with `shift_epoch,True`, subsequent commands recenter both the
+optimized epoch and its prior consistently inside the data window.
 
 Compare nested-sampling evidences from Python with
 `allesfitter.compare_logz(["model_a", "model_b"])`, or from the command line with

@@ -438,6 +438,11 @@ class Basement:
         self.validate_baseline_against_covariates()
         self.synthesize_linear_multi_params()
 
+        # Number of whole periods applied to each companion epoch by
+        # change_epoch(). Consumers that persist internal fit coordinates
+        # (notably optimize()) need this to convert epochs back to the
+        # reference frame used by params.csv.
+        self.epoch_shift_periods = {}
         if self.settings["shift_epoch"]:
             try:
                 self.change_epoch()
@@ -3150,6 +3155,7 @@ class Basement:
 
             #::: calculate how much the user_epoch has to be shifted to get the mid_epoch
             N_shift = int(np.round((self.settings["mid_epoch"] - user_epoch) / period))
+            self.epoch_shift_periods[str(companion)] = N_shift
 
             #::: set the new initial guess (and truth)
             self.params[companion + "_epoch"] = 1.0 * self.settings["mid_epoch"]
