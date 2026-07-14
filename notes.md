@@ -215,7 +215,7 @@ allesfitter.mcmc_fit('.')      # warm-started iff res.accepted
 allesfitter.mcmc_output('.')
 ```
 
-The optimum is pushed into `config.BASEMENT.theta_0` (so subsequent samplers pick it up automatically) only when **all** acceptance gates pass — otherwise `theta_0` is left untouched and the next sampler call sees the original initial values. This makes `optimize()` safe to call unconditionally in `run.py`.
+The optimum is pushed into `config.BASEMENT.theta_0` *and* written into the `value` column of the fitted rows in `params.csv` on disk, only when **all** acceptance gates pass — otherwise both are left untouched and the next sampler call sees the original initial values. The disk write matters even for same-process chains like the one above: `mcmc_fit()` / `ns_fit()` / `show_initial_guess()` each call `config.init(datadir)` internally, which rebuilds `BASEMENT` from `params.csv` — an in-memory-only `theta_0` update would otherwise be silently discarded before `mcmc_fit()` ever saw it. This also means `optimize()` mutates your `params.csv` in place on acceptance; keep it under version control (or `mutate_basement=False`) if you want to inspect the diff before committing to it. It's what makes `optimize()` safe to call unconditionally in `run.py`.
 
 ### Methods
 
@@ -688,7 +688,12 @@ allesfitter prior strings in `params.csv` (`bounds` column): `uniform <lo> <hi>`
 - Check if target was observed by TESS
 
 **"Multiple exposure times available"**
-- Specify exposure time: `-e 120` or `-e 600`
+- The prepare step lists the available cadences (e.g. `120, 20 sec`), then
+  exits with a non-zero status so a scheduler notices. Re-run picking one with
+  `-e/--exptime`, e.g. `-e 120` or `-e 20`.
+- For headless/batch runs, set `ALLESFITTER_NONINTERACTIVE=1` to auto-select
+  the shortest usable cadence instead of exiting (it logs which one it picked;
+  pass `-e` to override).
 - Use `--debug` to see available options
 
 **"Sector not available"**

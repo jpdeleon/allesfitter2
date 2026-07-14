@@ -29,20 +29,28 @@ import os
 
 os.environ["OMP_NUM_THREADS"] = "1"
 import allesfitter
+from allesfitter.mcmc_output import mcmc_output
+from allesfitter.nested_sampling_output import ns_output
 
 DATADIR = os.path.dirname(os.path.abspath(__file__))
 SAMPLER = os.environ.get("ALLESFIT_SAMPLER", "mcmc").lower()
 
-allesfitter.show_initial_guess(DATADIR)
+allesfitter.show_initial_guess(DATADIR, file_extension=".png")
 if SAMPLER == "ns":
     with allesfitter.log_run("ns_fit", DATADIR):
         allesfitter.ns_fit(DATADIR, overwrite=False)
-    allesfitter.ns_output(DATADIR, overwrite=True)
+    ns_output(DATADIR, overwrite=True, file_extension=".png")
+elif SAMPLER == "optimize":
+    opt_method = os.environ.get("ALLESFIT_OPTIMIZE_METHOD", "cmaes")
+    opt_refine = os.environ.get("ALLESFIT_OPTIMIZE_REFINE", "true").lower() == "true"
+    opt_restarts = int(os.environ.get("ALLESFIT_OPTIMIZE_RESTARTS", "1"))
+    allesfitter.optimize(DATADIR, method=opt_method, refine=opt_refine, n_restarts=opt_restarts)
+    allesfitter.show_initial_guess(DATADIR, file_extension=".png")
 else:
     allesfitter.optimize(DATADIR, method="differential_evolution", refine=True)
     with allesfitter.log_run("mcmc_fit", DATADIR):
         allesfitter.mcmc_fit(DATADIR, append=True)
-    allesfitter.mcmc_output(DATADIR, overwrite=True)
+    mcmc_output(DATADIR, overwrite=True, file_extension=".png")
 '''
 
 # params.csv column header (commented, matching the examples).

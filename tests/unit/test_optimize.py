@@ -189,6 +189,30 @@ def test_lbfgsb_improves_and_mutates_basement(datadir):
     ), "theta_0 should have been mutated"
 
 
+def test_accepted_optimize_persists_to_params_csv(datadir):
+    """The in-memory theta_0 mutation alone isn't enough: mcmc_fit / ns_fit /
+    show_initial_guess all call config.init(datadir) again, which rebuilds
+    BASEMENT straight from params.csv. Only a disk write survives that."""
+    res = optimize(
+        str(datadir),
+        method="L-BFGS-B",
+        refine=False,
+        n_restarts=1,
+        save=False,
+        quiet=True,
+        improvement_threshold=0.0,
+        skip_bounds_check=True,
+    )
+    assert res.accepted
+
+    # A fresh config.init (what every subsequent engine call does) must see
+    # the optimized values, not the original guess.
+    config.init(str(datadir))
+    reloaded = dict(zip(config.BASEMENT.fitkeys, config.BASEMENT.theta_0))
+    for key, value in zip(res.fitkeys, res.theta_opt):
+        assert reloaded[key] == pytest.approx(value)
+
+
 # ---------------------------------------------------------------------------
 # 4) acceptance gate rejects when delta < threshold (synthetic case)
 # ---------------------------------------------------------------------------
@@ -234,6 +258,38 @@ def test_mutate_basement_false_leaves_theta0(datadir):
     )
     assert res.accepted
     assert np.allclose(config.BASEMENT.theta_0, theta_0_before)
+
+
+def test_mutate_basement_false_leaves_params_csv(datadir):
+    params_csv_before = (datadir / "params.csv").read_text()
+    res = optimize(
+        str(datadir),
+        method="L-BFGS-B",
+        refine=False,
+        n_restarts=1,
+        save=False,
+        quiet=True,
+        improvement_threshold=0.0,
+        mutate_basement=False,
+        skip_bounds_check=True,
+    )
+    assert res.accepted
+    assert (datadir / "params.csv").read_text() == params_csv_before
+
+
+def test_rejected_optimize_leaves_params_csv(datadir):
+    params_csv_before = (datadir / "params.csv").read_text()
+    res = optimize(
+        str(datadir),
+        method="L-BFGS-B",
+        refine=False,
+        n_restarts=1,
+        save=False,
+        quiet=True,
+        improvement_threshold=1e30,
+    )
+    assert res.accepted is False
+    assert (datadir / "params.csv").read_text() == params_csv_before
 
 
 # ---------------------------------------------------------------------------

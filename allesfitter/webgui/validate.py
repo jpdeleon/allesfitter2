@@ -89,7 +89,7 @@ def initial_guess_preview(run_dir: str | Path, out_path: str | Path | None = Non
         return None
 
     try:
-        fig = allesfitter.show_initial_guess(str(run_dir))
+        fig = allesfitter.show_initial_guess(str(run_dir), file_extension=".png", return_figs=True)
     except Exception:
         return None
     if fig is None:

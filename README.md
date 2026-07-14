@@ -92,13 +92,19 @@ HD39091/
    allesfitter.ns_fit('.')      # nested sampling
    allesfitter.ns_output('.')   # parameter derivation
    ```
-3. **Execute:** `python run.py` — results are saved in `HD39091/results/`.
+3. **Execute:** `python run.py` — MCMC and nested-sampling outputs are saved separately
+   in `HD39091/mcmc_results/` and `HD39091/ns_results/`, respectively. Existing runs
+   using the legacy `HD39091/results/` directory remain readable.
 
 By default `fast_fit,True` restricts evaluation to transit windows. For a quick
 preliminary run, loosen `ns_tol` (e.g. `10` or `100`); use `ns_tol,0.01` only for
 the final run. The recommended workflow — warm-start with `optimize()`, iterate
 cheap→expensive, let the data set GP priors — is in
 [Effective use of allesfitter2](notes.md#effective-use-of-allesfitter2).
+
+Compare nested-sampling evidences from Python with
+`allesfitter.compare_logz(["model_a", "model_b"])`, or from the command line with
+`python -m allesfitter.postprocessing.nested_sampling_compare_logZ model_a model_b`.
 
 ## Command Line Options
 
@@ -164,6 +170,23 @@ When `-f` has ≥2 distinct instruments and `-bp` is omitted, the script warns t
 | `-u, --update_db` | Force database updates |
 | `--debug` | Detailed diagnostic output |
 
+### Non-interactive / headless runs
+
+The fitter runs a few "luser proof" sanity checks that normally ask a
+yes/no question on the terminal (e.g. *"the initial guess for `b_epoch`
+lies more than 3 sigma from its prior — continue?"*, or *"output file
+already exists — overwrite?"*). Under a batch scheduler, subprocess, or
+notebook kernel with no attached TTY these are auto-answered with the
+safe default (continue / overwrite) plus a warning, so a run never hangs
+waiting for input. Set `ALLESFITTER_NONINTERACTIVE=1` to force that
+non-interactive behaviour even when a terminal is attached.
+
+`ALLESFITTER_NONINTERACTIVE=1` additionally makes `prepare_allesfit.py`
+auto-select the **shortest** available cadence when a search returns
+multiple exposure times (e.g. TESS Sector 64 in both 20 s and 120 s),
+instead of exiting to let you re-run with `-e/--exptime`. It logs which
+cadence it picked; pass `-e` to override.
+
 ## Usage notes, modeling walkthroughs & troubleshooting
 
 Detailed per-feature walkthroughs and all advisory material now live in
@@ -193,18 +216,64 @@ into the GUI: give it a target (name/TOI/TIC/CTOI) and a sector/campaign/quarter
 it runs `prepare_allesfit` as a subprocess to **auto-download** the TESS/K2/Kepler
 light curves and **auto-generate** the whole datadir (light-curve CSVs, `params.csv`,
 `settings.csv`, GP/dilution/TTV priors) — no manual upload or hand-typed ephemerides.
-The run appears on **Jobs** as `preparing`, then `prepared` once it re-emits a
-launch-compatible `run.py` and validates through `Basement`; you review the generated
-config and click **Fit** (MCMC or Nested Sampling) to launch it via the same
-subprocess launcher as a manual fit. Requires network access (not `--no-network`).
+A live archive lookup fills the sector chips, and an **exposure-time dropdown**
+lets you pin the cadence (passed through as `-e`): TESS offers its standard set
+(20/120/600/1800 s) and other missions list what the archive reports. Leave it on
+*Auto* for a single cadence, or pick one when several are available (e.g. TESS
+20 s vs 120 s).
+The run appears on **Jobs** as `preparing`. Preparation validates through
+`Basement`, renders and saves `show_initial_guess`, then stops in the `prepared`
+state. Open **Review** to inspect that preview and edit `params.csv` or
+`settings.csv` directly. **Run MCMC** and **Run Nested Sampling** each save the
+editors, validate the revised configuration, refresh the initial-guess preview,
+and only then launch the selected sampler through the same subprocess launcher as
+a manual fit. Requires network access (not `--no-network`).
 
 ```bash
 pip install -e ".[webgui]"        # or: uv sync --extra webgui
 
-allesfitter-gui                    # serve at http://127.0.0.1:8000
+allesfitter-gui                    # serve at http://127.0.0.1:5100
 allesfitter-gui --runs-root ./runs --toi-csv data/TOIs.csv --port 8080
 allesfitter-gui --no-network       # disable NASA Exoplanet Archive auto-fill
+uv run allesfitter gui --reload    # development server with automatic reload
 ```
+
+For a standalone loopback deployment with an explicit runs directory:
+
+```bash
+uv run allesfitter-gui --host 127.0.0.1 --port 5100 --runs-root ./webgui_runs
+```
+
+When a reverse proxy exposes the GUI below a URL prefix, pass that same public
+prefix explicitly. The proxy should strip the prefix before forwarding requests;
+generated links, static assets, browser actions, redirects, and result files will
+retain it:
+
+```bash
+uv run allesfitter-gui \
+  --host 127.0.0.1 \
+  --port 5001 \
+  --root-path /allesfitter \
+  --runs-root /path/to/persistent/allesfitter-runs \
+  --max-concurrent-fits 2 \
+  --max-queued-fits-per-user 3 \
+  --no-kill-existing
+```
+
+An empty `--root-path` (the default) keeps the standalone URLs rooted at `/`.
+The safe default is to fail if the port is occupied; `--kill-existing` is an
+explicit development-only opt-in.
+
+Fit jobs use a durable FIFO queue. `--max-concurrent-fits` bounds total running
+fits and `--max-queued-fits-per-user` bounds each owner's pending fits. Running
+jobs are placed in their own process groups, so Stop cancels child workers as
+well as the launcher. A graceful GUI shutdown leaves fits running. On restart,
+the scheduler verifies the recorded PID identity and reconciles each job using
+the worker's durable `results/exit.json` marker. A vanished process without that
+marker is failed, never assumed successful. For operational restarts, stop the
+GUI, restart it with the same database and runs root, and confirm recovered
+states on **Jobs**; use the Stop action before host shutdown when fits must not
+survive.
 
 Pages: **Targets** (status badges), **Prepare** (catalog target + sector →
 auto-downloaded, validated, ready-to-fit run), **New fit** (form + Validate/Run +

@@ -129,6 +129,10 @@ _LAZY_NAMES: dict[str, tuple[str, str | None]] = {
         "allesfitter.postprocessing.nested_sampling_compare_logZ",
         "get_logZ",
     ),
+    "compare_logz": (
+        "allesfitter.postprocessing.nested_sampling_compare_logZ",
+        "compare_logz",
+    ),
     "ns_plot_bayes_factors": (
         "allesfitter.postprocessing.nested_sampling_compare_logZ",
         "ns_plot_bayes_factors",
@@ -207,6 +211,13 @@ def __dir__() -> list[str]:
 
 class allesclass:
     def __init__(self, datadir, quiet=True):
+        # ``allesfitter`` deliberately defers heavyweight imports.  Names
+        # looked up by a function body do not go through this module's
+        # ``__getattr__``, though, so load the dependencies used by the
+        # constructor explicitly when an instance is requested.
+        from . import config, general_output
+        from .general_output import draw_initial_guess_samples, get_labels
+
         config.init(datadir, quiet=quiet)
         self.BASEMENT = config.BASEMENT
         self.fulldata = config.BASEMENT.fulldata
@@ -231,7 +242,14 @@ class allesclass:
 
         print("working")
 
-        if os.path.exists(os.path.join(config.BASEMENT.outdir, "save_ns.pickle.gz")):
+        from .results import results_directory
+
+        ns_outdir = results_directory(datadir, "ns")
+        mcmc_outdir = results_directory(datadir, "mcmc")
+        if os.path.exists(os.path.join(ns_outdir, "save_ns.pickle.gz")):
+            from . import nested_sampling_output
+
+            config.BASEMENT.outdir = ns_outdir
             f = gzip.GzipFile(os.path.join(config.BASEMENT.outdir, "save_ns.pickle.gz"), "rb")
             results = pickle.load(f)
             f.close()
@@ -243,7 +261,15 @@ class allesclass:
                 general_output.get_params_from_samples(self.posterior_samples)
             )
 
-        elif os.path.exists(os.path.join(config.BASEMENT.outdir, "mcmc_save.h5")):
+        elif os.path.exists(os.path.join(mcmc_outdir, "mcmc_save.h5")):
+            import emcee
+
+            from .mcmc_output import (
+                draw_mcmc_posterior_samples,
+                draw_mcmc_posterior_samples_at_maximum_likelihood,
+            )
+
+            config.BASEMENT.outdir = mcmc_outdir
             copyfile(
                 os.path.join(config.BASEMENT.outdir, "mcmc_save.h5"),
                 os.path.join(config.BASEMENT.outdir, "mcmc_save_tmp.h5"),

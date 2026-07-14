@@ -20,11 +20,11 @@ from allesfitter.webgui.runstore import RunStore
 class JobStore(Protocol):
     """Durable job state keyed by ``run_id``."""
 
-    def enqueue(self, run_id: str) -> None:
+    def enqueue(self, run_id: str, *, owner: str = "", limit: int = 1_000_000) -> bool:
         """Mark a created run as pending (queued, not yet launched)."""
         ...
 
-    def mark_running(self, run_id: str, pid: int) -> None:
+    def mark_running(self, run_id: str, pid: int, **metadata: object) -> None:
         """Record that a run's subprocess has started."""
         ...
 
@@ -38,6 +38,10 @@ class JobStore(Protocol):
 
     def all(self) -> list[dict]: ...
 
+    def set_state(self, run_id: str, state: str, **fields: object) -> None: ...
+
+    def record_command(self, run_id: str, command: str) -> None: ...
+
 
 class RunStoreJobStore(JobStore):
     """:class:`JobStore` backed by a :class:`RunStore`."""
@@ -45,11 +49,11 @@ class RunStoreJobStore(JobStore):
     def __init__(self, store: RunStore):
         self.store = store
 
-    def enqueue(self, run_id: str) -> None:
-        self.store.set_state(run_id, runstore.PENDING)
+    def enqueue(self, run_id: str, *, owner: str = "", limit: int = 1_000_000) -> bool:
+        return self.store.enqueue_if_below_limit(run_id, owner=owner, limit=limit)
 
-    def mark_running(self, run_id: str, pid: int) -> None:
-        self.store.set_state(run_id, runstore.RUNNING, pid=pid)
+    def mark_running(self, run_id: str, pid: int, **metadata: object) -> None:
+        self.store.set_state(run_id, runstore.RUNNING, pid=pid, **metadata)
 
     def mark_done(self, run_id: str, *, returncode: int, logz: str = "", error: str = "") -> None:
         state = runstore.DONE if returncode == 0 else runstore.FAILED
@@ -63,6 +67,12 @@ class RunStoreJobStore(JobStore):
 
     def all(self) -> list[dict]:
         return self.store.list_runs()
+
+    def set_state(self, run_id: str, state: str, **fields: object) -> None:
+        self.store.set_state(run_id, state, **fields)
+
+    def record_command(self, run_id: str, command: str) -> None:
+        self.store.record_command(run_id, command)
 
 
 # Process-wide active store. The app installs one at startup via set_job_store();

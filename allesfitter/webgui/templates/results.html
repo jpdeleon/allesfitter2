@@ -1,53 +1,171 @@
 {% extends "base.html" %}
-{% block title %}{{ run.target }} results · allesfitter{% endblock %}
+{% block title %}{{ run.target }} · allesfitter{% endblock %}
 {% block content %}
-<section class="stack">
-  <div class="row-between">
-    <h1>{{ run.target }} <span class="badge state-{{ run.state }}">{{ run.state }}</span></h1>
-    <a class="btn" href="/jobs">Back to jobs</a>
+{% set preparing = run.state in ('created', 'preparing') %}
+{% set fitting = run.state in ('pending', 'running', 'stopping') %}
+{% set finished = run.state == 'done' %}
+<section class="stack run-workspace" id="run-workspace" data-run-id="{{ run.run_id }}" data-state="{{ run.state }}">
+  <div class="run-heading row-between">
+    <div>
+      <div class="breadcrumb"><a href="{{ url_for('index') }}">Overview</a><span>/</span><a href="{{ url_for('jobs_page') }}">Runs</a><span>/</span><span>{{ run.target }}</span></div>
+      <div class="title-line"><h1>{{ run.target }}</h1><span id="run-state-badge" class="badge state-{{ run.state }}"><i></i>{{ run.state }}</span></div>
+      <p class="mono run-id">{{ run.run_id }}</p>
+    </div>
+    <div class="actions">
+      <button class="btn hidden" id="stop-run" type="button">Stop run</button>
+      <a class="btn" href="{{ url_for('jobs_page') }}">All runs</a>
+    </div>
   </div>
 
-  <div class="panel meta-grid">
-    <div><span class="muted">Run</span><br><span class="mono small">{{ run.run_id }}</span></div>
-    <div><span class="muted">Instruments</span><br><span class="mono small">{{ run.insts }}</span></div>
-    <div><span class="muted">Bands</span><br>{{ run.bands }}</div>
-    <div><span class="muted">Sampler</span><br>{{ run.sampler }}</div>
-    <div><span class="muted">log(Z)</span><br><span class="mono">{{ run.logz or '—' }}</span></div>
+  <ol class="pipeline-steps run-pipeline" aria-label="Analysis progress">
+    <li class="{{ 'active' if preparing else 'complete' }}"><span>{{ '✓' if not preparing else '1' }}</span><div><strong>Prepare</strong><small>Acquire observations</small></div></li>
+    <li class="{{ 'active' if editable else ('complete' if fitting or finished else '') }}"><span>{{ '✓' if fitting or finished else '2' }}</span><div><strong>Validate</strong><small>Review initial model</small></div></li>
+    <li class="{{ 'active' if fitting else ('complete' if finished else '') }}"><span>{{ '✓' if finished else '3' }}</span><div><strong>Fit</strong><small>Run inference</small></div></li>
+    <li class="{{ 'active' if finished else '' }}"><span>4</span><div><strong>Inspect</strong><small>Assess diagnostics</small></div></li>
+  </ol>
+
+  {% if run.error %}<div class="callout error"><span aria-hidden="true">!</span><p><strong>This run needs attention.</strong><br>{{ run.error }}</p></div>{% endif %}
+
+  <div class="workspace-grid">
+    <div class="workspace-main stack">
+      {% if preparing %}
+      <section class="panel process-panel">
+        <div class="process-hero"><span class="spinner" aria-hidden="true"></span><div><p class="eyebrow">Stage 1 of 4</p><h2>Preparing observations</h2><p>The archive data is being downloaded and converted into an allesfitter dataset. This page updates automatically.</p></div></div>
+        <div class="indeterminate"><i></i></div>
+      </section>
+      {% endif %}
+
+      {% if editable %}
+      <section class="panel model-review" id="config-editor" data-run-id="{{ run.run_id }}">
+        <div class="section-heading row-between">
+          <div><p class="eyebrow">Scientific review gate</p><h2>Validate the initial model</h2><p>Confirm that the model captures the signal and that the free parameters and priors are scientifically sensible.</p></div>
+          <span class="badge state-prepared">Ready for review</span>
+        </div>
+
+        <div class="review-checklist" aria-label="Preflight checklist">
+          <div class="complete"><span>✓</span><p><strong>Observations loaded</strong><small>{{ run.insts or 'Generated dataset' }}</small></p></div>
+          <div class="complete"><span>✓</span><p><strong>Configuration parsed</strong><small>params.csv + settings.csv</small></p></div>
+          <div class="{{ 'complete' if has_initial_guess else 'warning' }}"><span>{{ '✓' if has_initial_guess else '!' }}</span><p><strong>Initial model rendered</strong><small>{{ 'Inspect the preview below' if has_initial_guess else 'Preview unavailable' }}</small></p></div>
+        </div>
+
+        <div class="review-tabs" role="tablist" aria-label="Model review views">
+          <button class="active" id="tab-model" role="tab" aria-selected="true" aria-controls="view-model" data-review-tab="model">Model preview</button>
+          <button id="tab-params" role="tab" aria-selected="false" aria-controls="view-params" data-review-tab="params">Parameters <span class="dirty-dot" title="Unsaved changes"></span></button>
+          <button id="tab-settings" role="tab" aria-selected="false" aria-controls="view-settings" data-review-tab="settings">Settings <span class="dirty-dot" title="Unsaved changes"></span></button>
+        </div>
+
+        <div id="view-model" class="review-view active" role="tabpanel" aria-labelledby="tab-model">
+          {% if has_initial_guess %}
+          <figure class="initial-guess image-stage">
+            <img id="initial-guess" src="{{ url_for('initial_guess_file', run_id=run.run_id) }}" alt="Initial allesfitter model plotted against observations">
+            <figcaption>Initial model preview · generated from the current parameter configuration</figcaption>
+          </figure>
+          {% else %}
+          <div class="empty"><h3>Initial preview unavailable</h3><p>Save and validate the configuration to try rendering it again.</p></div>
+          {% endif %}
+        </div>
+        <div id="view-params" class="review-view" role="tabpanel" aria-labelledby="tab-params" hidden>
+          <div class="editor-toolbar"><div><strong>params.csv</strong><span>Model values, bounds, and priors</span></div><div><button class="ghost editor-reset" type="button" data-editor="params-csv">Discard edits</button><span class="editor-stats" data-stats="params-csv"></span></div></div>
+          <textarea id="params-csv" class="code-editor" spellcheck="false" aria-label="params.csv editor">{{ params_csv }}</textarea>
+        </div>
+        <div id="view-settings" class="review-view" role="tabpanel" aria-labelledby="tab-settings" hidden>
+          <div class="editor-toolbar"><div><strong>settings.csv</strong><span>Sampler and model settings</span></div><div><button class="ghost editor-reset" type="button" data-editor="settings-csv">Discard edits</button><span class="editor-stats" data-stats="settings-csv"></span></div></div>
+          <textarea id="settings-csv" class="code-editor" spellcheck="false" aria-label="settings.csv editor">{{ settings_csv }}</textarea>
+        </div>
+
+        <div class="validation-bar">
+          <div id="config-result" class="validation-status" role="status" aria-live="polite"><span class="status-icon">✓</span><p><strong>Prepared configuration is valid</strong><small>Save after editing to re-run validation and refresh the preview.</small></p></div>
+          <button class="btn" id="save-config" type="button">Save &amp; validate</button>
+        </div>
+      </section>
+
+      <section class="panel inference-panel">
+        <div class="section-heading"><p class="eyebrow">Next stage</p><h2>Choose an inference method</h2><p>Optimization is a fast preflight. Use MCMC for posterior estimation or nested sampling when the Bayesian evidence matters.</p></div>
+        <div class="sampler-grid">
+          <article class="sampler-card recommended">
+            <span class="recommendation">Recommended first</span><div class="sampler-icon">◎</div><h3>Optimize</h3><p>Find a high-likelihood solution quickly and catch poor starting values before an expensive fit.</p>
+            <button class="btn primary" data-sampler="optimize" type="button">Run optimization →</button>
+          </article>
+          <article class="sampler-card">
+            <div class="sampler-icon">∿</div><h3>MCMC</h3><p>Characterize the posterior distribution and parameter covariances with ensemble sampling.</p>
+            <button class="btn" data-sampler="mcmc" type="button">Run MCMC →</button>
+          </article>
+          <article class="sampler-card">
+            <div class="sampler-icon">∫</div><h3>Nested sampling</h3><p>Estimate posterior distributions and Bayesian evidence for model comparison.</p>
+            <button class="btn" data-sampler="ns" type="button">Run Nested Sampling →</button>
+          </article>
+        </div>
+        <details class="advanced-options optimize-options">
+          <summary>Optimization controls</summary>
+          <div class="field-row">
+            <label>Method<select id="optimize-method"><option value="cmaes" selected>CMA-ES (robust global)</option><option value="differential_evolution">Differential evolution</option><option value="dual_annealing">Dual annealing</option><option value="L-BFGS-B">L-BFGS-B (local)</option><option value="Nelder-Mead">Nelder-Mead (local)</option><option value="Powell">Powell (local)</option><option value="SLSQP">SLSQP (local)</option></select></label>
+            <label>Restarts<input type="number" id="optimize-restarts" value="1" min="1" max="100"></label>
+            <label class="check"><input type="checkbox" id="optimize-refine" checked><span>Refine best solution<small>Finish with a local optimizer.</small></span></label>
+          </div>
+        </details>
+      </section>
+      {% endif %}
+
+      {% if fitting %}
+      <section class="panel process-panel">
+        <div class="process-hero"><span class="spinner" aria-hidden="true"></span><div><p class="eyebrow">Stage 3 of 4</p><h2>{{ 'Waiting for a worker' if run.state == 'pending' else 'Inference in progress' }}</h2><p>{{ {'mcmc': 'Sampling the posterior with MCMC.', 'ns': 'Exploring the posterior and accumulating Bayesian evidence.', 'optimize': 'Searching for a high-likelihood parameter solution.'}.get(run.sampler, 'The fitting engine is running.') }}</p></div></div>
+        <div class="indeterminate"><i></i></div>
+      </section>
+      {% endif %}
+
+      {% if images %}
+      <section class="results-section stack">
+        <div class="section-heading row-between"><div><p class="eyebrow">Scientific output</p><h2>Diagnostic figures</h2><p>Inspect the fit, posterior structure, residuals, and derived parameters.</p></div><span class="muted small">{{ images|length }} file{{ '' if images|length == 1 else 's' }}</span></div>
+        <div class="figure-filters" role="group" aria-label="Filter figures"><button class="active" type="button" data-figure-filter="all">All</button><button type="button" data-figure-filter="fit">Fits</button><button type="button" data-figure-filter="posterior">Posteriors</button><button type="button" data-figure-filter="other">Other</button></div>
+        <div class="figs" id="figure-gallery">
+          {% for name in images %}{% if not (editable and name.startswith('initial_guess')) %}
+          {% set category = 'fit' if ('fit' in name or 'initial_guess' in name) else ('posterior' if ('corner' in name or 'chain' in name or 'posterior' in name or 'trace' in name) else 'other') %}
+          <figure data-category="{{ category }}" class="{% if (name.startswith('initial_guess') or name.startswith('mcmc_fit') or name.startswith('ns_fit')) and '_per_transit' not in name %}wide{% endif %}">
+            <button class="figure-open" type="button" data-full-src="{{ url_for('result_file', run_id=run.run_id, name=name) }}" data-caption="{{ name }}"><img loading="lazy" src="{{ url_for('result_file', run_id=run.run_id, name=name) }}" alt="{{ name }}"><span>Expand</span></button>
+            <figcaption><span class="mono small">{{ name }}</span><a href="{{ url_for('result_file', run_id=run.run_id, name=name) }}" target="_blank" rel="noopener">Open file ↗</a></figcaption>
+          </figure>
+          {% endif %}{% endfor %}
+        </div>
+      </section>
+      {% endif %}
+
+      {% if documents %}
+      <section class="panel"><div class="section-heading"><p class="eyebrow">Exports</p><h2>Documents &amp; vector plots</h2></div><ul class="doc-list">{% for name in documents %}<li><a href="{{ url_for('result_file', run_id=run.run_id, name=name) }}" target="_blank" rel="noopener"><span>PDF</span>{{ name }} <i>↗</i></a></li>{% endfor %}</ul></section>
+      {% endif %}
+
+      {% if not editable and not preparing and not images and not documents and not fitting %}
+      <div class="empty"><span class="empty-orbit">◇</span><h2>No scientific output found</h2><p>Inspect the process log for details or return to the run monitor.</p></div>
+      {% endif %}
+
+      {% if run_log or preparing or fitting %}
+      <details class="panel log-section" {{ 'open' if preparing or fitting else '' }}>
+        <summary><span><span class="eyebrow">Process output</span><strong>Run log</strong></span><span class="log-summary-actions"><span class="live-note" id="log-live-indicator"><i></i>{{ 'Following' if preparing or fitting else 'Complete' }}</span><span class="chevron">⌄</span></span></summary>
+        <div class="log-toolbar"><span class="muted small">Last 300 lines</span><button class="ghost" id="copy-run-log" type="button">Copy log</button></div>
+        <pre class="log log-full" id="live-run-log">{{ run_log or '(waiting for process output)' }}</pre>
+      </details>
+      {% endif %}
+    </div>
+
+    <aside class="workspace-sidebar stack">
+      <section class="panel run-facts">
+        <div class="section-heading"><p class="eyebrow">Run metadata</p><h2>Analysis setup</h2></div>
+        <dl>
+          <div><dt>Status</dt><dd><span class="badge state-{{ run.state }}" id="sidebar-state">{{ run.state }}</span></dd></div>
+          <div><dt>Instrument{{ 's' if ' ' in run.insts else '' }}</dt><dd class="mono">{{ run.insts or 'Pending' }}</dd></div>
+          <div><dt>Bandpass{{ 'es' if ' ' in run.bands else '' }}</dt><dd>{{ run.bands or 'Achromatic' }}</dd></div>
+          <div><dt>Method</dt><dd id="sidebar-sampler">{{ {'mcmc': 'MCMC', 'ns': 'Nested sampling', 'optimize': 'Optimization'}.get(run.sampler, run.sampler) }}</dd></div>
+          <div><dt>Companions</dt><dd>{{ run.companions or '—' }}</dd></div>
+          <div><dt>log(Z)</dt><dd class="mono evidence" id="sidebar-logz">{{ run.logz or '—' }}</dd></div>
+        </dl>
+      </section>
+      <section class="panel science-note">
+        <span aria-hidden="true">◇</span><div><h3>Review before compute</h3><p>The initial model is a plausibility check, not proof of convergence. Inspect residuals, chains, and posterior geometry after fitting.</p></div>
+      </section>
+      {% if finished %}<a class="btn primary full-width" href="#figure-gallery">Inspect diagnostics ↓</a>{% endif %}
+    </aside>
   </div>
-
-  {% if run.error %}<div class="result err">{{ run.error }}</div>{% endif %}
-
-  {% if images %}
-  <h2>Figures</h2>
-  <div class="figs">
-    {% for name in images %}
-    <figure>
-      <a href="/results/{{ run.run_id }}/file/{{ name }}" target="_blank">
-        <img loading="lazy" src="/results/{{ run.run_id }}/file/{{ name }}" alt="{{ name }}">
-      </a>
-      <figcaption class="mono small">{{ name }}</figcaption>
-    </figure>
-    {% endfor %}
-  </div>
-  {% endif %}
-
-  {% if documents %}
-  <h2>Plots (PDF)</h2>
-  <ul class="doc-list">
-    {% for name in documents %}
-    <li><a href="/results/{{ run.run_id }}/file/{{ name }}" target="_blank">{{ name }}</a></li>
-    {% endfor %}
-  </ul>
-  {% endif %}
-
-  {% if not images and not documents %}
-  <p class="empty">No figures yet — the run may still be in progress.
-    <a href="/jobs">Watch the log →</a></p>
-  {% endif %}
 </section>
+
+<div class="lightbox hidden" id="figure-lightbox" role="dialog" aria-modal="true" aria-label="Expanded scientific figure"><button class="lightbox-close icon-btn" type="button" aria-label="Close figure">✕</button><img alt=""><p class="mono"></p></div>
 {% endblock %}
-{% block scripts %}
-{% if run.state in ('created','pending','running') %}
-<script>setTimeout(() => location.reload(), 5000);</script>
-{% endif %}
-{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', path='/results.js') }}?v=6"></script>{% endblock %}

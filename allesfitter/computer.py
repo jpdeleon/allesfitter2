@@ -26,8 +26,10 @@ import warnings
 
 import numpy as np
 
-warnings.filterwarnings("ignore", category=np.VisibleDeprecationWarning)
-warnings.filterwarnings("ignore", category=np.RankWarning)
+from ._numpy_compat import RankWarning, VisibleDeprecationWarning
+
+warnings.filterwarnings("ignore", category=VisibleDeprecationWarning)
+warnings.filterwarnings("ignore", category=RankWarning)
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 _HAS_PLOTTING = False
@@ -67,12 +69,15 @@ def _init_plotting():
 
 
 #::: for now, only use the original celerite
+celerite_version = 0
+_celerite_import_error = None
 try:
     import celerite
     from celerite import terms
 
     celerite_version = 1
-except ImportError:
+except ImportError as exc:
+    _celerite_import_error = exc
     warnings.warn(
         "Cannot import package 'celerite', thus GP baseline models will not be supported.",
         stacklevel=2,
@@ -1092,7 +1097,6 @@ def flux_subfct_sinusoidal_phase_curves(
 #::: flux sub-fct: flare models
 # ==============================================================================
 def flux_subfct_flares(params, inst, companion, xx=None, settings=None, return_fluxes=False):
-
     # --------------------------------------------------------------------------
     #::: defaults
     # --------------------------------------------------------------------------
@@ -1138,7 +1142,6 @@ def _bump_bandpass_suffix(inst, settings):
 
 
 def flux_subfct_bumps(params, inst, companion, xx=None, settings=None, return_fluxes=False):
-
     # --------------------------------------------------------------------------
     #::: defaults
     # --------------------------------------------------------------------------
@@ -1693,7 +1696,6 @@ def calculate_external_priors(params):
 #::: calculate all instruments linked (for stellar variability)
 # ==============================================================================
 def calculate_lnlike_total(params):
-
     lnlike_total = 0
 
     # --------------------------------------------------------------------------
@@ -2013,7 +2015,6 @@ def calculate_yerr_w(params, inst, key):
 #::: calculate model
 ###############################################################################
 def calculate_model(params, inst, key, xx=None, settings=None):
-
     if settings is None:
         settings = config.BASEMENT.settings
 
@@ -2138,7 +2139,7 @@ def calculate_baseline(params, inst, key, model=None, yerr_w=None, xx=None):
         _close = _difflib.get_close_matches(str(baseline_method), _valid, n=3, cutoff=0.4)
         _hint = ("Did you mean: " + ", ".join(repr(c) for c in _close) + "?  ") if _close else ""
         raise KeyError(
-            f"settings.csv has {_setting}={baseline_method!r}, which is not a known baseline kind. "
+            f"settings.csv has {_setting}={str(baseline_method)!r}, which is not a known baseline kind. "
             f"{_hint}Valid options are: {_valid}."
         )
     return baseline_switch[baseline_method](x, y, yerr_w, xx, params, inst, key)
@@ -2598,6 +2599,11 @@ def baseline_sample_GP(*args):
 #::: calculate baseline: get GP kernel
 # ==============================================================================
 def baseline_get_gp(params, inst, key):
+    if celerite_version != 1:
+        raise ImportError(
+            "Cannot construct a GP baseline because celerite could not be imported. "
+            "Install a compatible celerite build and C++ runtime."
+        ) from _celerite_import_error
 
     #::: kernel
     if config.BASEMENT.settings["baseline_" + key + "_" + inst] == "sample_GP_real":
@@ -2717,7 +2723,6 @@ def gp_predict_in_chunks(gp, y, x, chunk_size=5000):
 #::: Stellar Variability: main
 # ==============================================================================
 def calculate_stellar_var(params, inst, key, model=None, baseline=None, yerr_w=None, xx=None):
-
     # --------------------------------------------------------------------------
     #::: over all instruments (needed for GP)
     # --------------------------------------------------------------------------
@@ -2793,6 +2798,11 @@ def calculate_stellar_var(params, inst, key, model=None, baseline=None, yerr_w=N
 #::: Stellar Variability: get GP kernel
 # ==============================================================================
 def stellar_var_get_gp(params, key):
+    if celerite_version != 1:
+        raise ImportError(
+            "Cannot construct a stellar-variability GP because celerite could not be imported. "
+            "Install a compatible celerite build and C++ runtime."
+        ) from _celerite_import_error
 
     #::: kernel
     if config.BASEMENT.settings["stellar_var_" + key] == "sample_GP_real":

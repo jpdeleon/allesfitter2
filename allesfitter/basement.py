@@ -25,11 +25,13 @@ from typing import Any
 
 import numpy as np
 
+from ._numpy_compat import RankWarning, VisibleDeprecationWarning
+
 warnings.formatwarning = lambda msg, *args, **kwargs: (
     f"\n! WARNING:\n {msg}\ntype: {args[0]}, file: {args[1]}, line: {args[2]}\n"
 )
-warnings.filterwarnings("ignore", category=np.VisibleDeprecationWarning)
-warnings.filterwarnings("ignore", category=np.RankWarning)
+warnings.filterwarnings("ignore", category=VisibleDeprecationWarning)
+warnings.filterwarnings("ignore", category=RankWarning)
 #::: plotting settings
 import seaborn as sns
 from scipy.stats import truncnorm
@@ -43,6 +45,7 @@ from .exoworlds_rdx.lightcurves.index_transits import (
     index_transits,
 )
 from .priors.simulate_PDF import simulate_PDF
+from .utils.interactive import ask_choice
 from .utils.mcmc_move_translator import translate_str_to_move
 from .validation import validate_params_settings
 from .validation.physical_limits import eccentricity_error, lookup_limit
@@ -2609,9 +2612,9 @@ class Basement:
                 self.params[key] = self.params[
                     self.coupled_with[i]
                 ]  # luser proof: automatically set the values of the params coupled to another param
-                buf["fit"][
-                    i
-                ] = 0  # luser proof: automatically set fit=0 for the params coupled to another param
+                buf["fit"][i] = (
+                    0  # luser proof: automatically set fit=0 for the params coupled to another param
+                )
 
         # ==========================================================================
         #::: baseline share groups: alias follower GP hyperparameters to leader
@@ -2759,34 +2762,40 @@ class Basement:
                 raise ValueError("The initial guess for " + key + " lies outside of its bounds.")
 
             elif (b[0] == "normal") and (np.abs(th - b[1]) > 3 * b[2]):
-                answer = input(
+                answer = ask_choice(
                     "The initial guess for "
                     + key
                     + " lies more than 3 sigma from its prior\n"
                     + "What do you want to do?\n"
                     + "1 : continue at any sacrifice \n"
-                    + "2 : stop and let me fix the params.csv file \n"
+                    + "2 : stop and let me fix the params.csv file \n",
+                    default="1",
+                    warning="The initial guess for "
+                    + key
+                    + " lies more than 3 sigma from its prior; continuing "
+                    "anyway (non-interactive run).",
                 )
-                if answer == 1:
-                    pass
-                else:
+                if answer != "1":
                     raise ValueError("User aborted the run.")
 
             elif (b[0] == "trunc_normal") and not (b[1] <= th <= b[2]):
                 raise ValueError("The initial guess for " + key + " lies outside of its bounds.")
 
             elif (b[0] == "trunc_normal") and (np.abs(th - b[3]) > 3 * b[4]):
-                answer = input(
+                answer = ask_choice(
                     "The initial guess for "
                     + key
                     + " lies more than 3 sigma from its prior\n"
                     + "What do you want to do?\n"
                     + "1 : continue at any sacrifice \n"
-                    + "2 : stop and let me fix the params.csv file \n"
+                    + "2 : stop and let me fix the params.csv file \n",
+                    default="1",
+                    warning="The initial guess for "
+                    + key
+                    + " lies more than 3 sigma from its prior; continuing "
+                    "anyway (non-interactive run).",
                 )
-                if answer == 1:
-                    pass
-                else:
+                if answer != "1":
                     raise ValueError("User aborted the run.")
 
     ###############################################################################

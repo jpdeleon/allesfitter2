@@ -30,6 +30,8 @@ import os
 import emcee
 import numpy as np
 
+from ._numpy_compat import RankWarning, VisibleDeprecationWarning
+
 multiprocessing.set_start_method("fork", force=True)
 # solves python>=3.8 issues, see https://stackoverflow.com/questions/60518386/error-with-module-multiprocessing-under-python3-8
 #::: warnings
@@ -38,8 +40,8 @@ from contextlib import closing
 from multiprocessing import Pool
 from time import time as timer
 
-warnings.filterwarnings("ignore", category=np.VisibleDeprecationWarning)
-warnings.filterwarnings("ignore", category=np.RankWarning)
+warnings.filterwarnings("ignore", category=VisibleDeprecationWarning)
+warnings.filterwarnings("ignore", category=RankWarning)
 
 #::: allesfitter modules
 from . import config
@@ -52,7 +54,6 @@ from .mcmc_output import print_autocorr
 #::: MCMC log likelihood
 ###############################################################################
 def mcmc_lnlike(theta):
-
     params = update_params(theta)
     lnlike = calculate_lnlike_total(params)
 
@@ -142,6 +143,9 @@ def mcmc_fit(datadir, overwrite=None, append=None):
 
     #::: init
     config.init(datadir)
+    from .results import use_results_directory
+
+    use_results_directory(config.BASEMENT, "mcmc", for_write=True)
 
     continue_old_run = resolve_overwrite_append(
         os.path.join(config.BASEMENT.outdir, "mcmc_save.h5"), overwrite=overwrite, append=append
@@ -181,7 +185,6 @@ def mcmc_fit(datadir, overwrite=None, append=None):
 
     #::: helper fct
     def run_mcmc(sampler):
-
         #::: set initial walker positions
         if continue_old_run:
             p0 = backend.get_chain()[-1, :, :]

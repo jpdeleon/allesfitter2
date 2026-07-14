@@ -594,19 +594,13 @@ def derive(samples, mode):
                 dil = 0
             derived_samples[companion + "_depth_tr_undil_" + inst] = derived_samples[
                 companion + "_depth_tr_dil_" + inst
-            ] / (
-                1.0 - dil
-            )  # in ppt
+            ] / (1.0 - dil)  # in ppt
             derived_samples[companion + "_depth_occ_undil_" + inst] = derived_samples[
                 companion + "_depth_occ_dil_" + inst
-            ] / (
-                1.0 - dil
-            )  # in ppt
+            ] / (1.0 - dil)  # in ppt
             derived_samples[companion + "_nightside_flux_undil_" + inst] = derived_samples[
                 companion + "_nightside_flux_dil_" + inst
-            ] / (
-                1.0 - dil
-            )  # in ppt
+            ] / (1.0 - dil)  # in ppt
 
         # ----------------------------------------------------------------------
         #::: equilibirum temperature
@@ -749,7 +743,7 @@ def derive(samples, mode):
         labels.append(
             "Host radius over semi-major axis "
             + companion
-            + "; $R_\star/a_\mathrm{"
+            + r"; $R_\star/a_\mathrm{"
             + companion
             + "}$"
         )
@@ -758,9 +752,9 @@ def derive(samples, mode):
         labels.append(
             "Semi-major axis "
             + companion
-            + " over host radius; $a_\mathrm{"
+            + r" over host radius; $a_\mathrm{"
             + companion
-            + "}/R_\star$"
+            + r"}/R_\star$"
         )
 
         #::: R_companion is bandpass-dependent in chromatic mode, so emit one
@@ -777,9 +771,9 @@ def derive(samples, mode):
                 + bp_label
                 + " over semi-major axis "
                 + companion
-                + "; $R_\mathrm{"
+                + r"; $R_\mathrm{"
                 + companion
-                + "}/a_\mathrm{"
+                + r"}/a_\mathrm{"
                 + companion
                 + "}$"
             )
@@ -789,9 +783,9 @@ def derive(samples, mode):
                 "Companion radius "
                 + companion
                 + bp_label
-                + "; $R_\mathrm{"
+                + r"; $R_\mathrm{"
                 + companion
-                + "}$ ($\mathrm{R_{\oplus}}$)"
+                + r"}$ ($\mathrm{R_{\oplus}}$)"
             )
 
             names.append(companion + "_R_companion_(R_jup" + bp_suffix + ")")
@@ -799,103 +793,107 @@ def derive(samples, mode):
                 "Companion radius "
                 + companion
                 + bp_label
-                + "; $R_\mathrm{"
+                + r"; $R_\mathrm{"
                 + companion
-                + "}$ ($\mathrm{R_{jup}}$)"
+                + r"}$ ($\mathrm{R_{jup}}$)"
             )
 
         names.append(companion + "_a_(R_sun)")
         labels.append(
             "Semi-major axis "
             + companion
-            + "; $a_\mathrm{"
+            + r"; $a_\mathrm{"
             + companion
-            + "}$ ($\mathrm{R_{\odot}}$)"
+            + r"}$ ($\mathrm{R_{\odot}}$)"
         )
 
         names.append(companion + "_a_(AU)")
-        labels.append("Semi-major axis " + companion + "; $a_\mathrm{" + companion + "}$ (AU)")
+        labels.append("Semi-major axis " + companion + r"; $a_\mathrm{" + companion + "}$ (AU)")
 
         names.append(companion + "_i")
-        labels.append("Inclination " + companion + "; $i_\mathrm{" + companion + "}$ (deg)")
+        labels.append("Inclination " + companion + r"; $i_\mathrm{" + companion + "}$ (deg)")
 
         names.append(companion + "_e")
-        labels.append("Eccentricity " + companion + "; $e_\mathrm{" + companion + "}$")
+        labels.append("Eccentricity " + companion + r"; $e_\mathrm{" + companion + "}$")
 
         names.append(companion + "_w")
         labels.append(
-            "Argument of periastron " + companion + "; $w_\mathrm{" + companion + "}$ (deg)"
+            "Argument of periastron " + companion + r"; $w_\mathrm{" + companion + "}$ (deg)"
         )
 
         names.append(companion + "_q")
-        labels.append("Mass ratio " + companion + "; $q_\mathrm{" + companion + "}$")
+        labels.append("Mass ratio " + companion + r"; $q_\mathrm{" + companion + "}$")
 
         names.append(companion + "_M_companion_(M_earth)")
         labels.append(
             "Companion mass "
             + companion
-            + "; $M_\mathrm{"
+            + r"; $M_\mathrm{"
             + companion
-            + "}$ ($\mathrm{M_{\oplus}}$)"
+            + r"}$ ($\mathrm{M_{\oplus}}$)"
         )
 
         names.append(companion + "_M_companion_(M_jup)")
         labels.append(
-            "Companion mass " + companion + "; $M_\mathrm{" + companion + "}$ ($\mathrm{M_{jup}}$)"
+            "Companion mass "
+            + companion
+            + r"; $M_\mathrm{"
+            + companion
+            + r"}$ ($\mathrm{M_{jup}}$)"
         )
 
         names.append(companion + "_M_companion_(M_sun)")
         labels.append(
             "Companion mass "
             + companion
-            + "; $M_\mathrm{"
+            + r"; $M_\mathrm{"
             + companion
-            + "}$ ($\mathrm{M_{\odot}}$)"
+            + r"}$ ($\mathrm{M_{\odot}}$)"
         )
 
         names.append(companion + "_b_tra")
-        labels.append("Impact parameter " + companion + "; $b_\mathrm{tra;" + companion + "}$")
+        labels.append("Impact parameter " + companion + r"; $b_\mathrm{tra;" + companion + "}$")
 
         names.append(companion + "_T_tra_tot")
         labels.append(
-            "Total transit duration " + companion + "; $T_\mathrm{tot;" + companion + "}$ (h)"
+            "Total transit duration " + companion + r"; $T_\mathrm{tot;" + companion + "}$ (h)"
         )
 
         names.append(companion + "_T_tra_full")
         labels.append(
-            "Full-transit duration " + companion + "; $T_\mathrm{full;" + companion + "}$ (h)"
+            "Full-transit duration " + companion + r"; $T_\mathrm{full;" + companion + "}$ (h)"
         )
 
         names.append(companion + "_epoch_occ")
-        labels.append("Epoch occultation " + companion + "; $T_\mathrm{0;occ;" + companion + "}$")
+        labels.append("Epoch occultation " + companion + r"; $T_\mathrm{0;occ;" + companion + "}$")
 
         names.append(companion + "_b_occ")
         labels.append(
-            "Impact parameter occultation " + companion + "; $b_\mathrm{occ;" + companion + "}$"
+            "Impact parameter occultation " + companion + r"; $b_\mathrm{occ;" + companion + "}$"
         )
 
         names.append(companion + "_host_density")
         labels.append(
             "Host density from orbit "
             + companion
-            + "; $\\rho_\mathrm{\star;"
+            + "; $\\rho_\\mathrm{\\star;"
             + companion
             + "}$ (cgs)"
         )
 
         names.append(companion + "_density")
         labels.append(
-            "Companion density " + companion + "; $\\rho_\mathrm{" + companion + "}$ (cgs)"
+            "Companion density " + companion + "; $\\rho_\\mathrm{" + companion + "}$ (cgs)"
         )
 
         names.append(companion + "_surface_gravity")
         labels.append(
-            "Companion surface gravity " + companion + "; $g_\mathrm{" + companion + "}$ (cgs)"
+            "Companion surface gravity " + companion + r"; $g_\mathrm{" + companion + "}$ (cgs)"
         )
 
         names.append(companion + "_Teq")
         labels.append(
-            "Equilibrium temperature " + companion + "; $T_\mathrm{eq;" + companion + "}$ (K)"
+            "Equilibrium temperature " + companion + r"; $T_\mathrm{eq;" + companion + "}$ (K)"
         )
 
         for inst in config.BASEMENT.settings["inst_phot"]:
@@ -903,7 +901,7 @@ def derive(samples, mode):
             labels.append(
                 "Transit depth (undil.) "
                 + companion
-                + "; $\delta_\mathrm{tr; undil; "
+                + r"; $\delta_\mathrm{tr; undil; "
                 + companion
                 + "; "
                 + inst
@@ -914,7 +912,7 @@ def derive(samples, mode):
             labels.append(
                 "Transit depth (dil.) "
                 + companion
-                + "; $\delta_\mathrm{tr; dil; "
+                + r"; $\delta_\mathrm{tr; dil; "
                 + companion
                 + "; "
                 + inst
@@ -925,7 +923,7 @@ def derive(samples, mode):
             labels.append(
                 "Occultation depth (undil.) "
                 + companion
-                + "; $\delta_\mathrm{occ; undil; "
+                + r"; $\delta_\mathrm{occ; undil; "
                 + companion
                 + "; "
                 + inst
@@ -936,7 +934,7 @@ def derive(samples, mode):
             labels.append(
                 "Occultation depth (dil.) "
                 + companion
-                + "; $\delta_\mathrm{occ; dil; "
+                + r"; $\delta_\mathrm{occ; dil; "
                 + companion
                 + "; "
                 + inst
@@ -947,7 +945,7 @@ def derive(samples, mode):
             labels.append(
                 "Nightside flux (undil.)"
                 + companion
-                + "; $F_\mathrm{nightside; undil; "
+                + r"; $F_\mathrm{nightside; undil; "
                 + companion
                 + "; "
                 + inst
@@ -958,7 +956,7 @@ def derive(samples, mode):
             labels.append(
                 "Nightside flux (dil.)"
                 + companion
-                + "; $F_\mathrm{nightside; dil; "
+                + r"; $F_\mathrm{nightside; dil; "
                 + companion
                 + "; "
                 + inst
@@ -971,9 +969,9 @@ def derive(samples, mode):
                 if other_companion is not companion:
                     names.append(companion + "_period/" + other_companion + "_period")
                     labels.append(
-                        "Period ratio; $P_\mathrm{"
+                        r"Period ratio; $P_\mathrm{"
                         + companion
-                        + "} / P_\mathrm{"
+                        + r"} / P_\mathrm{"
                         + other_companion
                         + "}$"
                     )
@@ -985,21 +983,21 @@ def derive(samples, mode):
 
         elif config.BASEMENT.settings["host_ld_law_" + inst] == "lin":
             names.append("host_ldc_u1_" + inst)
-            labels.append("Limb darkening; $u_\mathrm{1; " + inst + "}$")
+            labels.append(r"Limb darkening; $u_\mathrm{1; " + inst + "}$")
 
         elif config.BASEMENT.settings["host_ld_law_" + inst] == "quad":
             names.append("host_ldc_u1_" + inst)
-            labels.append("Limb darkening; $u_\mathrm{1; " + inst + "}$")
+            labels.append(r"Limb darkening; $u_\mathrm{1; " + inst + "}$")
             names.append("host_ldc_u2_" + inst)
-            labels.append("Limb darkening; $u_\mathrm{2; " + inst + "}$")
+            labels.append(r"Limb darkening; $u_\mathrm{2; " + inst + "}$")
 
         elif config.BASEMENT.settings["host_ld_law_" + inst] == "sing":
             names.append("host_ldc_u1_" + inst)
-            labels.append("Limb darkening; $u_\mathrm{1; " + inst + "}$")
+            labels.append(r"Limb darkening; $u_\mathrm{1; " + inst + "}$")
             names.append("host_ldc_u2_" + inst)
-            labels.append("Limb darkening; $u_\mathrm{2; " + inst + "}$")
+            labels.append(r"Limb darkening; $u_\mathrm{2; " + inst + "}$")
             names.append("host_ldc_u3_" + inst)
-            labels.append("Limb darkening; $u_\mathrm{3; " + inst + "}$")
+            labels.append(r"Limb darkening; $u_\mathrm{3; " + inst + "}$")
 
         else:
             raise ValueError(

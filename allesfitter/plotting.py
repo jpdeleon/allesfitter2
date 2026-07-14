@@ -576,7 +576,7 @@ def _guess_xlabels(time):
     if np.min(time) < jd_moon_landing:
         return "Time", "days"
     else:
-        return "Time", "BJD$_\mathrm{TDB}$"
+        return "Time", r"BJD$_\mathrm{TDB}$"
 
 
 def _set_axes(ax, time, y, labels=None):

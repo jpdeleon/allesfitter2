@@ -43,6 +43,7 @@ def _init_plotting():
 
 #::: allesfitter modules
 from . import config, deriver
+from ._figure_output import normalize_file_extension
 from ._output_shared import save_per_transit_plots, write_priors_latex_table
 from .computer import calculate_baseline, calculate_model, calculate_stellar_var
 from .general_output import (
@@ -474,7 +475,7 @@ def print_autocorr(sampler):
 ###############################################################################
 #::: analyse the output from save_mcmc.h5 file
 ###############################################################################
-def mcmc_output(datadir, quiet=False, overwrite=None):
+def mcmc_output(datadir, quiet=False, overwrite=None, file_extension=".pdf"):
     """
     Inputs:
     -------
@@ -492,10 +493,14 @@ def mcmc_output(datadir, quiet=False, overwrite=None):
     This will output information into the console, and create a output files
     into datadir/results/ (or datadir/QL/ if QL==True)
     """
+    file_extension = normalize_file_extension(file_extension)
     import emcee
     import matplotlib.pyplot as plt
 
     config.init(datadir, quiet=quiet)
+    from .results import use_results_directory
+
+    use_results_directory(config.BASEMENT, "mcmc")
 
     #::: security check
     resolve_overwrite(
@@ -556,7 +561,7 @@ def mcmc_output(datadir, quiet=False, overwrite=None):
             fig, axes = afplot(posterior_samples, companion)
             if fig is not None:
                 fig.savefig(
-                    os.path.join(config.BASEMENT.outdir, "mcmc_fit_" + companion + ".pdf"),
+                    os.path.join(config.BASEMENT.outdir, "mcmc_fit_" + companion + file_extension),
                     bbox_inches="tight",
                 )
                 plt.close(fig)
@@ -566,20 +571,16 @@ def mcmc_output(datadir, quiet=False, overwrite=None):
 
     #::: per-transit fit plots (shared with ns_output; differs only in the
     #::: posterior-sample array and the 'mcmc' filename prefix)
-    save_per_transit_plots(posterior_samples, "mcmc")
+    save_per_transit_plots(posterior_samples, "mcmc", file_extension=file_extension)
 
     #::: plot the chains (wrapped: OOM or matplotlib error must not kill
     #::: the rest of mcmc_output — tables, residual stats, derived params)
     try:
         fig, axes = plot_MCMC_chains(reader)
-        try:  # some matplotlib versions cannot handle jpg
-            fig.savefig(
-                os.path.join(config.BASEMENT.outdir, "mcmc_chains.jpg"), bbox_inches="tight"
-            )
-        except Exception:
-            fig.savefig(
-                os.path.join(config.BASEMENT.outdir, "mcmc_chains.png"), bbox_inches="tight"
-            )
+        fig.savefig(
+            os.path.join(config.BASEMENT.outdir, "mcmc_chains" + file_extension),
+            bbox_inches="tight",
+        )
         plt.close(fig)
     except (MemoryError, Exception) as _exc:
         logprint(f"! plot_MCMC_chains failed ({_exc}); skipping chains plot.")
@@ -589,7 +590,10 @@ def mcmc_output(datadir, quiet=False, overwrite=None):
     #::: tables/derived/residual-stats below)
     try:
         fig = plot_MCMC_corner(reader)
-        fig.savefig(os.path.join(config.BASEMENT.outdir, "mcmc_corner.pdf"), bbox_inches="tight")
+        fig.savefig(
+            os.path.join(config.BASEMENT.outdir, "mcmc_corner" + file_extension),
+            bbox_inches="tight",
+        )
         plt.close(fig)
     except (MemoryError, Exception) as _exc:
         logprint(f"! plot_MCMC_corner failed ({_exc}); skipping corner plot.")
@@ -623,7 +627,7 @@ def mcmc_output(datadir, quiet=False, overwrite=None):
     #::: per-bandpass Rp/Rs posterior overlay (chromatic mode only — the
     #::: helper is a no-op when settings['chromatic'] is False).
     try:
-        plot_chromatic_rr_histogram(posterior_samples, prefix="mcmc")
+        plot_chromatic_rr_histogram(posterior_samples, prefix="mcmc", file_extension=file_extension)
     except (MemoryError, Exception) as _exc:
         logprint(f"! plot_chromatic_rr_histogram failed ({_exc}); skipping.")
         plt.close("all")
@@ -631,7 +635,9 @@ def mcmc_output(datadir, quiet=False, overwrite=None):
     #::: linear-multi baseline component diagnostic (timex-style; no-op
     #::: when no inst uses sample_linear_multi / hybrid_linear_multi)
     try:
-        plot_linear_baseline_components(posterior_samples, prefix="mcmc")
+        plot_linear_baseline_components(
+            posterior_samples, prefix="mcmc", file_extension=file_extension
+        )
     except (MemoryError, Exception) as _exc:
         logprint(f"! plot_linear_baseline_components failed ({_exc}); skipping.")
         plt.close("all")
@@ -670,14 +676,17 @@ def mcmc_output(datadir, quiet=False, overwrite=None):
             comments="#",
         )
         fig, ax = plot_top_down_view(params_median, params_star)
-        fig.savefig(os.path.join(config.BASEMENT.outdir, "top_down_view.pdf"), bbox_inches="tight")
+        fig.savefig(
+            os.path.join(config.BASEMENT.outdir, "top_down_view" + file_extension),
+            bbox_inches="tight",
+        )
         plt.close(fig)
     except Exception as e:
         logprint(f"\nOrbital plots could not be produced: {e}")
 
     #::: plot TTV results (if wished for)
     if config.BASEMENT.settings["fit_ttvs"]:
-        plot_ttv_results(params_median, params_ll, params_ul)
+        plot_ttv_results(params_median, params_ll, params_ul, file_extension=file_extension)
 
     #::: clean up and delete the tmp file
     os.remove(os.path.join(config.BASEMENT.outdir, "mcmc_save_tmp.h5"))
@@ -700,9 +709,29 @@ def get_mcmc_posterior_samples(datadir, Nsamples=None, as_type="dic"):  # QL=Fal
     import emcee
 
     config.init(datadir)
+    from .results import use_results_directory
+
+    use_results_directory(config.BASEMENT, "mcmc")
     reader = emcee.backends.HDFBackend(
         os.path.join(config.BASEMENT.outdir, "mcmc_save.h5"), read_only=True
     )
     return draw_mcmc_posterior_samples(
         reader, Nsamples=Nsamples, as_type=as_type
     )  # only 20 samples for plotting
+
+
+import sys
+import types
+
+
+class _CallableModule(types.ModuleType):
+    def __init__(self, module, func):
+        super().__init__(module.__name__)
+        self.__dict__.update(module.__dict__)
+        self._func = func
+
+    def __call__(self, *args, **kwargs):
+        return self._func(*args, **kwargs)
+
+
+sys.modules[__name__] = _CallableModule(sys.modules[__name__], mcmc_output)

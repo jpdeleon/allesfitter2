@@ -1,17 +1,27 @@
 """``allesfitter-gui`` console entry point — serve the web GUI with uvicorn.
 
-On startup the target ``--port`` is freed first: any process already listening
-on it is terminated, so re-running the GUI never fails with "address already in
-use" or leaves an orphaned server behind. Disable with ``--no-kill-existing``.
+The server fails safely when its port is occupied. Development users may opt in
+to terminating an existing listener with ``--kill-existing``.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import signal
 import subprocess
 import time
+
+_RELOAD_CONFIG_ENV = "ALLESFITTER_GUI_RELOAD_CONFIG"
+
+
+def _reload_app():
+    """Uvicorn factory used by the reload worker process."""
+    from allesfitter.webgui.app import create_app
+
+    config = json.loads(os.environ[_RELOAD_CONFIG_ENV])
+    return create_app(**config)
 
 
 def _pids_on_port(port: int) -> list[int]:
@@ -90,29 +100,62 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument("--toi-csv", default=None, help="local ExoFOP TOI table for auto-fill")
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--port", type=int, default=5100)
+    parser.add_argument(
+        "--root-path",
+        default="",
+        help="external URL prefix when served by a reverse proxy (for example /allesfitter)",
+    )
     parser.add_argument("--no-network", action="store_true", help="disable NASA Archive lookups")
     parser.add_argument(
+        "--reload",
+        action="store_true",
+        help="reload the development server when Python source files change",
+    )
+    port_group = parser.add_mutually_exclusive_group()
+    port_group.add_argument(
+        "--kill-existing",
+        action="store_true",
+        help="development only: terminate a process already listening on --port",
+    )
+    port_group.add_argument(
         "--no-kill-existing",
         action="store_true",
-        help="do not stop a process already listening on --port before starting",
+        help=argparse.SUPPRESS,
     )
+    parser.add_argument("--max-concurrent-fits", type=int, default=1)
+    parser.add_argument("--max-queued-fits-per-user", type=int, default=2)
     args = parser.parse_args(argv)
 
-    if not args.no_kill_existing:
+    if args.kill_existing:
         free_port(args.host, args.port)
 
     import uvicorn
 
-    from allesfitter.webgui.app import create_app
+    app_config = {
+        "runs_root": args.runs_root,
+        "db_path": args.db,
+        "toi_csv": args.toi_csv,
+        "allow_network": not args.no_network,
+        "root_path": args.root_path,
+        "max_concurrent_fits": args.max_concurrent_fits,
+        "max_queued_fits_per_user": args.max_queued_fits_per_user,
+    }
+    if args.reload:
+        # Uvicorn's reload supervisor requires an import string so each worker
+        # can import a fresh application after a source change.
+        os.environ[_RELOAD_CONFIG_ENV] = json.dumps(app_config)
+        uvicorn.run(
+            "allesfitter.webgui.cli:_reload_app",
+            factory=True,
+            host=args.host,
+            port=args.port,
+            reload=True,
+        )
+    else:
+        from allesfitter.webgui.app import create_app
 
-    app = create_app(
-        args.runs_root,
-        args.db,
-        toi_csv=args.toi_csv,
-        allow_network=not args.no_network,
-    )
-    uvicorn.run(app, host=args.host, port=args.port)
+        uvicorn.run(create_app(**app_config), host=args.host, port=args.port)
 
 
 if __name__ == "__main__":

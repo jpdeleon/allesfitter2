@@ -10,7 +10,7 @@ network-optional: any failure returns an empty :class:`Ephemeris` with
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 _TOI_RE = re.compile(r"(?:toi[\s_-]*)?(\d+(?:\.\d+)?)", re.IGNORECASE)
@@ -150,3 +150,151 @@ def lookup(
         if eph.found:
             return eph
     return Ephemeris(target=target)
+
+
+# --- sector / campaign / quarter availability -------------------------------
+# So the Prepare form can show what "-s"/"-c"/"-q" would actually accept
+# *before* the user submits and waits for a download. Queries the same
+# archive `prepare_allesfit` itself uses, with the same result-object access
+# pattern (``result.mission`` / ``result.author``, not ``.table.to_pandas()``)
+# already proven in ``scripts/prepare_allesfit.py``.
+
+
+@dataclass
+class SectorAvailability:
+    """Archived sectors/campaigns/quarters (+ pipelines) found for a target."""
+
+    target: str
+    mission: str
+    segments: list[str] = field(default_factory=list)  # e.g. ["1", "2", "27"] or ["11a", "11b"]
+    pipelines: list[str] = field(default_factory=list)  # lowercased author names found
+    exptimes: list[int] = field(default_factory=list)  # unique exposure times (s), ascending
+    error: str = ""
+
+    @property
+    def ok(self) -> bool:
+        return not self.error
+
+
+def _segment_label(mission_str: str) -> str:
+    """Last whitespace token of a lightkurve ``mission`` string, kept as str.
+
+    TESS sectors / Kepler quarters are integers ('TESS Sector 42' -> '42');
+    K2 campaigns may carry an alpha suffix ('K2 Campaign 11a' -> '11a').
+    """
+    return str(mission_str).split()[-1]
+
+
+def _exptime_values(search_result) -> list[float]:
+    """Best-effort list of exposure times (seconds) from a lightkurve result.
+
+    Reads the ``exptime`` column (``.table['exptime']``, falling back to an
+    ``.exptime`` attribute), unwrapping an astropy ``Quantity``/``Column`` via
+    ``.value``. Never raises — anything unparsable yields ``[]`` so the caller
+    can still return sectors/pipelines.
+    """
+    raw = None
+    table = getattr(search_result, "table", None)
+    if table is not None:
+        try:
+            raw = table["exptime"]
+        except Exception:
+            raw = None
+    if raw is None:
+        raw = getattr(search_result, "exptime", None)
+    if raw is None:
+        return []
+    values = getattr(raw, "value", raw)  # unwrap astropy Quantity/Column
+    out: list[float] = []
+    try:
+        for v in values:
+            try:
+                out.append(float(v))
+            except (TypeError, ValueError):
+                continue
+    except TypeError:
+        return []
+    return out
+
+
+def _segment_sort_key(label: str):
+    """Sort key for segment labels: numeric prefix, then alpha suffix."""
+    s = str(label)
+    n = 0
+    while n < len(s) and s[n].isdigit():
+        n += 1
+    head = int(s[:n]) if n else float("inf")
+    return (head, s[n:])
+
+
+def _sector_query_name(target: str, id_type: str) -> str:
+    id_type = (id_type or "name").strip().lower()
+    target = str(target).strip()
+    return {"tic": f"TIC {target}", "toi": f"TOI {target}", "ctoi": f"CTOI {target}"}.get(
+        id_type, target
+    )
+
+
+def available_sectors(
+    target: str,
+    *,
+    id_type: str = "name",
+    mission: str = "tess",
+    pipeline: str = "",
+    allow_network: bool = True,
+) -> SectorAvailability:
+    """List archived sectors/campaigns/quarters for *target*, best-effort.
+
+    Runs the same survey query ``prepare_allesfit`` uses
+    (``lightkurve.search_lightcurve(query_name, mission=mission)``), so what's
+    shown here is exactly what ``-s``/``-c``/``-q`` can select. Never raises —
+    any failure comes back as ``SectorAvailability.error``.
+    """
+    target = (target or "").strip()
+    mission = (mission or "tess").strip().lower()
+    if not target:
+        return SectorAvailability(target=target, mission=mission, error="target is required")
+    if not allow_network:
+        return SectorAvailability(target=target, mission=mission, error="network is disabled")
+
+    try:
+        import lightkurve as lk
+    except Exception as exc:
+        return SectorAvailability(
+            target=target, mission=mission, error=f"lightkurve unavailable: {exc}"
+        )
+
+    query_name = _sector_query_name(target, id_type)
+    try:
+        result = lk.search_lightcurve(query_name, mission=mission)
+    except Exception as exc:
+        return SectorAvailability(target=target, mission=mission, error=str(exc))
+
+    if len(result) == 0:
+        return SectorAvailability(target=target, mission=mission, error="no light curves found")
+
+    pipelines = sorted({str(a).lower() for a in result.author})
+
+    pipeline = (pipeline or "").strip().lower()
+    rows = result
+    if pipeline:
+        idx = [str(a).lower() == pipeline for a in result.author]
+        rows = result[idx]
+        if len(rows) == 0:
+            return SectorAvailability(
+                target=target,
+                mission=mission,
+                pipelines=pipelines,
+                error=f"no light curves for pipeline {pipeline!r} (available: "
+                f"{', '.join(pipelines) or 'none'})",
+            )
+
+    segments = sorted({_segment_label(m) for m in rows.mission}, key=_segment_sort_key)
+    exptimes = sorted({round(e) for e in _exptime_values(rows) if e > 0})
+    return SectorAvailability(
+        target=target,
+        mission=mission,
+        segments=segments,
+        pipelines=pipelines,
+        exptimes=exptimes,
+    )

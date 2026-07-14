@@ -24,6 +24,7 @@ https://exoplanetarchive.ipac.caltech.edu/docs/sysaliases.html
 """
 
 import math
+import os
 import sys
 from argparse import ArgumentParser
 from math import ceil
@@ -823,6 +824,78 @@ def check_if_sector_is_available(target_name: str, given_sector, all_sectors: li
         return "multi_sector"
 
 
+#::: environment override: auto-resolve interactive/exit points in headless runs
+NONINTERACTIVE_ENV_VAR = "ALLESFITTER_NONINTERACTIVE"
+
+
+def _handle_multiple_exptimes(search_result, unique_exptimes, logger, context="", expected_n=None):
+    """Resolve the "multiple exposure times available" situation.
+
+    Several download paths bail out when a search returns more than one
+    exposure time (e.g. TESS Sector 64 offers both 20 s and 120 s SPOC
+    products) because stitching mixed cadences is not meaningful. Historically
+    this exited with a hint that named a non-existent ``-exp`` flag and printed
+    the whole array of choices, and exited with status 0 (looking like success
+    to a scheduler).
+
+    Default behaviour now: log an actionable message naming the real
+    ``-e/--exptime`` flag and a single valid value, then ``sys.exit(1)`` so the
+    user (or an orchestrator) re-runs with an explicit cadence.
+
+    Opt-in behaviour (``ALLESFITTER_NONINTERACTIVE`` set): auto-select the
+    shortest cadence, narrow ``search_result`` to it, and return
+    ``(narrowed_result, chosen_exptime)`` so the run completes unattended.
+
+    Parameters
+    ----------
+    search_result : lightkurve.SearchResult
+        The result to narrow when auto-selecting.
+    unique_exptimes : iterable of float
+        The distinct exposure times present (seconds).
+    logger : loguru.Logger
+        Logger for the hint / warning.
+    context : str
+        Short human-readable scope for the message (e.g. ``"the given sector"``).
+    expected_n : int or None
+        If given, prefer the shortest cadence that yields exactly this many
+        products (so a stitched multi-sector download stays one-per-segment);
+        falls back to the shortest cadence when none matches.
+
+    Returns
+    -------
+    (lightkurve.SearchResult, float)
+        Narrowed result and chosen exposure time. Never returns in the default
+        (exit) path.
+    """
+    choices = sorted(float(e) for e in unique_exptimes)
+    choices_str = ", ".join(f"{c:g}" for c in choices)
+    ctx = f" for {context}" if context else ""
+
+    if not os.environ.get(NONINTERACTIVE_ENV_VAR):
+        logger.error(
+            f"Multiple exposure times are available{ctx} ({choices_str} sec).\n"
+            f"Re-run with a single exposure time, e.g. -e {choices[0]:g} "
+            "(or --exptime <sec>).\n"
+            f"Set {NONINTERACTIVE_ENV_VAR}=1 to auto-select the shortest cadence."
+        )
+        sys.exit(1)
+
+    exptimes = search_result.table.to_pandas().exptime.to_numpy(dtype=float)
+    chosen = choices[0]
+    if expected_n is not None:
+        for c in choices:
+            if int(np.isclose(exptimes, c, atol=0.5).sum()) == expected_n:
+                chosen = c
+                break
+    narrowed = search_result[list(np.isclose(exptimes, chosen, atol=0.5))]
+    logger.warning(
+        f"Multiple exposure times available{ctx} ({choices_str} sec); "
+        f"auto-selected the shortest usable cadence -e {chosen:g} "
+        f"({NONINTERACTIVE_ENV_VAR} set). Pass -e/--exptime to override."
+    )
+    return narrowed, chosen
+
+
 def main():
     ap = ArgumentParser()
     group1 = ap.add_mutually_exclusive_group(required=True)
@@ -1035,9 +1108,13 @@ def main():
         exptime = unique_exptimes[0] if exptime is None else exptime
 
         if len(sector_to_use) != len(filtered_result):
-            msg = f"Multiple exposure times available. Use -e {unique_exptimes}"
-            logger.error(msg)
-            sys.exit()
+            filtered_result, exptime = _handle_multiple_exptimes(
+                filtered_result,
+                unique_exptimes,
+                logger,
+                context=f"{_segment_word(mission)}={sector_to_use}",
+                expected_n=len(sector_to_use),
+            )
 
         lc = _safe_stitch(
             filtered_result.download_all(flux_column=lc_type, quality_bitmask=quality_bitmask),
@@ -1848,10 +1925,13 @@ fig = allesfitter.show_initial_guess(dir_path)
                 )
                 unique_exptimes = result.table.to_pandas().exptime.unique()
                 if len(unique_exptimes) > 1:
-                    msg = f"Multiple exposure times are available for `all` {_w_p}:\n{result}.\n"
-                    msg += f"Try using -exp={unique_exptimes}"
-                    logger.error(msg)
-                    sys.exit()
+                    result, exptime = _handle_multiple_exptimes(
+                        result,
+                        unique_exptimes,
+                        logger,
+                        context=f"all {_w_p}",
+                        expected_n=len(unique_sectors),
+                    )
                 exptime = unique_exptimes[0] if exptime is None else exptime
                 lc = _safe_stitch(
                     result.download_all(flux_column=lc_type, quality_bitmask=quality_bitmask),
@@ -1906,10 +1986,13 @@ fig = allesfitter.show_initial_guess(dir_path)
                     logger.error(msg)
                     sys.exit()
                 elif len(sector) < len(filtered_result):
-                    msg = f"Multiple exposure times are available for the given {_w}:\n{filtered_result}.\n"
-                    msg += f"Try using -exp={unique_exptimes}"
-                    logger.error(msg)
-                    sys.exit()
+                    filtered_result, exptime = _handle_multiple_exptimes(
+                        filtered_result,
+                        unique_exptimes,
+                        logger,
+                        context=f"the given {_w_p}",
+                        expected_n=len(sector),
+                    )
                 assert len(sector) == len(filtered_result)
                 exptime = unique_exptimes[0] if exptime is None else exptime
                 lc = _safe_stitch(

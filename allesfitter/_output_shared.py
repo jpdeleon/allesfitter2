@@ -18,10 +18,11 @@ import os
 import matplotlib.pyplot as plt
 
 from . import config
+from ._figure_output import normalize_file_extension
 from .general_output import afplot_per_transit
 
 
-def save_per_transit_plots(posterior_samples, prefix):
+def save_per_transit_plots(posterior_samples, prefix, file_extension=".pdf"):
     """Render and save per-transit fit plots for every photometric companion.
 
     Shared by ``mcmc_output`` and ``ns_output``; the two paths differ only in
@@ -43,6 +44,7 @@ def save_per_transit_plots(posterior_samples, prefix):
     bare ``except:``; narrowed to ``except Exception`` so ``KeyboardInterrupt``
     and ``SystemExit`` still propagate).
     """
+    file_extension = normalize_file_extension(file_extension)
     for companion in config.BASEMENT.settings["companions_phot"]:
         for inst in config.BASEMENT.settings["inst_phot"]:
             first_transit = 0
@@ -64,7 +66,8 @@ def save_per_transit_plots(posterior_samples, prefix):
                             + companion
                             + "_"
                             + str(last_transit)
-                            + "th.pdf",
+                            + "th"
+                            + file_extension,
                         ),
                         bbox_inches="tight",
                     )

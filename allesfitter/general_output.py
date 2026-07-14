@@ -24,6 +24,8 @@ from astropy.time import Time
 # import pickle
 from tqdm import tqdm
 
+from ._numpy_compat import RankWarning, VisibleDeprecationWarning
+
 _HAS_PLOTTING = False
 
 
@@ -46,8 +48,8 @@ def _init_plotting():
     sns.set_context(rc={"lines.markeredgewidth": 1})
 
 
-warnings.filterwarnings("ignore", category=np.VisibleDeprecationWarning)
-warnings.filterwarnings("ignore", category=np.RankWarning)
+warnings.filterwarnings("ignore", category=VisibleDeprecationWarning)
+warnings.filterwarnings("ignore", category=RankWarning)
 
 #::: allesfitter modules
 from . import config
@@ -65,6 +67,7 @@ from .exoworlds_rdx.lightcurves import lightcurve_tools as lct
 from .exoworlds_rdx.lightcurves.index_transits import get_tmid_observed_transits
 from .plot_utils import broken_xaxis_subplots, detect_time_gaps
 from .utils import latex_printer
+from .utils.interactive import ask_choice
 
 
 ###############################################################################
@@ -134,16 +137,18 @@ def resolve_overwrite_append(save_path, overwrite=None, append=None):
         #::: either flag uniquely determines the action
         return bool(append) or (overwrite is False)
 
-    #::: interactive default (historical behaviour)
-    choice = str(
-        input(
-            save_path
-            + " already exists.\n"
-            + "What do you want to do?\n"
-            + "1 : overwrite the save file\n"
-            + "2 : append to the save file\n"
-            + "3 : abort\n"
-        )
+    #::: interactive default (historical behaviour); auto-overwrite when
+    #::: non-interactive, matching resolve_overwrite()'s EOF behaviour.
+    choice = ask_choice(
+        save_path
+        + " already exists.\n"
+        + "What do you want to do?\n"
+        + "1 : overwrite the save file\n"
+        + "2 : append to the save file\n"
+        + "3 : abort\n",
+        default="1",
+        warning=save_path + " already existed from a previous run, "
+        "and was automatically overwritten (non-interactive run).",
     )
     if choice == "1":
         return False
@@ -188,8 +193,9 @@ def resolve_overwrite(save_path, overwrite=None, label="Output"):
     * If ``save_path`` does not exist, returns immediately.
     * If ``overwrite`` is given, the decision is taken without prompting.
     * If ``overwrite`` is ``None``, prompts interactively (1 overwrite /
-      2 abort). A non-interactive stdin (``EOFError``) proceeds with a
-      warning, preserving the historical auto-overwrite behaviour.
+      2 abort). A non-interactive stdin (no TTY, EOF, or the
+      ``ALLESFITTER_NONINTERACTIVE`` env var) proceeds with a warning,
+      preserving the historical auto-overwrite behaviour.
     """
     if not os.path.exists(save_path):
         return
@@ -197,25 +203,18 @@ def resolve_overwrite(save_path, overwrite=None, label="Output"):
         if overwrite:
             return
         raise ValueError("User aborted operation.")
-    try:
-        choice = str(
-            input(
-                label
-                + " files already exists in "
-                + os.path.dirname(save_path)
-                + ".\n"
-                + "What do you want to do?\n"
-                + "1 : overwrite the output files\n"
-                + "2 : abort\n"
-            )
-        )
-    except EOFError:
-        warnings.warn(
-            label + " files already existed from a previous run, "
-            "and were automatically overwritten.",
-            stacklevel=2,
-        )
-        return
+    choice = ask_choice(
+        label
+        + " files already exists in "
+        + os.path.dirname(save_path)
+        + ".\n"
+        + "What do you want to do?\n"
+        + "1 : overwrite the output files\n"
+        + "2 : abort\n",
+        default="1",
+        warning=label + " files already existed from a previous run, "
+        "and were automatically overwritten (non-interactive run).",
+    )
     if choice == "1":
         return
     raise ValueError("User aborted operation.")
@@ -669,7 +668,6 @@ def afplot(samples, companion, plot_midtransit=False, plot_ingress=False, plot_e
 #::: guesstimate median values for plotting stuff
 ###############################################################################
 def guesstimator(params_median, companion, base=None, inst=None):
-
     if base is None:
         base = config.BASEMENT
 
@@ -1977,6 +1975,7 @@ def show_initial_guess(
     plot_midtransit=True,
     plot_ingress=False,
     plot_egress=False,
+    file_extension=".pdf",
     **_extra_kwargs,
 ):
     """Optional ``plot_midtransit`` / ``plot_ingress`` / ``plot_egress``
@@ -1998,6 +1997,7 @@ def show_initial_guess(
                 "plot_midtransit",
                 "plot_ingress",
                 "plot_egress",
+                "file_extension",
             ]
         )
         _bits = []
@@ -2026,6 +2026,7 @@ def show_initial_guess(
             plot_midtransit=plot_midtransit,
             plot_ingress=plot_ingress,
             plot_egress=plot_egress,
+            file_extension=file_extension,
         )
 
 
@@ -2096,11 +2097,19 @@ def logprint_initial_guess():
 #::: plot initial guess
 ###############################################################################
 def plot_initial_guess(
-    return_figs=False, kwargs_dict=None, plot_midtransit=True, plot_ingress=False, plot_egress=False
+    return_figs=False,
+    kwargs_dict=None,
+    plot_midtransit=True,
+    plot_ingress=False,
+    plot_egress=False,
+    file_extension=".pdf",
 ):
     _init_plotting()
     import matplotlib.pyplot as plt
 
+    from ._figure_output import normalize_file_extension
+
+    file_extension = normalize_file_extension(file_extension)
     samples = draw_initial_guess_samples()
 
     if not return_figs:
@@ -2114,7 +2123,9 @@ def plot_initial_guess(
             )
             if fig is not None:
                 fig.savefig(
-                    os.path.join(config.BASEMENT.outdir, "initial_guess_" + companion + ".pdf"),
+                    os.path.join(
+                        config.BASEMENT.outdir, "initial_guess_" + companion + file_extension
+                    ),
                     bbox_inches="tight",
                 )
                 plt.close(fig)
@@ -2138,7 +2149,8 @@ def plot_initial_guess(
                                 + companion
                                 + "_"
                                 + str(last_transit)
-                                + "th.pdf",
+                                + "th"
+                                + file_extension,
                             ),
                             bbox_inches="tight",
                         )
@@ -2176,10 +2188,13 @@ def plot_initial_guess(
 ###############################################################################
 #::: plot initial guess
 ###############################################################################
-def plot_ttv_results(params_median, params_ll, params_ul):
+def plot_ttv_results(params_median, params_ll, params_ul, file_extension=".pdf"):
     _init_plotting()
     import matplotlib.pyplot as plt
 
+    from ._figure_output import normalize_file_extension
+
+    file_extension = normalize_file_extension(file_extension)
     for companion in config.BASEMENT.settings["companions_all"]:
         fig, axes = plt.subplots()
         axes.axhline(0, color="grey", ls="--")
@@ -2200,7 +2215,7 @@ def plot_ttv_results(params_median, params_ll, params_ul):
             )
         axes.set(xlabel="Transit Nr.", ylabel="TTV (mins)")
         fig.savefig(
-            os.path.join(config.BASEMENT.outdir, "ttv_results_" + companion + ".pdf"),
+            os.path.join(config.BASEMENT.outdir, "ttv_results_" + companion + file_extension),
             bbox_inches="tight",
         )
         plt.close(fig)

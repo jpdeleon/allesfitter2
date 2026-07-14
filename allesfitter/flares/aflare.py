@@ -114,9 +114,7 @@ def aflare1(t, tpeak, fwhm, ampl, upsample=False, uptime=10):
                     + _fd[2] * np.exp(((x - tpeak) / fwhm) * _fd[3])
                 ),
             ],
-        ) * np.abs(
-            ampl
-        )  # amplitude
+        ) * np.abs(ampl)  # amplitude
 
         # and now downsample back to the original time...
         ## this way might be better, but makes assumption of uniform time bins
@@ -146,8 +144,6 @@ def aflare1(t, tpeak, fwhm, ampl, upsample=False, uptime=10):
                     + _fd[2] * np.exp(((x - tpeak) / fwhm) * _fd[3])
                 ),
             ],
-        ) * np.abs(
-            ampl
-        )  # amplitude
+        ) * np.abs(ampl)  # amplitude
 
     return flare

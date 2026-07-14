@@ -171,7 +171,11 @@ def test_prepare_sectors_wires_query_params_into_catalog_lookup(tmp_path, monkey
             allow_network=allow_network,
         )
         return catalog.SectorAvailability(
-            target=target, mission=mission, segments=["2", "9"], pipelines=["qlp", "spoc"]
+            target=target,
+            mission=mission,
+            segments=["2", "9"],
+            pipelines=["qlp", "spoc"],
+            exptimes=[120, 1800],
         )
 
     monkeypatch.setattr(app_module.catalog, "available_sectors", _fake_available_sectors)
@@ -187,6 +191,7 @@ def test_prepare_sectors_wires_query_params_into_catalog_lookup(tmp_path, monkey
         "ok": True,
         "segments": ["2", "9"],
         "pipelines": ["qlp", "spoc"],
+        "exptimes": [120, 1800],
         "error": "",
     }
     assert captured == {

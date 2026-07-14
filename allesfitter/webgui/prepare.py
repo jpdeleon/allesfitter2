@@ -124,6 +124,10 @@ def build_prepare_argv(spec: dict, *, work_dir: str | Path | None = None) -> lis
     if lc_type:
         argv += ["-lc", lc_type]
 
+    exptime = str(spec.get("exptime") or "").strip()
+    if exptime:
+        argv += ["-e", exptime]
+
     argv += ["-f", *(_tokens(spec.get("filename")) or ["tess"])]
 
     bandpass = _tokens(spec.get("bandpass"))
@@ -241,6 +245,10 @@ def _wait_and_finalize(store: rs.RunStore, handle: PrepareHandle, log_file) -> N
 
 def _finalize(store: rs.RunStore, handle: PrepareHandle, returncode: int) -> None:
     """Validate + register the produced datadir, or mark the run failed."""
+    run = store.get_run(handle.run_id)
+    if run and run.get("state") == rs.STOPPED:
+        return
+
     if returncode != 0:
         store.set_state(
             handle.run_id, rs.FAILED, error=f"prepare_allesfit exited with code {returncode}"
@@ -262,10 +270,19 @@ def _finalize(store: rs.RunStore, handle: PrepareHandle, returncode: int) -> Non
     store.update_run(handle.run_id, run_dir=str(datadir), insts=" ".join(insts))
 
     result = _validate.dry_run(datadir)
-    if result.ok:
-        store.set_state(handle.run_id, rs.PREPARED, error="")
-    else:
+    if not result.ok:
         store.set_state(handle.run_id, rs.FAILED, error=f"validation failed: {result.error}")
+        return
+
+    preview = _validate.initial_guess_preview(datadir)
+    if preview is None:
+        store.set_state(
+            handle.run_id,
+            rs.FAILED,
+            error="show_initial_guess failed to produce a preview",
+        )
+        return
+    store.set_state(handle.run_id, rs.PREPARED, error="")
 
 
 # --- live controls (mirror jobs.py) ----------------------------------------
@@ -278,15 +295,45 @@ def is_running(run_id: str) -> bool:
 
 def stop(run_id: str) -> bool:
     """Terminate a running prepare process group. True if one was signalled."""
+    from allesfitter.webgui import runstore as rs
+    from allesfitter.webgui.job_store import get_job_store
+
     with _LOCK:
         handle = _ACTIVE.get(run_id)
-    if handle is None or handle.process.poll() is not None:
-        return False
+
+    pid = None
+    if handle is not None:
+        pid = handle.process.pid
+    else:
+        try:
+            store = get_job_store().store
+            run = store.get_run(run_id)
+            if run and run.get("pid"):
+                pid = run["pid"]
+        except Exception:
+            pass
+
+    signalled = False
+    if pid is not None:
+        try:
+            os.killpg(os.getpgid(pid), 15)  # SIGTERM to the group
+            signalled = True
+        except (ProcessLookupError, PermissionError, OSError):
+            try:
+                os.kill(pid, 15)
+                signalled = True
+            except Exception:
+                pass
+        except Exception:
+            pass
+
     try:
-        os.killpg(os.getpgid(handle.process.pid), 15)  # SIGTERM to the group
-    except (ProcessLookupError, PermissionError):
-        handle.process.terminate()
-    return True
+        store = get_job_store().store
+        store.set_state(run_id, rs.STOPPED, error="Stopped by user")
+    except Exception:
+        pass
+
+    return signalled or (pid is not None)
 
 
 def tail_log(work_dir: str | Path, n: int = 300) -> str:

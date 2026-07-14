@@ -214,7 +214,7 @@ def prepare_ttv_fit(datadir, style="fullplot", max_transits=20):
                     + np.format_float_positional(ttv_guess - 0.01, 4)
                     + " "
                     + np.format_float_positional(ttv_guess + 0.01, 4)
-                    + ",TTV$_\mathrm{"
+                    + r",TTV$_\mathrm{"
                     + companion
                     + ";"
                     + str(i + 1)
@@ -407,3 +407,20 @@ def prepare_ttv_fit(datadir, style="fullplot", max_transits=20):
         fig = plt.gcf()
         fig.savefig(fname, bbox_inches="tight")
         plt.close(fig)
+
+
+import sys
+import types
+
+
+class _CallableModule(types.ModuleType):
+    def __init__(self, module, func):
+        super().__init__(module.__name__)
+        self.__dict__.update(module.__dict__)
+        self._func = func
+
+    def __call__(self, *args, **kwargs):
+        return self._func(*args, **kwargs)
+
+
+sys.modules[__name__] = _CallableModule(sys.modules[__name__], prepare_ttv_fit)

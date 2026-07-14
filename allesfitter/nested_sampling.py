@@ -28,6 +28,8 @@ import numpy as np
 from scipy.special import ndtri
 from scipy.stats import truncnorm
 
+from ._numpy_compat import RankWarning, VisibleDeprecationWarning
+
 multiprocessing.set_start_method("fork", force=True)
 # solves python>=3.8 issues, see https://stackoverflow.com/questions/60518386/error-with-module-multiprocessing-under-python3-8
 import gzip
@@ -41,8 +43,8 @@ except Exception:
 #::: warnings
 import warnings
 
-warnings.filterwarnings("ignore", category=np.VisibleDeprecationWarning)
-warnings.filterwarnings("ignore", category=np.RankWarning)
+warnings.filterwarnings("ignore", category=VisibleDeprecationWarning)
+warnings.filterwarnings("ignore", category=RankWarning)
 
 #::: allesfitter modules
 from . import config
@@ -54,7 +56,6 @@ from .general_output import logprint, resolve_overwrite
 #::: Nested Sampling log likelihood
 ###############################################################################
 def ns_lnlike(theta):
-
     params = update_params(theta)
     lnlike = calculate_lnlike_total(params)
 
@@ -146,6 +147,9 @@ def ns_fit(datadir, backend=None, overwrite=None):
     """
     #::: init
     config.init(datadir)
+    from .results import use_results_directory
+
+    use_results_directory(config.BASEMENT, "ns", for_write=True)
 
     #::: resolve backend (settings.csv wins, then kwarg, then default)
     resolved = config.BASEMENT.settings.get("ns_backend") or backend or "dynesty"

@@ -7,12 +7,14 @@ subprocess launcher so nothing is actually downloaded or spawned.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
 from allesfitter.webgui import config_writer, jobs, prepare
 from allesfitter.webgui import runstore as rs
-from allesfitter.webgui.app import create_app
+from allesfitter.webgui.app import _tail_run_log, create_app
 from allesfitter.webgui.validate import ValidationResult
 
 
@@ -85,6 +87,18 @@ def test_argv_chromatic_filenames_and_bandpasses():
     assert argv[bi + 1 : bi + 3] == ["kepler", "tess"]
 
 
+def test_argv_exptime_adds_e_flag():
+    argv = prepare.build_prepare_argv({"target": "HD 1", "sectors": "1", "exptime": "120"})
+    assert _after(argv, "-e") == "120"
+
+
+@pytest.mark.parametrize("exptime", [None, "", "  "])
+def test_argv_exptime_auto_omits_e_flag(exptime):
+    argv = prepare.build_prepare_argv({"target": "HD 1", "sectors": "1", "exptime": exptime})
+    #:: "Auto" (blank) means let prepare_allesfit resolve the cadence itself
+    assert "-e" not in argv
+
+
 def test_argv_flags_and_scalars():
     argv = prepare.build_prepare_argv(
         {
@@ -154,6 +168,11 @@ def test_finalize_success_registers_prepared(tmp_path, monkeypatch):
     monkeypatch.setattr(
         prepare._validate, "dry_run", lambda d: ValidationResult(True, n_free_params=5)
     )
+    monkeypatch.setattr(
+        prepare._validate,
+        "initial_guess_preview",
+        lambda d: Path(d) / "initial_guess.png",
+    )
 
     prepare._finalize(store, handle, 0)
 
@@ -163,6 +182,19 @@ def test_finalize_success_registers_prepared(tmp_path, monkeypatch):
     assert row["insts"] == "tess"
     # run.py was re-emitted from the launcher-compatible template.
     assert (datadir / "run.py").read_text() == config_writer.RUN_PY_TEMPLATE
+
+
+def test_finalize_requires_initial_guess_preview(tmp_path, monkeypatch):
+    store, work_dir, handle = _prepared_store_and_handle(tmp_path)
+    _make_datadir(work_dir)
+    monkeypatch.setattr(prepare._validate, "dry_run", lambda d: ValidationResult(True))
+    monkeypatch.setattr(prepare._validate, "initial_guess_preview", lambda d: None)
+
+    prepare._finalize(store, handle, 0)
+
+    row = store.get_run("r1")
+    assert row["state"] == rs.FAILED
+    assert "show_initial_guess" in row["error"]
 
 
 def test_finalize_validation_failure_marks_failed_but_keeps_datadir(tmp_path, monkeypatch):
@@ -206,6 +238,29 @@ def test_prepare_page_renders(tmp_path):
     assert "prepare" in resp.text.lower()
 
 
+def test_prepare_sectors_route_returns_exptimes(tmp_path, monkeypatch):
+    from allesfitter.webgui import catalog
+
+    monkeypatch.setattr(
+        catalog,
+        "available_sectors",
+        lambda *a, **k: catalog.SectorAvailability(
+            target="HD 1",
+            mission="tess",
+            segments=["1"],
+            pipelines=["spoc"],
+            exptimes=[20, 120],
+        ),
+    )
+    c = TestClient(_app(tmp_path, allow_network=True))
+    resp = c.get("/prepare/sectors", params={"target": "HD 1", "mission": "tess"})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["exptimes"] == [20, 120]
+    assert data["segments"] == ["1"]
+
+
 def test_prepare_run_launches_and_registers(tmp_path, monkeypatch):
     launched = []
     monkeypatch.setattr(prepare, "launch_prepare", lambda *a, **k: launched.append(a))
@@ -220,6 +275,31 @@ def test_prepare_run_launches_and_registers(tmp_path, monkeypatch):
     assert launched  # subprocess launcher was invoked
     runs = c.get("/jobs/status").json()["runs"]
     assert any(r["run_id"] == run_id and r["state"] == rs.PREPARING for r in runs)
+
+
+def test_prepare_run_makes_relative_runs_root_absolute(tmp_path, monkeypatch):
+    """The child cwd must not be prepended to ``-dir`` a second time."""
+    monkeypatch.chdir(tmp_path)
+    app = create_app("runs", "db.sqlite3", allow_network=True)
+
+    assert app.state.runs_root == (tmp_path / "runs").resolve()
+
+
+def test_failed_prepare_log_is_available_from_jobs_log(tmp_path):
+    work_dir = tmp_path / "runs" / "r1"
+    work_dir.mkdir(parents=True)
+    (work_dir / "prepare.log").write_text("prepare failure details\n")
+
+    assert _tail_run_log(work_dir, work_dir) == "prepare failure details\n"
+
+
+def test_failed_prepare_log_is_shown_on_results_page(tmp_path):
+    work_dir = tmp_path / "runs" / "r1"
+    work_dir.mkdir(parents=True)
+    (work_dir / "prepare.log").write_text("prepare failure details\n")
+    template = Path(__file__).parents[3] / "allesfitter/webgui/templates/results.html"
+
+    assert "run_log" in template.read_text()
 
 
 def test_prepare_run_blocked_without_network(tmp_path):
@@ -254,3 +334,50 @@ def test_jobs_fit_launches_prepared_run(tmp_path, monkeypatch):
 def test_jobs_fit_unknown_run_404(tmp_path):
     c = TestClient(_app(tmp_path, allow_network=True))
     assert c.post("/jobs/fit/nope").status_code == 404
+
+
+def test_prepared_run_can_edit_configs_and_refresh_preview(tmp_path, monkeypatch):
+    app = _app(tmp_path, allow_network=True)
+    c = TestClient(app)
+    run_dir = tmp_path / "runs" / "r1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "params.csv").write_text("old params\n")
+    (run_dir / "settings.csv").write_text("old settings\n")
+    (run_dir / "initial_guess.png").write_bytes(b"old")
+    app.state.store.create_run(run_id="r1", target="HD 1", run_dir=str(run_dir), state=rs.PREPARED)
+    monkeypatch.setattr(
+        "allesfitter.webgui.app._validate.dry_run",
+        lambda d: ValidationResult(True, n_free_params=7),
+    )
+
+    def preview(path):
+        output = Path(path) / "initial_guess.png"
+        output.write_bytes(b"new")
+        return output
+
+    monkeypatch.setattr("allesfitter.webgui.app._validate.initial_guess_preview", preview)
+
+    page = c.get("/results/r1")
+    assert "params-csv" in page.text
+    assert "Run MCMC" in page.text
+    assert "Run Nested Sampling" in page.text
+    response = c.post(
+        "/results/r1/config",
+        json={"params_csv": "new params\n", "settings_csv": "new settings\n"},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "n_free_params": 7}
+    assert (run_dir / "params.csv").read_text() == "new params\n"
+    assert (run_dir / "settings.csv").read_text() == "new settings\n"
+    assert c.get("/results/r1/initial-guess").content == b"new"
+
+
+def test_unprepared_run_cannot_be_edited_or_fitted(tmp_path):
+    app = _app(tmp_path, allow_network=True)
+    c = TestClient(app)
+    run_dir = tmp_path / "runs" / "r1"
+    run_dir.mkdir(parents=True)
+    app.state.store.create_run(run_id="r1", target="HD 1", run_dir=str(run_dir), state=rs.PREPARING)
+
+    assert c.post("/results/r1/config", json={}).status_code == 409
+    assert c.post("/jobs/fit/r1").status_code == 409

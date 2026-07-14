@@ -544,9 +544,7 @@ def tls_search(time, flux, flux_err, plot=True, plot_type="brokenplot", **kwargs
         SDE = results["SDE"]
         FAP = results["FAP"]
         if is_multiple_of(results["period"], kwargs["inj_period"]):
-            SNR = (
-                -np.inf
-            )  # if run as part of an injection-recovery test, then abort if it matches the injected period
+            SNR = -np.inf  # if run as part of an injection-recovery test, then abort if it matches the injected period
 
     #::: return
     if plot_bool:
@@ -791,7 +789,6 @@ def _tls_search_plot_individual(time, flux, flux_err, results):
 def tls_search_tess(
     time, flux, flux_err, wotan_kwargs=None, tls_kwargs=None, bad_regions=None, options=None
 ):
-
     if options is None:
         options = {}
     if "outdir" not in options:

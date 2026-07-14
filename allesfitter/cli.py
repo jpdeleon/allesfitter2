@@ -33,18 +33,21 @@ def gui(
     db: str | None = typer.Option(None, help="SQLite path (default: <runs-root>/webgui.sqlite3)"),
     toi_csv: str | None = typer.Option(None, help="local ExoFOP TOI table for auto-fill"),
     host: str = typer.Option("127.0.0.1"),
-    port: int = typer.Option(8000),
+    port: int = typer.Option(5100),
     no_network: bool = typer.Option(False, "--no-network", help="disable NASA Archive lookups"),
     no_kill_existing: bool = typer.Option(
         False,
         "--no-kill-existing",
         help="do not stop a process already listening on --port before starting",
     ),
+    reload: bool = typer.Option(
+        False, "--reload", help="reload the development server when source files change"
+    ),
 ):
     """Serve the allesfitter web GUI."""
     from allesfitter.webgui.cli import main as gui_main
 
-    argv = ["allesfitter-gui"]
+    argv = []
     argv.append(f"--runs-root={runs_root}")
     if db:
         argv.append(f"--db={db}")
@@ -56,6 +59,8 @@ def gui(
         argv.append("--no-network")
     if no_kill_existing:
         argv.append("--no-kill-existing")
+    if reload:
+        argv.append("--reload")
     gui_main(argv)
 
 
@@ -182,7 +187,10 @@ def grid(
 def show_initial_guess(
     dir_path: str = typer.Argument(..., help="path to the data directory"),
     quiet: bool = typer.Option(False, "--quiet", "-q"),
-    no_plot: bool = typer.Option(False, "--no-plot", help="skip generating PDFs"),
+    no_plot: bool = typer.Option(False, "--no-plot", help="skip generating figures"),
+    file_extension: str = typer.Option(
+        ".pdf", "--file-extension", "-e", help="figure format: pdf, png, jpg, svg, or webp"
+    ),
     midtransit: bool = typer.Option(True, "--midtransit/--no-midtransit"),
     ingress: bool = typer.Option(False, "--ingress/--no-ingress"),
     egress: bool = typer.Option(False, "--egress/--no-egress"),
@@ -197,6 +205,7 @@ def show_initial_guess(
         plot_midtransit=midtransit,
         plot_ingress=ingress,
         plot_egress=egress,
+        file_extension=file_extension,
     )
 
 
@@ -245,11 +254,14 @@ def mcmc_output(
     dir_path: str = typer.Argument(..., help="path to the data directory"),
     overwrite: bool = typer.Option(False, "--overwrite", "-o"),
     quiet: bool = typer.Option(False, "--quiet", "-q"),
+    file_extension: str = typer.Option(
+        ".pdf", "--file-extension", "-e", help="figure format: pdf, png, jpg, svg, or webp"
+    ),
 ):
     """Process MCMC results (posteriors, plots, summaries)."""
     from allesfitter.mcmc_output import mcmc_output as _mcmc_output
 
-    _mcmc_output(dir_path, overwrite=overwrite, quiet=quiet)
+    _mcmc_output(dir_path, overwrite=overwrite, quiet=quiet, file_extension=file_extension)
 
 
 @app.command()
@@ -269,11 +281,14 @@ def ns_fit(
 def ns_output(
     dir_path: str = typer.Argument(..., help="path to the data directory"),
     overwrite: bool = typer.Option(False, "--overwrite", "-o"),
+    file_extension: str = typer.Option(
+        ".pdf", "--file-extension", "-e", help="figure format: pdf, png, jpg, svg, or webp"
+    ),
 ):
     """Process nested sampling results (posteriors, evidence, plots)."""
     from allesfitter.nested_sampling_output import ns_output as _ns_output
 
-    _ns_output(dir_path, overwrite=overwrite)
+    _ns_output(dir_path, overwrite=overwrite, file_extension=file_extension)
 
 
 @app.command()

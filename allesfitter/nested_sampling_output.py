@@ -44,6 +44,7 @@ def _init_plotting():
 
 #::: allesfitter modules
 from . import config
+from ._figure_output import normalize_file_extension
 from ._output_shared import save_per_transit_plots, write_priors_latex_table
 from .computer import calculate_baseline, calculate_model, calculate_stellar_var
 from .general_output import (
@@ -312,7 +313,7 @@ def _load_R_star_samples(n_samples, seed=42):
     return samples, R_star
 
 
-def plot_chromatic_rr_histogram(posterior_samples, prefix="ns"):
+def plot_chromatic_rr_histogram(posterior_samples, prefix="ns", file_extension=".pdf"):
     """
     Overlay posterior histograms of per-bandpass Rp/Rs for chromatic fits.
 
@@ -338,6 +339,7 @@ def plot_chromatic_rr_histogram(posterior_samples, prefix="ns"):
         Output filename prefix (``'ns'`` or ``'mcmc'``).
     """
     _init_plotting()
+    file_extension = normalize_file_extension(file_extension)
 
     import matplotlib.pyplot as plt
 
@@ -451,7 +453,10 @@ def plot_chromatic_rr_histogram(posterior_samples, prefix="ns"):
 
         fig.tight_layout()
         fig.savefig(
-            os.path.join(config.BASEMENT.outdir, prefix + "_chromatic_rr_" + companion + ".pdf"),
+            os.path.join(
+                config.BASEMENT.outdir,
+                prefix + "_chromatic_rr_" + companion + file_extension,
+            ),
             bbox_inches="tight",
         )
         plt.close(fig)
@@ -463,7 +468,7 @@ def plot_chromatic_rr_histogram(posterior_samples, prefix="ns"):
 ###############################################################################
 #::: convert params.csv into a LaTeX prior table
 ###############################################################################
-def plot_linear_baseline_components(posterior_samples=None, prefix="ns"):
+def plot_linear_baseline_components(posterior_samples=None, prefix="ns", file_extension=".pdf"):
     """timex-style diagnostic of every linear-multi baseline in the fit.
 
     For each instrument whose ``baseline_<key>_<inst>`` is
@@ -491,6 +496,7 @@ def plot_linear_baseline_components(posterior_samples=None, prefix="ns"):
     """
     # Local imports to avoid pulling computer at module load.
     _init_plotting()
+    file_extension = normalize_file_extension(file_extension)
     import matplotlib.pyplot as plt
 
     from .computer import (
@@ -578,7 +584,9 @@ def plot_linear_baseline_components(posterior_samples=None, prefix="ns"):
         axes[1].axhline(0, color="grey", lw=0.5, ls="--")
 
         fig.tight_layout()
-        out = os.path.join(config.BASEMENT.outdir, prefix + "_linear_baseline_" + inst + ".pdf")
+        out = os.path.join(
+            config.BASEMENT.outdir, prefix + "_linear_baseline_" + inst + file_extension
+        )
         fig.savefig(out, bbox_inches="tight")
         plt.close(fig)
 
@@ -589,7 +597,7 @@ def plot_linear_baseline_components(posterior_samples=None, prefix="ns"):
 #::: write_priors_latex_table` keeps working unchanged.
 
 
-def ns_output(datadir, backend=None, overwrite=None):
+def ns_output(datadir, backend=None, overwrite=None, file_extension=".pdf"):
     """
     Inputs:
     -------
@@ -615,6 +623,7 @@ def ns_output(datadir, backend=None, overwrite=None):
     into datadir/results/ (or datadir/QL/ if QL==True)
     """
     _init_plotting()
+    file_extension = normalize_file_extension(file_extension)
     import pickle
 
     import matplotlib.pyplot as plt
@@ -625,6 +634,9 @@ def ns_output(datadir, backend=None, overwrite=None):
     from . import deriver
 
     config.init(datadir)
+    from .results import use_results_directory
+
+    use_results_directory(config.BASEMENT, "ns")
 
     #::: security check
     resolve_overwrite(
@@ -656,14 +668,14 @@ def ns_output(datadir, backend=None, overwrite=None):
         fig, axes = afplot(posterior_samples_for_plot, companion)
         if fig is not None:
             fig.savefig(
-                os.path.join(config.BASEMENT.outdir, "ns_fit_" + companion + ".pdf"),
+                os.path.join(config.BASEMENT.outdir, "ns_fit_" + companion + file_extension),
                 bbox_inches="tight",
             )
             plt.close(fig)
 
     #::: per-transit fit plots (shared with mcmc_output; differs only in the
     #::: posterior-sample array and the 'ns' filename prefix)
-    save_per_transit_plots(posterior_samples_for_plot, "ns")
+    save_per_transit_plots(posterior_samples_for_plot, "ns", file_extension=file_extension)
 
     #::: retrieve the results
     posterior_samples = draw_ns_posterior_samples(results)  # all weighted posterior_samples
@@ -673,14 +685,16 @@ def ns_output(datadir, backend=None, overwrite=None):
 
     #::: chromatic Rp/Rs posterior histograms (no-op when achromatic)
     try:
-        plot_chromatic_rr_histogram(posterior_samples)
+        plot_chromatic_rr_histogram(posterior_samples, file_extension=file_extension)
     except Exception as _e:
         logprint("\n! WARNING: chromatic Rp/Rs histogram could not be produced: " + str(_e))
 
     #::: linear-multi baseline component diagnostic (timex-style; no-op
     #::: when no inst uses sample_linear_multi / hybrid_linear_multi)
     try:
-        plot_linear_baseline_components(posterior_samples, prefix="ns")
+        plot_linear_baseline_components(
+            posterior_samples, prefix="ns", file_extension=file_extension
+        )
     except (MemoryError, Exception) as _e:
         logprint("\n! WARNING: linear-multi baseline components plot failed: " + str(_e))
 
@@ -902,9 +916,13 @@ def ns_output(datadir, backend=None, overwrite=None):
         caxes[0, 0].yaxis.set_label_coords(-0.5, 0.5)
 
     #::: save and close the trace- and cornerplot
-    tfig.savefig(os.path.join(config.BASEMENT.outdir, "ns_trace.pdf"), bbox_inches="tight")
+    tfig.savefig(
+        os.path.join(config.BASEMENT.outdir, "ns_trace" + file_extension), bbox_inches="tight"
+    )
     plt.close(tfig)
-    cfig.savefig(os.path.join(config.BASEMENT.outdir, "ns_corner.pdf"), bbox_inches="tight")
+    cfig.savefig(
+        os.path.join(config.BASEMENT.outdir, "ns_corner" + file_extension), bbox_inches="tight"
+    )
     plt.close(cfig)
 
     #::: save the tables
@@ -947,14 +965,17 @@ def ns_output(datadir, backend=None, overwrite=None):
             comments="#",
         )
         fig, ax = plot_top_down_view(params_median, params_star)
-        fig.savefig(os.path.join(config.BASEMENT.outdir, "top_down_view.pdf"), bbox_inches="tight")
+        fig.savefig(
+            os.path.join(config.BASEMENT.outdir, "top_down_view" + file_extension),
+            bbox_inches="tight",
+        )
         plt.close(fig)
     except Exception as e:
         logprint(f"\nOrbital plots could not be produced: {e}")
 
     #::: plot TTV results (if wished for)
     if config.BASEMENT.settings["fit_ttvs"]:
-        plot_ttv_results(params_median, params_ll, params_ul)
+        plot_ttv_results(params_median, params_ll, params_ul, file_extension=file_extension)
 
     #::: clean up
     logprint("\nDone. For all outputs, see", config.BASEMENT.outdir)
@@ -981,6 +1002,9 @@ def get_ns_posterior_samples(datadir, Nsamples=None, as_type="dic"):
     import pickle
 
     config.init(datadir)
+    from .results import use_results_directory
+
+    use_results_directory(config.BASEMENT, "ns")
 
     try:
         f = gzip.GzipFile(os.path.join(datadir, "results", "save_ns.pickle.gz"), "rb")

@@ -3,14 +3,18 @@
 {% block nav_prepare %}active{% endblock %}
 {% block content %}
 <section class="stack" id="prepare-form">
-  <h1>Prepare from catalog</h1>
-  <p class="muted">
-    Auto-download light curves and generate a full allesfitter config from just a
-    target and sector — no manual upload. The run appears on
-    <a href="/jobs">Jobs</a> as <span class="badge state-preparing">preparing</span>,
-    then <span class="badge state-prepared">prepared</span> once validated. Review
-    the generated config, then hit <strong>Fit</strong>.
-  </p>
+  <div class="page-heading">
+    <p class="eyebrow">New analysis</p>
+    <h1>Prepare observations</h1>
+    <p class="lede">Choose a target and data product. We’ll download the light curve, build the model configuration, and stop for scientific review before fitting.</p>
+  </div>
+
+  <ol class="pipeline-steps compact" aria-label="Analysis pipeline">
+    <li class="active"><span>1</span><div><strong>Prepare</strong><small>Target &amp; data</small></div></li>
+    <li><span>2</span><div><strong>Validate</strong><small>Initial model</small></div></li>
+    <li><span>3</span><div><strong>Fit</strong><small>Inference</small></div></li>
+    <li><span>4</span><div><strong>Inspect</strong><small>Diagnostics</small></div></li>
+  </ol>
 
   {% if not allow_network %}
   <div class="panel result err">
@@ -19,38 +23,49 @@
   </div>
   {% endif %}
 
-  <div class="panel">
-    <h2>Target</h2>
-    <div class="field-row">
-      <label>Identifier
-        <input id="target" placeholder="HD 39091">
+  <div class="prepare-layout">
+  <div class="stack">
+  <section class="panel form-section">
+    <div class="form-section-head"><span>01</span><div><h2>Identify the target</h2><p>Use a common name or a mission catalog identifier.</p></div></div>
+    <div class="field-row target-fields">
+      <label class="grow">Target identifier <span class="required">Required</span>
+        <input id="target" placeholder="e.g. HD 39091 or TOI-6715" autocomplete="off" required>
+        <small>Names are resolved through the selected mission archive.</small>
       </label>
-      <label>Type
+      <label>Identifier type
         <select id="id-type">
-          <option value="name">name</option>
-          <option value="toi">TOI</option>
-          <option value="tic">TIC</option>
-          <option value="ctoi">CTOI</option>
+          <option value="name">Object name</option>
+          <option value="toi">TOI number</option>
+          <option value="tic">TIC number</option>
+          <option value="ctoi">CTOI number</option>
         </select>
       </label>
     </div>
-  </div>
+  </section>
 
-  <div class="panel">
-    <h2>Data selection</h2>
+  <section class="panel form-section">
+    <div class="form-section-head"><span>02</span><div><h2>Select observations</h2><p>Pick the mission product and observing windows to include.</p></div></div>
     <div class="field-grid">
       <label>Mission
         <select id="mission">
           {% for mo in missions %}<option value="{{ mo }}">{{ mo }}</option>{% endfor %}
         </select>
       </label>
-      <label>Sector / campaign / quarter
-        <input id="sectors" placeholder="1 2   ·   -1 (latest)   ·   all">
+      <label><span id="segment-label">Sector / campaign / quarter</span>
+        <input id="sectors" placeholder="Choose from available windows" required>
+        <div id="sector-hint" class="sector-hint" aria-live="polite"></div>
+        <small>Select one or more chips, or enter <code>all</code>.</small>
       </label>
       <label>Pipeline
         <select id="pipeline">
           {% for p in pipelines %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
         </select>
+      </label>
+      <label>Exposure time
+        <select id="exptime">
+          <option value="">Auto (any available)</option>
+        </select>
+        <small>TESS lists standard cadences (20/120/600/1800 s); other missions populate from the archive lookup. Leave on Auto for a single cadence.</small>
       </label>
       <label>Light-curve type
         <select id="lc-type">
@@ -62,36 +77,65 @@
           {% for q in quality_flags %}<option value="{{ q }}">{{ q }}</option>{% endfor %}
         </select>
       </label>
-      <label>Outlier σ-clip
-        <input id="sigma" type="number" step="any" placeholder="none">
-      </label>
     </div>
-  </div>
+  </section>
 
-  <div class="panel">
-    <h2>Instruments &amp; chromaticity</h2>
-    <div class="field-grid">
-      <label>Filename(s) <span class="muted small">(-f)</span>
-        <input id="filename" placeholder="tess   ·   kepler tess" value="tess">
+  <section class="panel form-section">
+    <div class="form-section-head"><span>03</span><div><h2>Define the analysis</h2><p>Set the output instruments, chromatic grouping, and first inference method.</p></div></div>
+    <div class="field-grid analysis-grid">
+      <label>Instrument label(s)
+        <input id="filename" placeholder="e.g. tess or kepler tess" value="tess">
+        <small>Space-separated; used in generated filenames and parameters.</small>
       </label>
-      <label>Bandpass(es) <span class="muted small">(-bp, one per file)</span>
-        <input id="bandpass" placeholder="leave blank = achromatic">
+      <label>Bandpass label(s)
+        <input id="bandpass" placeholder="Optional — one per instrument">
+        <small>Leave blank for an achromatic model.</small>
       </label>
-      <label>Default sampler
+      <label>Planned inference
         <select id="sampler">
-          <option value="mcmc">MCMC (emcee)</option>
-          <option value="ns">Nested Sampling</option>
+          <option value="mcmc">MCMC — posterior estimation</option>
+          <option value="ns">Nested sampling — evidence</option>
         </select>
+        <small>You can change this after model validation.</small>
       </label>
-      <label class="check"><input type="checkbox" id="ttv"> Emit per-transit TTV rows (--ttv)</label>
-      <label class="check"><input type="checkbox" id="overwrite"> Overwrite existing files (-o)</label>
     </div>
+    <details class="advanced-options">
+      <summary>Advanced preparation options</summary>
+      <div class="field-grid">
+        <label>Outlier σ-clip
+          <input id="sigma" type="number" step="any" min="0" placeholder="Disabled">
+          <small>Applied during light-curve preparation.</small>
+        </label>
+        <label class="check"><input type="checkbox" id="ttv"> <span>Emit per-transit TTV parameters<small>For transit-timing variation analyses.</small></span></label>
+        <label class="check"><input type="checkbox" id="overwrite"> <span>Overwrite existing prepared files<small>Only affects colliding output files.</small></span></label>
+      </div>
+    </details>
+  </section>
+
+  <div class="actions form-actions">
+    <a class="btn" href="{{ url_for('index') }}">Cancel</a>
+    <button class="btn primary btn-large" id="prepare" type="button">Prepare observations <span aria-hidden="true">→</span></button>
+    <div id="result" class="result" role="status" aria-live="polite"></div>
+  </div>
   </div>
 
-  <div class="actions">
-    <button class="btn primary" id="prepare" type="button">Prepare →</button>
-    <div id="result" class="result" role="status" aria-live="polite"></div>
+  <aside class="prepare-summary panel" aria-label="Preparation summary">
+    <p class="eyebrow">Run preview</p>
+    <h2 id="summary-target">Untitled target</h2>
+    <dl class="summary-list">
+      <div><dt>Data source</dt><dd id="summary-source">TESS · default pipeline</dd></div>
+      <div><dt>Observations</dt><dd id="summary-sectors">Not selected</dd></div>
+      <div><dt>Model</dt><dd id="summary-model">Achromatic</dd></div>
+      <div><dt>Next step</dt><dd>Review initial guess</dd></div>
+    </dl>
+    <div class="callout info"><span aria-hidden="true">i</span><p><strong>No fit starts automatically.</strong> Preparation pauses at a validated initial model so you can inspect priors and settings.</p></div>
+    <div class="summary-checks">
+      <p><i class="check-dot" id="check-target"></i> Target identified</p>
+      <p><i class="check-dot" id="check-sectors"></i> Observation window selected</p>
+      <p><i class="check-dot ready"></i> Review gate enabled</p>
+    </div>
+  </aside>
   </div>
 </section>
 {% endblock %}
-{% block scripts %}<script src="/static/prepare.js"></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', path='/prepare.js') }}?v=9"></script>{% endblock %}

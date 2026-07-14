@@ -24,11 +24,13 @@ PENDING = "pending"
 PREPARING = "preparing"  # prepare_allesfit subprocess is downloading/generating
 PREPARED = "prepared"  # config generated + validated, ready for the user to fit
 RUNNING = "running"
+STOPPING = "stopping"
 DONE = "done"
 FAILED = "failed"
 STOPPED = "stopped"
 
-_ACTIVE_STATES = frozenset({CREATED, PENDING, PREPARING, RUNNING})
+_ACTIVE_STATES = frozenset({CREATED, PENDING, PREPARING, RUNNING, STOPPING})
+TERMINAL_STATES = frozenset({DONE, FAILED, STOPPED})
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
@@ -42,7 +44,15 @@ CREATE TABLE IF NOT EXISTS runs (
     companions  TEXT NOT NULL DEFAULT '',
     logz        TEXT NOT NULL DEFAULT '',
     error       TEXT NOT NULL DEFAULT '',
+    owner       TEXT NOT NULL DEFAULT '',
     pid         INTEGER,
+    pgid        INTEGER,
+    command     TEXT NOT NULL DEFAULT '',
+    app_version TEXT NOT NULL DEFAULT '',
+    pid_start   TEXT NOT NULL DEFAULT '',
+    started_at  REAL,
+    finished_at REAL,
+    returncode  INTEGER,
     created_at  REAL NOT NULL,
     updated_at  REAL NOT NULL
 );
@@ -66,6 +76,25 @@ class RunStore:
         )
         with self._cursor() as conn:
             conn.executescript(SCHEMA)
+            self._migrate(conn)
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        """Add scheduler columns to databases created by older GUI versions."""
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
+        additions = {
+            "owner": "TEXT NOT NULL DEFAULT ''",
+            "pgid": "INTEGER",
+            "command": "TEXT NOT NULL DEFAULT ''",
+            "app_version": "TEXT NOT NULL DEFAULT ''",
+            "pid_start": "TEXT NOT NULL DEFAULT ''",
+            "started_at": "REAL",
+            "finished_at": "REAL",
+            "returncode": "INTEGER",
+        }
+        for name, declaration in additions.items():
+            if name not in columns:
+                conn.execute(f"ALTER TABLE runs ADD COLUMN {name} {declaration}")
 
     @contextmanager
     def _cursor(self):
@@ -91,14 +120,27 @@ class RunStore:
         insts: str = "",
         bands: str = "",
         companions: str = "",
+        owner: str = "",
         state: str = CREATED,
     ) -> dict:
         now = time.time()
         with self._cursor() as conn:
             conn.execute(
                 "INSERT INTO runs (run_id, target, sampler, state, run_dir, insts, bands, "
-                "companions, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (run_id, target, sampler, state, str(run_dir), insts, bands, companions, now, now),
+                "companions, owner, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    run_id,
+                    target,
+                    sampler,
+                    state,
+                    str(run_dir),
+                    insts,
+                    bands,
+                    companions,
+                    owner,
+                    now,
+                    now,
+                ),
             )
         return self.get_run(run_id)  # type: ignore[return-value]
 
@@ -110,6 +152,11 @@ class RunStore:
         pid: int | None = None,
         logz: str | None = None,
         error: str | None = None,
+        pgid: int | None = None,
+        command: str | None = None,
+        app_version: str | None = None,
+        pid_start: str | None = None,
+        returncode: int | None = None,
     ) -> None:
         sets = ["state = ?", "updated_at = ?"]
         vals: list[object] = [state, time.time()]
@@ -122,12 +169,39 @@ class RunStore:
         if error is not None:
             sets.append("error = ?")
             vals.append(error)
+        for key, value in (
+            ("pgid", pgid),
+            ("command", command),
+            ("app_version", app_version),
+            ("pid_start", pid_start),
+            ("returncode", returncode),
+        ):
+            if value is not None:
+                sets.append(f"{key} = ?")
+                vals.append(value)
+        if state == RUNNING:
+            sets.append("started_at = COALESCE(started_at, ?)")
+            vals.append(time.time())
+        if state in TERMINAL_STATES:
+            sets.append("finished_at = ?")
+            vals.append(time.time())
         vals.append(run_id)
         with self._cursor() as conn:
             conn.execute(f"UPDATE runs SET {', '.join(sets)} WHERE run_id = ?", vals)
 
     _UPDATABLE = frozenset(
-        {"target", "sampler", "state", "run_dir", "insts", "bands", "companions", "logz", "error"}
+        {
+            "target",
+            "sampler",
+            "state",
+            "run_dir",
+            "insts",
+            "bands",
+            "companions",
+            "logz",
+            "error",
+            "owner",
+        }
     )
 
     def update_run(self, run_id: str, **fields: object) -> None:
@@ -155,6 +229,13 @@ class RunStore:
         with self._cursor() as conn:
             conn.execute("DELETE FROM runs WHERE run_id = ?", (run_id,))
 
+    def record_command(self, run_id: str, command: str) -> None:
+        with self._cursor() as conn:
+            conn.execute(
+                "UPDATE runs SET command = ?, updated_at = ? WHERE run_id = ?",
+                (command, time.time(), run_id),
+            )
+
     # -- reads --------------------------------------------------------------
     def get_run(self, run_id: str) -> dict | None:
         with self._cursor() as conn:
@@ -177,6 +258,31 @@ class RunStore:
                 "SELECT * FROM runs WHERE state = ? ORDER BY created_at ASC", (PENDING,)
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def count_states(self, states: tuple[str, ...], *, owner: str | None = None) -> int:
+        marks = ",".join("?" for _ in states)
+        query = f"SELECT COUNT(*) FROM runs WHERE state IN ({marks})"
+        values: list[object] = list(states)
+        if owner is not None:
+            query += " AND owner = ?"
+            values.append(owner)
+        with self._cursor() as conn:
+            return int(conn.execute(query, values).fetchone()[0])
+
+    def enqueue_if_below_limit(self, run_id: str, *, owner: str, limit: int) -> bool:
+        """Atomically admit one prepared run to an owner's FIFO queue."""
+        with self._cursor() as conn:
+            count = conn.execute(
+                "SELECT COUNT(*) FROM runs WHERE owner = ? AND state = ?",
+                (owner, PENDING),
+            ).fetchone()[0]
+            if count >= limit:
+                return False
+            changed = conn.execute(
+                "UPDATE runs SET state = ?, updated_at = ? " "WHERE run_id = ? AND state IN (?, ?)",
+                (PENDING, time.time(), run_id, PREPARED, CREATED),
+            ).rowcount
+            return changed == 1
 
     def targets(self) -> list[dict]:
         """Per-target aggregate: run count and the most-recent run's state."""

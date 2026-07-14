@@ -2,8 +2,12 @@
 warm-start for mcmc_fit / ns_fit.
 
 Default stack: CMA-ES global search → L-BFGS-B refine → acceptance gates →
-optional in-place update of ``config.BASEMENT.theta_0`` so that the next
-sampler call starts from the optimized point.
+optional update of ``config.BASEMENT.theta_0`` *and* the ``value`` column of
+``params.csv`` on disk, so that the next sampler call starts from the
+optimized point. The disk write matters because ``mcmc_fit`` / ``ns_fit`` /
+``show_initial_guess`` each call ``config.init(datadir)``, which rebuilds
+BASEMENT from ``params.csv`` — an in-memory-only ``theta_0`` update would be
+silently discarded before the next call ever sees it.
 
 Public entry point:
 
@@ -302,6 +306,39 @@ def _run_cmaes(
     )
 
 
+def _write_theta_to_params_csv(datadir, fitkeys, theta) -> None:
+    """Overwrite the ``value`` column of ``params.csv`` for rows in *fitkeys*.
+
+    Every other line — comments, section headers, other columns — is left
+    byte-for-byte untouched. This is what makes ``mutate_basement=True``'s
+    documented promise ("the next sampler call starts from the optimized
+    point") actually true: ``mcmc_fit`` / ``ns_fit`` / ``show_initial_guess``
+    all call ``config.init(datadir)``, which reconstructs BASEMENT from disk
+    and would otherwise silently discard an in-memory-only ``theta_0`` update.
+    """
+    path = os.path.join(datadir, "params.csv")
+    updates = {str(k): float(v) for k, v in zip(fitkeys, theta)}
+    with open(path, encoding="utf-8") as f:
+        lines = f.readlines()
+
+    out = []
+    for line in lines:
+        stripped = line.strip()
+        if not updates or not stripped or stripped.startswith("#"):
+            out.append(line)
+            continue
+        parts = line.split(",", 2)
+        name = parts[0].strip() if parts else ""
+        if len(parts) >= 2 and name in updates:
+            rest = parts[2] if len(parts) > 2 else "\n" if line.endswith("\n") else ""
+            out.append(f"{parts[0]},{updates.pop(name)!r},{rest}")
+        else:
+            out.append(line)
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.writelines(out)
+
+
 def _refine(theta, bounds, maxiter=30):
     """L-BFGS-B finite-diff refinement within `maxiter` steps. Catches and
     returns the input theta unchanged if the refinement fails."""
@@ -367,8 +404,10 @@ def optimize(
     save : bool
         Persist a JSON summary to ``<datadir>/results/optimize_save.json``.
     mutate_basement : bool
-        If accepted, overwrite ``config.BASEMENT.theta_0`` in place so the
-        next ``mcmc_fit`` / ``ns_fit`` warm-starts from the optimum.
+        If accepted, overwrite ``config.BASEMENT.theta_0`` in place *and*
+        rewrite the ``value`` column of the fitted rows in ``params.csv`` on
+        disk, so the next ``mcmc_fit`` / ``ns_fit`` / ``show_initial_guess``
+        call — in this process or a fresh one — warm-starts from the optimum.
     improvement_threshold : float
         Required lnprob improvement before the result is accepted. Default
         ``0.5 * ndim`` (loose AIC-style margin).
@@ -580,6 +619,7 @@ def optimize(
 
     if accepted and mutate_basement:
         b.theta_0 = np.asarray(theta_best, dtype=float)
+        _write_theta_to_params_csv(datadir, b.fitkeys, theta_best)
 
     result = OptimizeResult(
         method=method,
@@ -614,3 +654,19 @@ def optimize(
     )
 
     return result
+
+
+import types
+
+
+class _CallableModule(types.ModuleType):
+    def __init__(self, module, func):
+        super().__init__(module.__name__)
+        self.__dict__.update(module.__dict__)
+        self._func = func
+
+    def __call__(self, *args, **kwargs):
+        return self._func(*args, **kwargs)
+
+
+sys.modules[__name__] = _CallableModule(sys.modules[__name__], optimize)

@@ -8,6 +8,7 @@ import socket
 
 import pytest
 
+from allesfitter.webgui import app as web_app
 from allesfitter.webgui import cli
 
 
@@ -44,3 +45,30 @@ def test_detects_listener_excludes_self():
         assert cli.free_port("127.0.0.1", port) == []
     finally:
         srv.close()
+
+
+def test_cli_passes_root_path_to_application(monkeypatch):
+    received = {}
+    sentinel = object()
+
+    def fake_create_app(*args, **kwargs):
+        received.update(kwargs)
+        return sentinel
+
+    monkeypatch.setattr(web_app, "create_app", fake_create_app)
+    monkeypatch.setattr("uvicorn.run", lambda app, **kwargs: received.update(app=app, **kwargs))
+    cli.main(["--root-path", "/allesfitter/", "--no-kill-existing"])
+
+    assert received["root_path"] == "/allesfitter/"
+    assert received["app"] is sentinel
+
+
+def test_cli_reload_uses_import_string_and_factory(monkeypatch):
+    received = {}
+    monkeypatch.setattr("uvicorn.run", lambda app, **kwargs: received.update(app=app, **kwargs))
+
+    cli.main(["--reload", "--runs-root", "runs", "--no-kill-existing"])
+
+    assert received["app"] == "allesfitter.webgui.cli:_reload_app"
+    assert received["factory"] is True
+    assert received["reload"] is True

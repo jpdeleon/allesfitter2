@@ -15,8 +15,9 @@ Web: www.mnguenther.com
 
 #::: modules
 import gzip
-import os
 import sys
+from argparse import ArgumentParser
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -157,7 +158,6 @@ def ns_plot_bayes_factors(datadirs, labels=None, return_dlogZ=False, ax=None, ex
 
 
 def get_delta_logZ_and_delta_labels(datadirs, labels):
-
     logZ, logZ_err = get_logZ(datadirs)
 
     #::: calculate delta_logZ
@@ -173,36 +173,20 @@ def get_delta_logZ_and_delta_labels(datadirs, labels):
 
 
 def get_logZ(datadirs, quiet=False):
-
     logZ = []
     logZ_err = []
 
     for dirname in np.atleast_1d(datadirs):
-        # new version
-        fname = os.path.join(dirname, "results", "save_ns.pickle.gz")
-        if os.path.exists(fname):
-            if not quiet:
-                print("--------------------------")
-                print(fname)
-            #::: load the save_ns.pickle
-            f = gzip.GzipFile(fname, "rb")
-            results = pickle.load(f)
-            f.close()
-
-        else:  # old version
-            fname = os.path.join(dirname, "results", "save_ns.pickle")
-            if not quiet:
-                print("--------------------------")
-                print(fname)
-            #::: load the save_ns.pickle
-            with open(fname, "rb") as f:
-                results = pickle.load(f)
+        fname, results = _load_results(dirname)
+        if not quiet:
+            print("--------------------------")
+            print(fname)
 
         #::: get the results
-        logZdynesty = results.logz[
-            -1
-        ]  # value of ln(Z) - the NATURAL logarithm of Z, see https://dynesty.readthedocs.io/en/latest/api.html
-        logZerrdynesty = results.logzerr[-1]  # estimate of the statistcal uncertainty on ln(Z)
+        logz = _result_value(results, "logz")
+        logzerr = _result_value(results, "logzerr")
+        logZdynesty = logz[-1]
+        logZerrdynesty = logzerr[-1]
 
         #::: recalculate logZ error if it was NaN (bug in dynesty 0.9.2b)
         if (
@@ -213,10 +197,11 @@ def get_logZ(datadirs, quiet=False):
             if not quiet:
                 print("recalculating ln(Z) error...")
             sys.stdout.flush()
-            lnzs = np.zeros((10, len(results.logvol)))
+            logvol = _result_value(results, "logvol")
+            lnzs = np.zeros((10, len(logvol)))
             for i in tqdm(range(10), disable=quiet):
                 results_s = dyutils.simulate_run(results)
-                lnzs[i] = np.interp(-results.logvol, -results_s.logvol, results_s.logz)
+                lnzs[i] = np.interp(-logvol, -results_s.logvol, results_s.logz)
             lnzerr = np.std(lnzs, axis=0)
             logZerrdynesty = lnzerr[-1]
 
@@ -227,6 +212,79 @@ def get_logZ(datadirs, quiet=False):
         logZ_err.append(logZerrdynesty)
 
     return logZ, logZ_err
+
+
+def _result_value(results, key):
+    """Read a dynesty field from modern mappings or legacy Results objects."""
+    if isinstance(results, dict):
+        return np.asarray(results[key])
+    return np.asarray(getattr(results, key))
+
+
+def _load_results(path):
+    """Load a nested-sampling result from a run directory or pickle path."""
+    path = Path(path)
+    if path.is_file():
+        candidates = [path]
+    else:
+        candidates = [
+            path / "ns_results" / "save_ns.pickle.gz",
+            path / "results" / "save_ns.pickle.gz",
+            path / "ns_results" / "save_ns.pickle",
+            path / "results" / "save_ns.pickle",
+        ]
+    fname = next((candidate for candidate in candidates if candidate.is_file()), None)
+    if fname is None:
+        raise FileNotFoundError(f"No nested-sampling results found for {path}")
+    opener = gzip.open if fname.suffix == ".gz" else open
+    with opener(fname, "rb") as stream:
+        return str(fname), pickle.load(stream)
+
+
+def compare_logz(datadirs, labels=None):
+    """Compare final dynesty log-evidences against the first (reference) run.
+
+    Returns a list of dictionaries containing ``logz``, ``logzerr``, and the
+    propagated ``delta_logz`` uncertainty. ``datadirs`` may contain run
+    directories or direct paths to dynesty pickle files.
+    """
+    datadirs = list(datadirs)
+    if not datadirs:
+        raise ValueError("At least one nested-sampling result is required")
+    if labels is None:
+        labels = [str(path) for path in datadirs]
+    if len(labels) != len(datadirs):
+        raise ValueError("labels and datadirs must have the same length")
+
+    logz, logzerr = get_logZ(datadirs, quiet=True)
+    reference_logz = logz[0]
+    reference_error = logzerr[0]
+    return [
+        {
+            "label": label,
+            "logz": float(value),
+            "logzerr": float(error),
+            "delta_logz": float(value - reference_logz),
+            "delta_logzerr": float(np.hypot(error, reference_error)),
+        }
+        for label, value, error in zip(labels, logz, logzerr)
+    ]
+
+
+def main(argv=None):
+    """Print a log-evidence comparison table for nested-sampling runs."""
+    parser = ArgumentParser(description="Compare dynesty log-evidences")
+    parser.add_argument("datadirs", nargs="+", help="run directories or result pickle files")
+    parser.add_argument("--labels", nargs="+", help="labels matching the input order")
+    args = parser.parse_args(argv)
+    rows = compare_logz(args.datadirs, args.labels)
+    print("label\tlogz\tlogzerr\tdelta_logz\tdelta_logzerr")
+    for row in rows:
+        print(
+            f"{row['label']}\t{row['logz']:.6g}\t{row['logzerr']:.6g}\t"
+            f"{row['delta_logz']:.6g}\t{row['delta_logzerr']:.6g}"
+        )
+    return rows
 
 
 def get_collective_delta_logZ_and_delta_labels(collection_of_datadirs, collection_of_labels):
@@ -252,3 +310,7 @@ def get_collective_delta_logZ_and_delta_labels(collection_of_datadirs, collectio
         delta_logZ_err += list(b)
         delta_labels += list(c)
     return delta_logZ, delta_logZ_err, delta_labels
+
+
+if __name__ == "__main__":
+    main()
