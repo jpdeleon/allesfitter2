@@ -141,9 +141,9 @@ class TestSharedOrbitalParams:
         for key in SHARED_ORBITAL_KWARGS:
             v_tess = inst_calls[0].get(key)
             v_kepler = inst_calls[1].get(key)
-            assert (
-                v_tess == v_kepler
-            ), f"shared kwarg {key!r} differs across instruments: tess={v_tess}, kepler={v_kepler}"
+            assert v_tess == v_kepler, (
+                f"shared kwarg {key!r} differs across instruments: tess={v_tess}, kepler={v_kepler}"
+            )
 
     def test_rsuma_implied_consistency_per_band(
         self, two_band_two_inst_datadir, captured_fluxes_calls, truth
@@ -341,13 +341,13 @@ class TestAchromaticFallback:
         # update_params backfills a representative value.
         config.init(str(two_band_two_inst_datadir), quiet=True)
         params = _prepared_params()
-        assert (
-            "b_rr" in params
-        ), "update_params must backfill b_rr in chromatic mode so legacy code paths don't KeyError"
+        assert "b_rr" in params, (
+            "update_params must backfill b_rr in chromatic mode so legacy code paths don't KeyError"
+        )
         # The backfilled value should match the first bandpass's rr.
         config.BASEMENT.settings["bandpass"]
         first_inst = config.BASEMENT.settings["inst_phot"][0]
         first_band_key = config.BASEMENT.get_rr_key("b", first_inst)
-        assert (
-            params["b_rr"] == params[first_band_key]
-        ), f"backfilled b_rr={params['b_rr']} != {first_band_key}={params[first_band_key]}"
+        assert params["b_rr"] == params[first_band_key], (
+            f"backfilled b_rr={params['b_rr']} != {first_band_key}={params[first_band_key]}"
+        )

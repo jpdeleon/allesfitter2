@@ -279,7 +279,7 @@ class RunStore:
             if count >= limit:
                 return False
             changed = conn.execute(
-                "UPDATE runs SET state = ?, updated_at = ? " "WHERE run_id = ? AND state IN (?, ?)",
+                "UPDATE runs SET state = ?, updated_at = ? WHERE run_id = ? AND state IN (?, ?)",
                 (PENDING, time.time(), run_id, PREPARED, CREATED),
             ).rowcount
             return changed == 1

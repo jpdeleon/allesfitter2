@@ -94,9 +94,9 @@ class TestRawFluxClip:
         clipped_flux = config.BASEMENT.data["tess"]["raw_clipped_flux"]
         clipped_err = config.BASEMENT.data["tess"]["raw_clipped_flux_err"]
 
-        assert (
-            len(clipped_time) == 4
-        ), f"expected 4 clipped rows, got {len(clipped_time)} (times: {clipped_time.tolist()})"
+        assert len(clipped_time) == 4, (
+            f"expected 4 clipped rows, got {len(clipped_time)} (times: {clipped_time.tolist()})"
+        )
         assert len(clipped_flux) == 4 and len(clipped_err) == 4
         assert sorted(clipped_time.tolist()) == pytest.approx(expected)
         # Each clipped flux value is one of the injected outlier amplitudes.

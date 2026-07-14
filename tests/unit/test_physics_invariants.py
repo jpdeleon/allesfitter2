@@ -395,9 +395,9 @@ class TestLnlikeTotalNumericalCorrectness:
 
         lnlike = computer.calculate_lnlike_total(params)
         assert np.isfinite(lnlike), "lnlike is not finite"
-        assert lnlike == pytest.approx(
-            expected_lnlike, rel=1e-10
-        ), f"lnlike={lnlike}, expected={expected_lnlike}"
+        assert lnlike == pytest.approx(expected_lnlike, rel=1e-10), (
+            f"lnlike={lnlike}, expected={expected_lnlike}"
+        )
 
 
 # ============================================================================
@@ -594,18 +594,18 @@ class TestFluxModelChromatic:
         params, t = params_and_time
         depth_tess, _ = self._band_depth(params, t, "tess")
         depth_kepler, _ = self._band_depth(params, t, "kepler")
-        assert (
-            depth_kepler > depth_tess
-        ), f"expected kepler depth ({depth_kepler:.6f}) > tess depth ({depth_tess:.6f})"
+        assert depth_kepler > depth_tess, (
+            f"expected kepler depth ({depth_kepler:.6f}) > tess depth ({depth_tess:.6f})"
+        )
 
     def test_depth_scales_with_rr_squared_per_band(self, params_and_time):
         """Each band's transit depth ≈ that band's rr² (50% rel tol)"""
         params, t = params_and_time
         for inst, true_rr in [("tess", TRUE_RR_TESS), ("kepler", TRUE_RR_KEPLER)]:
             depth, _ = self._band_depth(params, t, inst)
-            assert depth == pytest.approx(
-                true_rr**2, rel=0.50
-            ), f"{inst}: depth={depth:.6f}, rr^2={true_rr**2:.6f}"
+            assert depth == pytest.approx(true_rr**2, rel=0.50), (
+                f"{inst}: depth={depth:.6f}, rr^2={true_rr**2:.6f}"
+            )
 
     def test_rsuma_invariant_per_band(self, params_and_time):
         """Each instrument's ellc call satisfies radius_1+radius_2 == rsuma"""
@@ -630,9 +630,9 @@ class TestFluxModelChromatic:
         assert len(captured) == 2, f"expected 2 ellc calls, got {len(captured)}"
         for kw in captured:
             rsuma = kw["radius_1"] + kw["radius_2"]
-            assert rsuma == pytest.approx(
-                TRUE_RSUMA, rel=1e-12
-            ), f"radius_1+radius_2={rsuma} != rsuma={TRUE_RSUMA}"
+            assert rsuma == pytest.approx(TRUE_RSUMA, rel=1e-12), (
+                f"radius_1+radius_2={rsuma} != rsuma={TRUE_RSUMA}"
+            )
 
     def test_each_band_uses_correct_rr_in_ellc(self, params_and_time):
         """Each instrument's ellc call receives radius_1,radius_2 matching its rr"""

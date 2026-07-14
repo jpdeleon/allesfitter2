@@ -184,9 +184,9 @@ def test_lbfgsb_improves_and_mutates_basement(datadir):
     assert res.accepted
     assert res.lnprob_opt >= res.lnprob_initial
     # BASEMENT.theta_0 has been overwritten with the optimum
-    assert not np.allclose(
-        config.BASEMENT.theta_0, theta_0_before
-    ), "theta_0 should have been mutated"
+    assert not np.allclose(config.BASEMENT.theta_0, theta_0_before), (
+        "theta_0 should have been mutated"
+    )
 
 
 def test_accepted_optimize_persists_to_params_csv(datadir):
@@ -233,9 +233,9 @@ def test_acceptance_gate_rejects_insufficient_improvement(datadir, monkeypatch):
     )
     assert res.accepted is False
     assert "improvement_threshold" in res.reject_reason
-    assert np.allclose(
-        config.BASEMENT.theta_0, theta_0_before
-    ), "theta_0 must NOT mutate when the run is rejected"
+    assert np.allclose(config.BASEMENT.theta_0, theta_0_before), (
+        "theta_0 must NOT mutate when the run is rejected"
+    )
 
 
 # ---------------------------------------------------------------------------

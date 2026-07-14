@@ -66,12 +66,12 @@ def test_ns_recovers_per_band_rr(two_band_e2e_fast_datadir, truth):
 
     # NS recovers each band's injected rr within a generous tolerance.
     # SNR floor at NOISE_SIGMA=5e-4, 80 pts → per-rr uncertainty ~few e-3.
-    assert (
-        abs(medians["b_rr_tess"] - truth["rr_tess"]) < 0.02
-    ), f"rr_tess median {medians['b_rr_tess']} drifted from truth {truth['rr_tess']}"
-    assert (
-        abs(medians["b_rr_kepler"] - truth["rr_kepler"]) < 0.02
-    ), f"rr_kepler median {medians['b_rr_kepler']} drifted from truth {truth['rr_kepler']}"
+    assert abs(medians["b_rr_tess"] - truth["rr_tess"]) < 0.02, (
+        f"rr_tess median {medians['b_rr_tess']} drifted from truth {truth['rr_tess']}"
+    )
+    assert abs(medians["b_rr_kepler"] - truth["rr_kepler"]) < 0.02, (
+        f"rr_kepler median {medians['b_rr_kepler']} drifted from truth {truth['rr_kepler']}"
+    )
 
 
 # --------------------------------------------------------------------------- #

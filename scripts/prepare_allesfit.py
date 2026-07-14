@@ -1052,9 +1052,9 @@ def main():
     if args.lc_only:
         # Minimal path: just download lightcurve
         assert args.sector is not None, "Sector required for --lc-only mode"
-        assert any(
-            [args.tic, args.toi, args.ctoi, args.name]
-        ), "One of -tic/-toi/-ctoi/-name required for --lc-only mode"
+        assert any([args.tic, args.toi, args.ctoi, args.name]), (
+            "One of -tic/-toi/-ctoi/-name required for --lc-only mode"
+        )
 
         mission = args.mission.lower()
         ticid = args.tic
