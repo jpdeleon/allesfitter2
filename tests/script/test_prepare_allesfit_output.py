@@ -117,6 +117,12 @@ def test_segment_word_per_mission_singular_and_plural():
     assert prep._segment_word(" groundbased") == "sector"
 
 
+def test_transit_requirement_settings_are_explicit_per_companion():
+    assert prep._transit_requirement_settings(["b", "c"]) == (
+        "require_b_transit,True\nrequire_c_transit,True\n"
+    )
+
+
 # ---------------------------------------------------------------------------
 # 2) default physics-informed prior bounds (substituted into params.csv)
 # ---------------------------------------------------------------------------

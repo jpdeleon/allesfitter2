@@ -109,6 +109,7 @@ from .bumps.bump import bump_model
 from .flares.aflare import aflare1
 
 # from .exoworlds_rdx.lightcurves.lightcurve_tools import calc_phase
+from .lightcurves import impact_parameters_smart
 from .lightcurves import translate_limb_darkening_from_q_to_u as q_to_u
 
 # from .lightcurves import translate_limb_darkening_from_u_to_q as u_to_q
@@ -1552,6 +1553,25 @@ def calculate_external_priors(params):
     ('none'), ('uniform', lower bound, upper bound), or ('normal', mean, std)
     """
     lnp = 0.0
+
+    #::: optionally condition each photometric companion on a primary transit
+    # ``companions_phot`` also supports non-transiting phase-curve and
+    # eclipse-only analyses, hence this is an explicit per-companion setting
+    # rather than a global default.  Reuse the model's eccentricity-aware
+    # impact-parameter calculation so the support exactly matches the light
+    # curve geometry.  A grazing transit (b == 1 + rr) remains allowed.
+    for companion in config.BASEMENT.settings["companions_phot"]:
+        if config.BASEMENT.settings.get(f"require_{companion}_transit", False):
+            rr = params[companion + "_rr"]
+            b_primary, _ = impact_parameters_smart(
+                rr=rr,
+                rsuma=params[companion + "_rsuma"],
+                cosi=params[companion + "_cosi"],
+                f_s=params[companion + "_f_s"],
+                f_c=params[companion + "_f_c"],
+            )
+            if not np.isfinite(b_primary) or abs(b_primary) > 1.0 + rr:
+                return -np.inf
 
     #::: stellar density prior
     if (config.BASEMENT.settings["use_host_density_prior"] is True) and (

@@ -31,6 +31,7 @@ full walkthrough in [notes.md](notes.md).
 | **Stellar variability / spots / flares** | GP stellar-variability term; spot and flare models | `stellar_var_*`, `spots.py`, `flares/` | — |
 | **TTVs** | Per-transit timing offsets via iterative refinement from a prior run | `fit_ttvs,True`, `b_ttv_transit_N` | [link](notes.md#using-a-previous-run-for-a-ttv-fit) |
 | **Stellar-density prior** | Break the `Rp/R★`–`a/R★`–`i` degeneracy from R★, M★ | `use_host_density_prior,True` + `params_star.csv` | — |
+| **Required transit geometry** | Condition an individual photometric companion on producing a primary transit, including eccentric and grazing geometries | `require_<companion>_transit,True` | — |
 | **Inference engines** | Nested sampling (evidence + multimodal) and MCMC | `ns_fit` / `mcmc_fit` | — |
 | **Warm-start optimizer** | Global optimizer (CMA-ES default) lands the sampler in a good basin, with safe acceptance gates and CMA warm-resume | `allesfitter.optimize(...)` | [link](notes.md#warm-starting-mcmc--ns-with-allesfitteroptimize) |
 | **Fast / binned evaluation** | Transit-window-only evaluation (`fast_fit`); load-time binning with auto supersampling | `fast_fit,True`, `binning`/`binning_<inst>` | [link](notes.md#choosing-settings--priors-by-use-case) |
@@ -45,6 +46,51 @@ chromatic); `params.csv` declares *every* free/fixed number and its prior
 density prior and post-fit derivation. Strict validators catch mismatches at
 `config.init` and name the exact key to fix. See
 [Effective use of allesfitter2](notes.md#effective-use-of-allesfitter2).
+
+### Transit geometry parameterization
+
+For a companion known to transit, set
+`require_<companion>_transit,True`. allesfitter then rejects sampled primary
+impact parameters outside the eccentricity-aware transit boundary, while
+still permitting grazing transits. This prevents the fit from escaping to a
+non-transiting geometry in which the radius ratio becomes unconstrained and a
+baseline model can absorb the transit.
+
+The current orbital parameterization samples `cosi` directly. This is
+physically natural for an isotropic orientation prior, but inefficient when
+the analysis is explicitly conditioned on a known transit: the valid region
+is a correlated wedge in `cosi`–`rsuma`–eccentricity–argument-of-periastron
+space, so broad independent bounds can produce many rejected proposals.
+Moreover, applying a hard transit cut to an independent `cosi` prior weights
+the marginal orbital prior by the geometric transit probability. Nested
+sampling evidence then includes that probability rather than being strictly
+conditional on the known transit.
+
+A preferable future sampling parameter is the normalized primary impact
+parameter
+
+```text
+beta = b_primary / (1 + rr),    0 <= beta <= 1
+cosi = beta * rsuma * (1 + e sin(omega)) / (1 - e^2)
+```
+
+A uniform `beta` prior gives a rectangular sampling domain and the usual
+uniform impact-parameter prior conditioned on a transit. Normalizing by
+`1 + rr` is preferable to sampling raw `b_primary`, whose upper boundary
+moves with the radius ratio. For a fully physical chromatic model, sampling
+`a/Rstar` alongside `beta` would also be cleaner than combining a shared
+`rsuma` with band-dependent radius ratios. Until that parameterization is
+implemented, use `require_<companion>_transit,True` and reasonably tight,
+physically informed `cosi` and `rsuma` bounds.
+
+See the executable
+[transit-geometry parameterization notebook](notebooks/transit_geometry_beta_experiment.ipynb)
+for the derivation, induced-prior comparison, an `emcee` efficiency experiment,
+and a comparison with the published Espinoza (2018) $(r_1,r_2)$ mapping.
+The companion
+[duration–orbital-scale–density notebook](notebooks/transit_duration_arstar_density_experiment.ipynb)
+derives the transformations among $T_{14}$, $a/R_\star$, and $\rho_\star$ and
+separates sampling-coordinate effects from external-prior constraints.
 
 ## Installation
 
@@ -83,7 +129,15 @@ python -m pip install ".[webgui]"
 
 </details>
 
-If you encounter a problem with ellc, use the custom installation script, which clones ellc and builds the Fortran extension modules:
+On Debian/Ubuntu Linux, the GNU Fortran runtime may be required to run `ellc`:
+
+```bash
+sudo apt-get install -y libgfortran5
+```
+
+If you encounter another problem with `ellc`, use the custom installation
+script, which clones `ellc` and builds the Fortran extension modules:
+
 ```bash
 cd allesfitter2
 bash install.sh

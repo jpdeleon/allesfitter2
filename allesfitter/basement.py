@@ -826,6 +826,13 @@ class Basement:
             "stellar_var_rv",
             "stellar_var_rv2",
         }
+        # Transit support is companion-specific.  Only accept keys for
+        # companions actually listed under companions_phot so a typo such as
+        # ``require_d_transit`` cannot silently configure a nonexistent body.
+        _raw_phot_companions = str(self.settings.get("companions_phot", "")).split()
+        valid_settings_keys.update(
+            f"require_{companion}_transit" for companion in _raw_phot_companions
+        )
         valid_settings_prefixes = _per_inst_prefixes + ("binning_", "N_bumps_")
 
         #::: Every key in settings.csv is an explicit user choice. An
@@ -882,6 +889,17 @@ class Basement:
             )
         if len(self.settings["inst_rv"]) == 0 and len(self.settings["companions_rv"]) > 0:
             raise ValueError("No RV instrument is selected, but RV companions are given.")
+
+        # A photometric companion is not necessarily known to transit (phase
+        # curves and eclipse-only models are valid), so legacy configurations
+        # default to False.  Preparation tools write the intended choice
+        # explicitly for newly generated transit fits.
+        for companion in self.settings["companions_phot"]:
+            key = f"require_{companion}_transit"
+            if key in self.settings and len(str(self.settings[key])):
+                self.settings[key] = set_bool(self.settings[key])
+            else:
+                self.settings[key] = False
 
         #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
         #::: Bandpass settings (for chromatic transit modeling)

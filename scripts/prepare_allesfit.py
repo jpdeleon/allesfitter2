@@ -143,6 +143,11 @@ def _segment_word(mission, plural=False):
     return base + ("s" if plural else "")
 
 
+def _transit_requirement_settings(companions):
+    """Return explicit per-companion transit-support settings rows."""
+    return "".join(f"require_{companion}_transit,True\n" for companion in companions)
+
+
 def _write_spoc_contamination(lc_or_collection, outpath, mission):
     """Extract CROWDSAP from SPOC headers and convert to allesfitter dilution.
 
@@ -2275,7 +2280,8 @@ fig = allesfitter.show_initial_guess(dir_path)
 # General settings,
 ###############################################################################,\n"""
 
-        text2 += f"companions_phot,{' '.join(planets[: len(target_df)])}"
+        phot_companions = planets[: len(target_df)]
+        text2 += f"companions_phot,{' '.join(phot_companions)}"
         # When --bandpass is provided, emit a real `bandpass,...` row so the
         # parser activates chromatic mode (one rr per unique bandpass). When
         # omitted, leave a commented stub so users can see where to add one.
@@ -2289,6 +2295,7 @@ inst_phot,{" ".join(fns)}
 inst_rv,
 time_format,BJD_TDB
 {_bandpass_row}
+{_transit_requirement_settings(phot_companions).rstrip()}
 #flux_min_raw,0.9
 #flux_max_raw,1.1
 ###############################################################################,

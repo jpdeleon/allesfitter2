@@ -39,6 +39,7 @@ def _emit_settings(datadir, inst_phot, bandpass=None):
     lines = [
         "#name,value",
         "companions_phot,b",
+        "require_b_transit,True",
         "companions_rv,",
         f"inst_phot,{' '.join(inst_phot)}",
         "inst_rv,",
@@ -141,6 +142,7 @@ class TestPrepareAllesfitEmission:
         assert b.settings["chromatic"] is False
         assert b.settings["bandpass"] == {}
         assert b.settings["host_ld_law_tess"] == "quad"
+        assert b.settings["require_b_transit"] is True
         # LDC must be keyed by inst (no bandpass dict).
         assert "host_ldc_q1_tess" in b.params
 
