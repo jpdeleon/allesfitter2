@@ -263,8 +263,10 @@ def update_params(theta):
             params[companion + "_rr"] = rr
         try:
             params[companion + "_radius_1"] = params[companion + "_rsuma"] / (1.0 + rr)
+            params[companion + "_radius_2"] = params[companion + "_radius_1"] * rr
         except (TypeError, KeyError, ZeroDivisionError):
             params[companion + "_radius_1"] = None
+            params[companion + "_radius_2"] = None
 
     # =========================================================================
     #::: limb darkening, per instrument (per-bandpass in chromatic mode)

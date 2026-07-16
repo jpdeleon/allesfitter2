@@ -18,6 +18,8 @@ Coverage:
      on the same fixture.
   9. Accepted optima with ``shift_epoch=True`` persist in the original
      params.csv epoch frame and reload with the correctly shifted prior.
+ 10. Baseline-first optimization masks transits, freezes science parameters,
+     restores the full data, and passes the baseline solution to the joint fit.
 """
 
 from __future__ import annotations
@@ -135,11 +137,87 @@ def _make_shift_epoch_datadir(tmp_path: Path) -> Path:
     return d
 
 
+def _add_sampled_photometric_baselines(d: Path) -> None:
+    params_path = d / "params.csv"
+    params = params_path.read_text()
+    for inst in _INSTS:
+        params += f"baseline_offset_flux_{inst},0.05,1,uniform -0.2 0.2,,,\n"
+    params_path.write_text(params)
+
+    settings_path = d / "settings.csv"
+    settings = settings_path.read_text()
+    for inst in _INSTS:
+        settings += f"baseline_flux_{inst},sample_offset\n"
+    settings_path.write_text(settings)
+
+
 @pytest.fixture
 def datadir(tmp_path):
     d = _make_datadir(tmp_path)
     config.init(str(d))
     return d
+
+
+def test_baseline_first_masks_then_restores_full_photometry(tmp_path, monkeypatch):
+    d = _make_datadir(tmp_path)
+    _add_sampled_photometric_baselines(d)
+    params_before = (d / "params.csv").read_text()
+    calls = []
+
+    def fake_run_local(method, x0, bounds, maxiter=None):
+        b = config.BASEMENT
+        calls.append(
+            {
+                "fitkeys": [str(k) for k in b.fitkeys],
+                "masked": bool(b.settings["mask_transit"]),
+                "ndata": sum(len(b.data[i]["time"]) for i in _INSTS),
+                "nfull": sum(len(b.fulldata[i]["time"]) for i in _INSTS),
+                "x0": np.asarray(x0, dtype=float).copy(),
+            }
+        )
+        # Improve the baseline stage; leave the warm-started joint stage alone.
+        if b.settings["mask_transit"]:
+            return np.zeros_like(x0, dtype=float), 1, True
+        return np.asarray(x0, dtype=float), 1, True
+
+    def fake_lnprob(theta):
+        return -float(np.sum(np.asarray(theta, dtype=float) ** 2))
+
+    monkeypatch.setitem(optimize.__globals__, "_run_local", fake_run_local)
+    monkeypatch.setitem(optimize.__globals__, "mcmc_lnprob", fake_lnprob)
+
+    res = optimize(
+        str(d),
+        method="L-BFGS-B",
+        refine=False,
+        save=False,
+        mutate_basement=False,
+        quiet=True,
+        improvement_threshold=0.0,
+        skip_bounds_check=True,
+        baseline_first=True,
+        baseline_mask_width=0.2,
+    )
+
+    assert len(calls) == 2
+    baseline_call, joint_call = calls
+    assert baseline_call["masked"] is True
+    assert baseline_call["ndata"] < baseline_call["nfull"]
+    assert baseline_call["fitkeys"]
+    assert all(k.startswith("baseline_") and "_flux_" in k for k in baseline_call["fitkeys"])
+
+    assert joint_call["masked"] is False
+    assert joint_call["ndata"] == joint_call["nfull"]
+    baseline_indices = [
+        i for i, key in enumerate(joint_call["fitkeys"]) if key.startswith("baseline_")
+    ]
+    assert baseline_indices
+    assert np.allclose(joint_call["x0"][baseline_indices], 0.0)
+
+    assert res.baseline_first is True
+    assert res.baseline_stage_accepted is True
+    assert sorted(res.baseline_stage_fitkeys) == sorted(baseline_call["fitkeys"])
+    assert (d / "params.csv").read_text() == params_before
 
 
 # ---------------------------------------------------------------------------

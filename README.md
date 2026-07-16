@@ -47,51 +47,6 @@ density prior and post-fit derivation. Strict validators catch mismatches at
 `config.init` and name the exact key to fix. See
 [Effective use of allesfitter2](notes.md#effective-use-of-allesfitter2).
 
-### Transit geometry parameterization
-
-For a companion known to transit, set
-`require_<companion>_transit,True`. allesfitter then rejects sampled primary
-impact parameters outside the eccentricity-aware transit boundary, while
-still permitting grazing transits. This prevents the fit from escaping to a
-non-transiting geometry in which the radius ratio becomes unconstrained and a
-baseline model can absorb the transit.
-
-The current orbital parameterization samples `cosi` directly. This is
-physically natural for an isotropic orientation prior, but inefficient when
-the analysis is explicitly conditioned on a known transit: the valid region
-is a correlated wedge in `cosi`–`rsuma`–eccentricity–argument-of-periastron
-space, so broad independent bounds can produce many rejected proposals.
-Moreover, applying a hard transit cut to an independent `cosi` prior weights
-the marginal orbital prior by the geometric transit probability. Nested
-sampling evidence then includes that probability rather than being strictly
-conditional on the known transit.
-
-A preferable future sampling parameter is the normalized primary impact
-parameter
-
-```text
-beta = b_primary / (1 + rr),    0 <= beta <= 1
-cosi = beta * rsuma * (1 + e sin(omega)) / (1 - e^2)
-```
-
-A uniform `beta` prior gives a rectangular sampling domain and the usual
-uniform impact-parameter prior conditioned on a transit. Normalizing by
-`1 + rr` is preferable to sampling raw `b_primary`, whose upper boundary
-moves with the radius ratio. For a fully physical chromatic model, sampling
-`a/Rstar` alongside `beta` would also be cleaner than combining a shared
-`rsuma` with band-dependent radius ratios. Until that parameterization is
-implemented, use `require_<companion>_transit,True` and reasonably tight,
-physically informed `cosi` and `rsuma` bounds.
-
-See the executable
-[transit-geometry parameterization notebook](notebooks/transit_geometry_beta_experiment.ipynb)
-for the derivation, induced-prior comparison, an `emcee` efficiency experiment,
-and a comparison with the published Espinoza (2018) $(r_1,r_2)$ mapping.
-The companion
-[duration–orbital-scale–density notebook](notebooks/transit_duration_arstar_density_experiment.ipynb)
-derives the transformations among $T_{14}$, $a/R_\star$, and $\rho_\star$ and
-separates sampling-coordinate effects from external-prior constraints.
-
 ## Installation
 
 ```bash
@@ -162,6 +117,7 @@ HD39091/
    ```python
    import allesfitter
    allesfitter.show_initial_guess('.')
+   allesfitter.optimize('.')
    allesfitter.ns_fit('.')      # nested sampling
    allesfitter.ns_output('.')   # parameter derivation
    ```
@@ -312,6 +268,51 @@ pytest tests/chromatic/ -m '' # include end-to-end NS fits (~30 s extra)
 
 `tests/chromatic/` covers scope mapping (global vs per-bandpass vs per-instrument keys), parser-error messages, LD-law defaults, likelihood assembly (monkeypatched `ellc.fluxes`), `prepare_allesfit` emission shapes, raw-flux clipping, an end-to-end two-band NS fit, and the run logger. See `docs/chromatic_validation.md` for the requirement → code → test mapping.
 
+
+### Transit geometry parameterization
+
+For a companion known to transit, set
+`require_<companion>_transit,True`. allesfitter then rejects sampled primary
+impact parameters outside the eccentricity-aware transit boundary, while
+still permitting grazing transits. This prevents the fit from escaping to a
+non-transiting geometry in which the radius ratio becomes unconstrained and a
+baseline model can absorb the transit.
+
+The current orbital parameterization samples `cosi` directly. This is
+physically natural for an isotropic orientation prior, but inefficient when
+the analysis is explicitly conditioned on a known transit: the valid region
+is a correlated wedge in `cosi`–`rsuma`–eccentricity–argument-of-periastron
+space, so broad independent bounds can produce many rejected proposals.
+Moreover, applying a hard transit cut to an independent `cosi` prior weights
+the marginal orbital prior by the geometric transit probability. Nested
+sampling evidence then includes that probability rather than being strictly
+conditional on the known transit.
+
+A preferable future sampling parameter is the normalized primary impact
+parameter
+
+```text
+beta = b_primary / (1 + rr),    0 <= beta <= 1
+cosi = beta * rsuma * (1 + e sin(omega)) / (1 - e^2)
+```
+
+A uniform `beta` prior gives a rectangular sampling domain and the usual
+uniform impact-parameter prior conditioned on a transit. Normalizing by
+`1 + rr` is preferable to sampling raw `b_primary`, whose upper boundary
+moves with the radius ratio. For a fully physical chromatic model, sampling
+`a/Rstar` alongside `beta` would also be cleaner than combining a shared
+`rsuma` with band-dependent radius ratios. Until that parameterization is
+implemented, use `require_<companion>_transit,True` and reasonably tight,
+physically informed `cosi` and `rsuma` bounds.
+
+See the executable
+[transit-geometry parameterization notebook](notebooks/transit_geometry_beta_experiment.ipynb)
+for the derivation, induced-prior comparison, an `emcee` efficiency experiment,
+and a comparison with the published Espinoza (2018) $(r_1,r_2)$ mapping.
+The companion
+[duration–orbital-scale–density notebook](notebooks/transit_duration_arstar_density_experiment.ipynb)
+derives the transformations among $T_{14}$, $a/R_\star$, and $\rho_\star$ and
+separates sampling-coordinate effects from external-prior constraints.
 
 ## Citation
 

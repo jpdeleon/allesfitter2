@@ -45,7 +45,7 @@ def _init_plotting():
 #::: allesfitter modules
 from . import config
 from ._figure_output import normalize_file_extension
-from ._output_shared import save_per_transit_plots, write_priors_latex_table
+from ._output_shared import save_per_transit_plots, save_ttv_csv, write_priors_latex_table
 from .computer import calculate_baseline, calculate_model, calculate_stellar_var
 from .general_output import (
     afplot,
@@ -975,6 +975,7 @@ def ns_output(datadir, backend=None, overwrite=None, file_extension=".pdf"):
 
     #::: plot TTV results (if wished for)
     if config.BASEMENT.settings["fit_ttvs"]:
+        save_ttv_csv(posterior_samples)
         plot_ttv_results(params_median, params_ll, params_ul, file_extension=file_extension)
 
     #::: clean up

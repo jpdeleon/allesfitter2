@@ -772,7 +772,55 @@ def catalog_info_name(df) -> Tuple:
     )
 
 
-def parse_target_name(toiid=None, ticid=None, ctoiid=None, name=None, update_db=False) -> Tuple:
+_TIC_TRANSIT_FIELDS = (
+    ("period", "Period (days)", "Porb (d): ", True),
+    ("period_err", "Period (days) err", "Porb err (d): ", False),
+    ("epoch", "Epoch (BJD)", "Epoch (BJD): ", True),
+    ("epoch_err", "Epoch (BJD) err", "Epoch err (BJD): ", False),
+    ("duration", "Duration (hours)", "Tdur (h): ", True),
+    ("duration_err", "Duration (hours) err", "Tdur err (h): ", False),
+    ("depth", "Depth (ppm)", "Depth (ppm): ", True),
+    ("depth_err", "Depth (ppm) err", "Depth err (ppm): ", False),
+)
+
+
+def _resolve_tic_transit_parameters(values=None, prompt=None):
+    """Use supplied TIC transit parameters and prompt only for missing fields.
+
+    Every supplied argument is validated before the first prompt, so a bad
+    command line fails immediately instead of asking for unrelated ephemeris
+    values first.
+    """
+    values = {} if values is None else dict(values)
+    prompt = input if prompt is None else prompt
+
+    for key, _column, _label, must_be_positive in _TIC_TRANSIT_FIELDS:
+        value = values.get(key)
+        if value is None:
+            continue
+        value = float(value)
+        if not math.isfinite(value) or value < 0 or (must_be_positive and value == 0):
+            relation = "positive" if must_be_positive else "non-negative"
+            raise ValueError(f"--{key.replace('_', '-')} must be a finite {relation} number")
+        values[key] = value
+
+    resolved = []
+    columns = []
+    for key, column, label, _must_be_positive in _TIC_TRANSIT_FIELDS:
+        value = values.get(key)
+        resolved.append(float(prompt(label)) if value is None else value)
+        columns.append(column)
+    return resolved, columns
+
+
+def parse_target_name(
+    toiid=None,
+    ticid=None,
+    ctoiid=None,
+    name=None,
+    update_db=False,
+    tic_parameters=None,
+) -> Tuple:
     if toiid:
         df = get_tois(clobber=update_db)
         logger.info("Using parameters from TOI database (use --update_db to update).")
@@ -788,28 +836,8 @@ def parse_target_name(toiid=None, ticid=None, ctoiid=None, name=None, update_db=
         id = str(ticid)
         target_name = f"TIC-{ticid}"
         source = "custom"
-        Porb = float(input("Porb (d): "))
-        Porberr = float(input("Porb err (d): "))
-        epoch = float(input("Epoch (BJD): "))
-        epocherr = float(input("Epoch err (BJD): "))
-        tdur = float(input("Tdur (h): "))
-        tdurerr = float(input("Tdur err (h): "))
-        depth = float(input("Depth (ppm): "))
-        deptherr = float(input("Depth err (ppm): "))
-        cols = [
-            "Period (days)",
-            "Period (days) err",
-            "Epoch (BJD)",
-            "Epoch (BJD) err",
-            "Duration (hours)",
-            "Duration (hours) err",
-            "Depth (ppm)",
-            "Depth (ppm) err",
-        ]
-        df = pd.DataFrame(
-            [[Porb, Porberr, epoch, epocherr, tdur, tdurerr, depth, deptherr]],
-            columns=cols,
-        )
+        transit_values, transit_columns = _resolve_tic_transit_parameters(tic_parameters)
+        df = pd.DataFrame([transit_values], columns=transit_columns)
         idx = [True]
     if ctoiid:
         logger.info("Using parameters from CTOI database (use --update_db to update).")
@@ -1075,6 +1103,17 @@ def main():
         default="default",
     )
     ap.add_argument("-dir", help="base directory", type=str, default=".")
+    for option, help_text in (
+        ("--period", "orbital period for a raw TIC target (days)"),
+        ("--period-err", "orbital-period uncertainty (days)"),
+        ("--epoch", "transit epoch for a raw TIC target (BJD)"),
+        ("--epoch-err", "transit-epoch uncertainty (days)"),
+        ("--duration", "transit duration for a raw TIC target (hours)"),
+        ("--duration-err", "transit-duration uncertainty (hours)"),
+        ("--depth", "transit depth for a raw TIC target (ppm)"),
+        ("--depth-err", "transit-depth uncertainty (ppm)"),
+    ):
+        ap.add_argument(option, help=help_text, type=float, default=None)
     ap.add_argument(
         "-i",
         "--interactive",
@@ -1525,7 +1564,15 @@ def main():
         overwrite = args.overwrite
         update_db = args.update_db
 
-        target_name, target_df, source = parse_target_name(toiid, ticid, ctoiid, name, update_db)
+        tic_parameters = {key: getattr(args, key) for key, *_rest in _TIC_TRANSIT_FIELDS}
+        target_name, target_df, source = parse_target_name(
+            toiid,
+            ticid,
+            ctoiid,
+            name,
+            update_db,
+            tic_parameters=tic_parameters,
+        )
         if ticid:
             name = target_name.replace("-", "")
         if mission == "tess":

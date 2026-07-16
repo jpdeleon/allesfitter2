@@ -69,6 +69,22 @@ def prepare(
         "--bandpass",
         help="bandpass labels for chromatic modeling",
     ),
+    period: float | None = typer.Option(None, "--period", help="orbital period (days)"),
+    period_err: float | None = typer.Option(
+        None, "--period-err", help="orbital-period uncertainty (days)"
+    ),
+    epoch: float | None = typer.Option(None, "--epoch", help="transit epoch (BJD)"),
+    epoch_err: float | None = typer.Option(
+        None, "--epoch-err", help="transit-epoch uncertainty (days)"
+    ),
+    duration: float | None = typer.Option(None, "--duration", help="transit duration (hours)"),
+    duration_err: float | None = typer.Option(
+        None, "--duration-err", help="transit-duration uncertainty (hours)"
+    ),
+    depth: float | None = typer.Option(None, "--depth", help="transit depth (ppm)"),
+    depth_err: float | None = typer.Option(
+        None, "--depth-err", help="transit-depth uncertainty (ppm)"
+    ),
 ):
     """Download TESS/Kepler/K2 data and prepare config files."""
     if not any([toi, ctoi, tic, name]):
@@ -121,6 +137,18 @@ def prepare(
         argv += ["--ttv"]
     if bandpass:
         argv += ["-bp"] + bandpass
+    for flag, value in (
+        ("--period", period),
+        ("--period-err", period_err),
+        ("--epoch", epoch),
+        ("--epoch-err", epoch_err),
+        ("--duration", duration),
+        ("--duration-err", duration_err),
+        ("--depth", depth),
+        ("--depth-err", depth_err),
+    ):
+        if value is not None:
+            argv += [flag, str(value)]
     _run_script("prepare_allesfit.py", argv)
 
 
@@ -213,6 +241,18 @@ def mcmc_fit(
     with log_run("mcmc_fit", dir_path):
         _mcmc_fit(dir_path, append=append)
 
+    from pathlib import Path
+
+    from allesfitter.results import results_directory
+
+    output_table = Path(results_directory(dir_path, "mcmc")) / "mcmc_table.csv"
+    if not output_table.exists():
+        from allesfitter.mcmc_output import mcmc_output as _mcmc_output
+
+        _mcmc_output(dir_path, overwrite=False)
+    else:
+        typer.echo("MCMC output already exists; run 'allesfitter mcmc-output' to refresh it.")
+
 
 @app.command()
 def mcmc_output(
@@ -240,6 +280,18 @@ def ns_fit(
 
     with log_run("ns_fit", dir_path):
         _ns_fit(dir_path, overwrite=overwrite)
+
+    from pathlib import Path
+
+    from allesfitter.results import results_directory
+
+    output_table = Path(results_directory(dir_path, "ns")) / "ns_table.csv"
+    if not output_table.exists():
+        from allesfitter.nested_sampling_output import ns_output as _ns_output
+
+        _ns_output(dir_path, overwrite=False)
+    else:
+        typer.echo("NS output already exists; run 'allesfitter ns-output' to refresh it.")
 
 
 @app.command()

@@ -51,6 +51,16 @@ def _prepared_params():
     return computer.update_params(np.array(theta, dtype=float))
 
 
+def test_update_params_stores_both_derived_radii(two_band_two_inst_datadir, truth):
+    """The TTV piecewise model reads both legacy scalar radius keys directly."""
+    config.init(str(two_band_two_inst_datadir), quiet=True)
+
+    params = _prepared_params()
+
+    assert params["b_radius_1"] + params["b_radius_2"] == pytest.approx(truth["rsuma"])
+    assert params["b_radius_2"] / params["b_radius_1"] == pytest.approx(truth["rr_tess"])
+
+
 # --------------------------------------------------------------------------- #
 # Per-band rr
 # --------------------------------------------------------------------------- #

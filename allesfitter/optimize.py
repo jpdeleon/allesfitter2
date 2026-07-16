@@ -24,7 +24,9 @@ beat the user's hand-tuned ``theta_0``, BASEMENT is left untouched.
 import json
 import os
 import pickle
+import shutil
 import sys
+import tempfile
 import warnings
 from dataclasses import asdict, dataclass, field
 from time import time as _now
@@ -98,6 +100,11 @@ class OptimizeResult:
     refine: bool = False
     bounds: list = field(default_factory=list)
     resumed_from_pickle: bool = False
+    baseline_first: bool = False
+    baseline_stage_accepted: bool = False
+    baseline_stage_fitkeys: list = field(default_factory=list)
+    baseline_stage_nfev: int = 0
+    baseline_stage_wallclock_s: float = 0.0
 
 
 def _extract_bounds(basement, normal_sigma_clip: float = 5.0):
@@ -375,6 +382,168 @@ def _theta_in_params_frame(basement, theta):
     return theta_params
 
 
+def _is_photometric_baseline_key(key: Any) -> bool:
+    """Return whether *key* is a sampled photometric-baseline parameter."""
+    key = str(key)
+    return key.startswith("baseline_") and "_flux_" in key
+
+
+def _set_setting(path: str, name: str, value: Any) -> None:
+    """Set one row in a two-column settings.csv, appending it if absent."""
+    with open(path, encoding="utf-8") as f:
+        lines = f.readlines()
+
+    replacement = f"{name},{value}\n"
+    found = False
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.split(",", 1)[0].strip() == name:
+            lines[i] = replacement
+            found = True
+            break
+    if not found:
+        if lines and not lines[-1].endswith("\n"):
+            lines[-1] += "\n"
+        lines.append(replacement)
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.writelines(lines)
+
+
+def _freeze_nonbaseline_params(path: str) -> None:
+    """Freeze every fitted CSV row except photometric baseline parameters.
+
+    Existing ``fit=0`` baseline rows remain fixed. Parameters synthesized by
+    the loader (currently ``sample_linear_multi`` weights) are unaffected and
+    are therefore still available to the baseline-only fit.
+    """
+    with open(path, encoding="utf-8") as f:
+        lines = f.readlines()
+
+    out = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            out.append(line)
+            continue
+        parts = line.split(",", 3)
+        if len(parts) >= 3 and not _is_photometric_baseline_key(parts[0].strip()):
+            parts[2] = "0"
+            line = ",".join(parts)
+        out.append(line)
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.writelines(out)
+
+
+def _make_baseline_stage_datadir(datadir, stage_dir, basement, mask_width=None) -> None:
+    """Build an isolated datadir for the out-of-transit baseline fit.
+
+    Root-level inputs are symlinked where possible so large light curves are
+    not copied. ``settings.csv`` and ``params.csv`` are real copies because the
+    stage changes them. The caller's current in-memory theta is written into
+    the copied params file before non-baseline rows are frozen.
+    """
+    for entry in os.scandir(datadir):
+        if not entry.is_file():
+            continue
+        dst = os.path.join(stage_dir, entry.name)
+        if entry.name in ("settings.csv", "params.csv"):
+            shutil.copy2(entry.path, dst)
+            continue
+        try:
+            os.symlink(os.path.abspath(entry.path), dst)
+        except OSError:
+            shutil.copy2(entry.path, dst)
+
+    params_path = os.path.join(stage_dir, "params.csv")
+    theta_params = _theta_in_params_frame(basement, basement.theta_0)
+    _write_theta_to_params_csv(stage_dir, basement.fitkeys, theta_params)
+    _freeze_nonbaseline_params(params_path)
+
+    settings_path = os.path.join(stage_dir, "settings.csv")
+    _set_setting(settings_path, "fast_fit", "False")
+    _set_setting(settings_path, "mask_transit", "True")
+    if mask_width is not None:
+        if not np.isfinite(mask_width) or float(mask_width) <= 0:
+            raise ValueError("optimize: baseline_mask_width must be a positive finite number")
+        _set_setting(settings_path, "fast_fit_width", repr(float(mask_width)))
+
+
+def _baseline_warm_start(
+    datadir,
+    basement,
+    *,
+    method,
+    refine,
+    n_restarts,
+    sigma0,
+    maxfevals,
+    seed,
+    consistency_threshold,
+    skip_bounds_check,
+    workers,
+    quiet,
+    verbose,
+    mask_width,
+):
+    """Fit baseline parameters on OOT data and restore the full Basement.
+
+    Returns the baseline-stage result. Its accepted values are injected into
+    the restored full-data ``theta_0`` in memory; no original input file is
+    changed here. The public optimize call remains responsible for persistence
+    after its full-data acceptance gates pass.
+    """
+    theta_before = {str(k): float(v) for k, v in zip(basement.fitkeys, basement.theta_0)}
+    stage_result = None
+    try:
+        with tempfile.TemporaryDirectory(prefix="allesfitter-baseline-") as stage_dir:
+            _make_baseline_stage_datadir(datadir, stage_dir, basement, mask_width=mask_width)
+            stage_result = optimize(
+                stage_dir,
+                method=method,
+                refine=refine,
+                n_restarts=n_restarts,
+                sigma0=sigma0,
+                maxfevals=maxfevals,
+                seed=seed,
+                save=False,
+                mutate_basement=False,
+                improvement_threshold=0.0,
+                consistency_threshold=consistency_threshold,
+                skip_bounds_check=skip_bounds_check,
+                workers=workers,
+                quiet=quiet,
+                verbose=verbose,
+                resume=False,
+                baseline_first=False,
+            )
+    finally:
+        # The nested optimize points config.BASEMENT at the temporary stage.
+        # Always restore the caller's full-data configuration, even if the
+        # stage raises, and preserve any in-memory starting values it supplied.
+        config.init(datadir)
+        restored = config.BASEMENT
+        restored.theta_0 = np.asarray(
+            [theta_before.get(str(k), v) for k, v in zip(restored.fitkeys, restored.theta_0)],
+            dtype=float,
+        )
+
+    if stage_result is not None and stage_result.accepted:
+        baseline_values = {
+            str(k): float(v)
+            for k, v in zip(stage_result.fitkeys, stage_result.theta_opt)
+            if _is_photometric_baseline_key(k)
+        }
+        restored.theta_0 = np.asarray(
+            [baseline_values.get(str(k), v) for k, v in zip(restored.fitkeys, restored.theta_0)],
+            dtype=float,
+        )
+    return stage_result
+
+
 def _refine(theta, bounds, maxiter=30):
     """L-BFGS-B finite-diff refinement within `maxiter` steps. Catches and
     returns the input theta unchanged if the refinement fails."""
@@ -395,7 +564,7 @@ def _refine(theta, bounds, maxiter=30):
 
 def optimize(
     datadir: str,
-    method: str = "cmaes",
+    method: str = "differential_evolution",
     refine: bool = True,
     n_restarts: int = 1,
     sigma0: float = None,
@@ -410,9 +579,17 @@ def optimize(
     quiet: bool = False,
     verbose: bool = False,
     resume: bool = False,
+    baseline_first: bool = True,
+    baseline_mask_width: float = None,
     **_extra_kwargs,
 ) -> OptimizeResult:
     """Find a posterior maximum and (optionally) push it into BASEMENT.theta_0.
+
+    By default, sampled photometric baseline parameters are initialized in a
+    separate out-of-transit fit before the joint fit. The stage masks every
+    primary transit (and secondary eclipse when enabled), freezes all science
+    parameters, and changes no user file. The accepted baseline point then
+    warm-starts the regular full-data optimization below.
 
     Parameters
     ----------
@@ -420,12 +597,21 @@ def optimize(
         Path passed to ``config.init(datadir)`` if BASEMENT is not already
         populated.
     method : str
-        One of ``'cmaes'`` (default, requires ``pip install cma``),
-        ``'dual_annealing'``, ``'differential_evolution'``, ``'L-BFGS-B'``,
+        One of ``'differential_evolution'`` (default), ``'cmaes'`` (requires
+        ``pip install cma``), ``'dual_annealing'``, ``'L-BFGS-B'``,
         ``'Powell'``, ``'TNC'``, ``'SLSQP'``, ``'trust-constr'``.
     refine : bool
         If True and ``method`` is global, run a short L-BFGS-B from the
         global optimum to refine within the basin.
+    baseline_first : bool
+        If True (default), first optimize sampled ``baseline_*_flux_*``
+        parameters using only out-of-transit photometry. This stage is skipped
+        when no such free parameters exist, when ``mask_transit=True`` already,
+        or when resuming a saved CMA-ES trajectory.
+    baseline_mask_width : float
+        Full transit-mask width in days for the baseline-only stage. ``None``
+        reuses ``fast_fit_width`` from settings.csv. A value around 1.2--1.5
+        times the expected T14 leaves a useful safety margin.
     n_restarts : int
         Number of optimizer runs (1 = single run from theta_0; >1 adds
         Latin-hypercube draws inside ``bounds``). Best of N is kept.
@@ -480,6 +666,8 @@ def optimize(
                 "datadir",
                 "method",
                 "refine",
+                "baseline_first",
+                "baseline_mask_width",
                 "n_restarts",
                 "sigma0",
                 "maxfevals",
@@ -515,6 +703,58 @@ def optimize(
     ) != os.path.abspath(datadir):
         config.init(datadir)
     b = config.BASEMENT
+
+    baseline_result = None
+    baseline_keys = [str(k) for k in b.fitkeys if _is_photometric_baseline_key(k)]
+    if (
+        baseline_first
+        and baseline_keys
+        and not b.settings.get("mask_transit", False)
+        and not resume
+    ):
+        logprint(
+            "optimize[baseline-first]  masking transits and fitting {} baseline parameter(s): {}".format(
+                len(baseline_keys), ", ".join(baseline_keys)
+            ),
+            quiet=quiet,
+        )
+        baseline_result = _baseline_warm_start(
+            datadir,
+            b,
+            method=method,
+            refine=refine,
+            n_restarts=n_restarts,
+            sigma0=sigma0,
+            maxfevals=maxfevals,
+            seed=seed,
+            consistency_threshold=consistency_threshold,
+            skip_bounds_check=skip_bounds_check,
+            workers=workers,
+            quiet=quiet,
+            verbose=verbose,
+            mask_width=baseline_mask_width,
+        )
+        b = config.BASEMENT
+        state = (
+            "accepted"
+            if baseline_result.accepted
+            else ("rejected: " + baseline_result.reject_reason)
+        )
+        logprint(
+            f"optimize[baseline-first]  stage {state}; restoring all transit points for the joint fit",
+            quiet=quiet,
+        )
+    elif baseline_first and baseline_keys and b.settings.get("mask_transit", False):
+        logprint(
+            "optimize[baseline-first]  skipped because settings.csv already has mask_transit=True",
+            quiet=quiet,
+        )
+    elif baseline_first and baseline_keys and resume:
+        logprint(
+            "optimize[baseline-first]  skipped because resume=True continues the saved CMA-ES state",
+            quiet=quiet,
+        )
+
     theta_0 = np.array(b.theta_0, dtype=float)
     bounds = _extract_bounds(b)
     if improvement_threshold is None:
@@ -676,6 +916,11 @@ def optimize(
         refine=bool(refine and method in _GLOBAL_METHODS),
         bounds=[list(bb) for bb in bounds],
         resumed_from_pickle=bool(resumed_from_pickle),
+        baseline_first=bool(baseline_result is not None),
+        baseline_stage_accepted=bool(baseline_result is not None and baseline_result.accepted),
+        baseline_stage_fitkeys=(list(baseline_result.fitkeys) if baseline_result else []),
+        baseline_stage_nfev=(int(baseline_result.nfev) if baseline_result else 0),
+        baseline_stage_wallclock_s=(float(baseline_result.wallclock_s) if baseline_result else 0.0),
     )
 
     if save:

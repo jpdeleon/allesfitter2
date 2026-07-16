@@ -123,6 +123,62 @@ def test_transit_requirement_settings_are_explicit_per_companion():
     )
 
 
+def test_tic_transit_arguments_avoid_prompts():
+    supplied = {
+        "period": 3.5,
+        "period_err": 0.01,
+        "epoch": 2459000.25,
+        "epoch_err": 0.02,
+        "duration": 2.4,
+        "duration_err": 0.1,
+        "depth": 1500,
+        "depth_err": 100,
+    }
+
+    def unexpected_prompt(_label):
+        raise AssertionError("complete command-line arguments must not prompt")
+
+    values, columns = prep._resolve_tic_transit_parameters(supplied, prompt=unexpected_prompt)
+
+    assert values == [3.5, 0.01, 2459000.25, 0.02, 2.4, 0.1, 1500.0, 100.0]
+    assert columns == [field[1] for field in prep._TIC_TRANSIT_FIELDS]
+
+
+def test_tic_transit_arguments_prompt_only_for_missing_values():
+    prompts = []
+
+    def prompt(label):
+        prompts.append(label)
+        return "0.1"
+
+    supplied = {
+        "period": 3.5,
+        "epoch": 2459000.25,
+        "duration": 2.4,
+        "depth": 1500,
+    }
+    values, _columns = prep._resolve_tic_transit_parameters(supplied, prompt=prompt)
+
+    assert values == [3.5, 0.1, 2459000.25, 0.1, 2.4, 0.1, 1500.0, 0.1]
+    assert prompts == [
+        "Porb err (d): ",
+        "Epoch err (BJD): ",
+        "Tdur err (h): ",
+        "Depth err (ppm): ",
+    ]
+
+
+def test_tic_transit_arguments_are_all_validated_before_prompting():
+    def unexpected_prompt(_label):
+        raise AssertionError("invalid supplied arguments must fail before prompting")
+
+    with pytest.raises(ValueError, match="--epoch must be a finite positive number"):
+        prep._resolve_tic_transit_parameters(
+            {"period": 3.5, "epoch": -1},
+            prompt=unexpected_prompt,
+        )
+
+
 # ---------------------------------------------------------------------------
 # 2) default physics-informed prior bounds (substituted into params.csv)
 # ---------------------------------------------------------------------------

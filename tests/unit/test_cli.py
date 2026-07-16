@@ -1,6 +1,64 @@
 from typer.testing import CliRunner
 
+import allesfitter.cli as cli_module
 from allesfitter.cli import app
+
+
+def test_prepare_forwards_tic_transit_arguments_before_running_script(monkeypatch):
+    received = {}
+    monkeypatch.setattr(
+        cli_module,
+        "_run_script",
+        lambda script_name, argv: received.update(script_name=script_name, argv=argv),
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "prepare",
+            "-tic",
+            "123",
+            "-s",
+            "1",
+            "--period",
+            "3.5",
+            "--period-err",
+            "0.01",
+            "--epoch",
+            "2459000.25",
+            "--epoch-err",
+            "0.02",
+            "--duration",
+            "2.4",
+            "--duration-err",
+            "0.1",
+            "--depth",
+            "1500",
+            "--depth-err",
+            "100",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert received["script_name"] == "prepare_allesfit.py"
+    assert received["argv"][-16:] == [
+        "--period",
+        "3.5",
+        "--period-err",
+        "0.01",
+        "--epoch",
+        "2459000.25",
+        "--epoch-err",
+        "0.02",
+        "--duration",
+        "2.4",
+        "--duration-err",
+        "0.1",
+        "--depth",
+        "1500.0",
+        "--depth-err",
+        "100.0",
+    ]
 
 
 def test_show_params_labels_fit_status_column(tmp_path):
