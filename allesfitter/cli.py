@@ -30,43 +30,6 @@ def _main(
 
 
 @app.command()
-def gui(
-    runs_root: str = typer.Option("webgui_runs", help="directory for per-run datadirs"),
-    db: str | None = typer.Option(None, help="SQLite path (default: <runs-root>/webgui.sqlite3)"),
-    toi_csv: str | None = typer.Option(None, help="local ExoFOP TOI table for auto-fill"),
-    host: str = typer.Option("127.0.0.1"),
-    port: int = typer.Option(5100),
-    no_network: bool = typer.Option(False, "--no-network", help="disable NASA Archive lookups"),
-    no_kill_existing: bool = typer.Option(
-        False,
-        "--no-kill-existing",
-        help="do not stop a process already listening on --port before starting",
-    ),
-    reload: bool = typer.Option(
-        False, "--reload", help="reload the development server when source files change"
-    ),
-):
-    """Serve the allesfitter web GUI."""
-    from allesfitter.webgui.cli import main as gui_main
-
-    argv = []
-    argv.append(f"--runs-root={runs_root}")
-    if db:
-        argv.append(f"--db={db}")
-    if toi_csv:
-        argv.append(f"--toi-csv={toi_csv}")
-    argv.append(f"--host={host}")
-    argv.append(f"--port={port}")
-    if no_network:
-        argv.append("--no-network")
-    if no_kill_existing:
-        argv.append("--no-kill-existing")
-    if reload:
-        argv.append("--reload")
-    gui_main(argv)
-
-
-@app.command()
 def prepare(
     toi: int | None = typer.Option(None, "-toi", help="TOI ID"),
     ctoi: int | None = typer.Option(None, "-ctoi", help="CTOI ID"),
