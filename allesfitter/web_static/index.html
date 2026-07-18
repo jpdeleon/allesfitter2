@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>allesfitter workbench</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="target-rail">
+      <header class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <div><strong>allesfitter</strong><span>research workbench</span></div>
+      </header>
+      <div class="rail-actions">
+        <label class="search"><span>⌕</span><input id="target-search" placeholder="Find target" aria-label="Find target"></label>
+        <button class="icon-button" id="new-target-button" title="Add target" aria-label="Add target">+</button>
+      </div>
+      <div class="section-label">Targets <span id="target-count">0</span></div>
+      <nav id="target-list" class="target-list" aria-label="Targets"></nav>
+      <div class="rail-foot">
+        <span class="connection-dot"></span>
+        <span>Local session</span>
+        <kbd>SSH</kbd>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <header class="workspace-head">
+        <div>
+          <p id="target-identifier" class="eyebrow">No target selected</p>
+          <h1 id="target-title">Start with a target</h1>
+        </div>
+        <div class="head-meta">
+          <span><small>Data directory</small><code id="target-path">—</code></span>
+          <button class="primary" id="prepare-top">Prepare data</button>
+        </div>
+      </header>
+
+      <section class="observation-strip" aria-label="Observed light curve">
+        <div class="plot-key"><span class="key-observed">observed flux</span><span class="key-model">reference</span></div>
+        <svg id="lightcurve" viewBox="0 0 1200 210" preserveAspectRatio="none" role="img" aria-label="Target light curve">
+          <g class="grid"></g><path class="reference-line" d="M0 105 H1200"></path><g class="points"></g>
+        </svg>
+        <div class="plot-empty" id="plot-empty"><strong>Awaiting observations</strong><span>Prepare the target to place its light curve here.</span></div>
+        <div class="plot-axis"><span id="axis-start">time</span><span>relative flux</span><span id="axis-end">BJD</span></div>
+      </section>
+
+      <nav class="workflow-tabs" aria-label="Target workflow">
+        <button data-tab="prepare" class="active"><span>Prepare</span><small>data + configuration</small></button>
+        <button data-tab="validate"><span>Validate</span><small>inspect generated files</small></button>
+        <button data-tab="run"><span>Run</span><small>fit + process</small></button>
+        <button data-tab="results"><span>Results</span><small>artifacts + figures</small></button>
+      </nav>
+
+      <section id="tab-prepare" class="tab-panel active">
+        <div class="panel-heading"><div><p class="eyebrow">Acquisition</p><h2>Prepare observations</h2></div><p>Build the exact non-interactive command before starting it.</p></div>
+        <form id="prepare-form" class="science-form">
+          <fieldset><legend>Observation window</legend>
+            <label>Mission<select name="mission"><option value="tess">TESS</option><option value="k2">K2</option><option value="kepler">Kepler</option></select></label>
+            <label>Window type<select name="window_type"><option value="sector">Sector</option><option value="campaign">Campaign</option><option value="quarter">Quarter</option></select></label>
+            <label class="wide">Sector, campaign, or quarter<input name="window_value" value="-1" placeholder="-1, all, or 12 13"><small>Separate multiple TESS sectors with spaces.</small></label>
+          </fieldset>
+          <fieldset><legend>Light curve</legend>
+            <label>Pipeline<select name="pipeline"><option>spoc</option><option>qlp</option><option>k2</option><option>everest</option><option>k2sff</option><option>kepler</option></select></label>
+            <label>Flux product<select name="lc_type"><option value="pdcsap">PDCSAP</option><option value="sap">SAP</option></select></label>
+            <label>Quality mask<select name="quality"><option>default</option><option>none</option><option>hard</option><option>hardest</option></select></label>
+            <label>Exposure time <span class="unit">s</span><input name="exptime" type="number" step="any" placeholder="Auto"></label>
+            <label>Sigma clipping<input name="sigma" type="number" step="any" placeholder="Off"></label>
+            <label>Instrument filenames<input name="filename" placeholder="tess"></label>
+            <label class="wide">Bandpasses<input name="bandpass" placeholder="Optional; one per filename"><small>Repeat a label to share a band across instruments.</small></label>
+          </fieldset>
+          <details class="advanced"><summary>Catalog overrides and advanced preparation</summary>
+            <fieldset><legend>Transit ephemeris for raw TIC targets</legend>
+              <label>Period <span class="unit">days</span><input name="period" type="number" step="any"></label><label>Period error<input name="period_err" type="number" step="any"></label>
+              <label>Epoch <span class="unit">BJD</span><input name="epoch" type="number" step="any"></label><label>Epoch error<input name="epoch_err" type="number" step="any"></label>
+              <label>Duration <span class="unit">hours</span><input name="duration" type="number" step="any"></label><label>Duration error<input name="duration_err" type="number" step="any"></label>
+              <label>Depth <span class="unit">ppm</span><input name="depth" type="number" step="any"></label><label>Depth error<input name="depth_err" type="number" step="any"></label>
+            </fieldset>
+            <fieldset><legend>File and catalog controls</legend>
+              <label class="wide">Previous results directory<input name="results_dir" placeholder="Optional path for TTV updates"></label>
+              <label class="check"><input name="overwrite" type="checkbox"><span>Overwrite generated files</span></label>
+              <label class="check"><input name="update_db" type="checkbox"><span>Refresh catalog databases</span></label>
+              <label class="check"><input name="lc_only" type="checkbox"><span>Download light curve only</span></label>
+              <label class="check"><input name="ttv" type="checkbox"><span>Emit per-transit TTV parameters</span></label>
+              <label class="check"><input name="debug" type="checkbox"><span>Detailed diagnostic output</span></label>
+              <label class="check"><input name="interactive" type="checkbox"><span>Manual missing values (not recommended for jobs)</span></label>
+            </fieldset>
+          </details>
+          <div class="form-action"><div><span class="command-label">Job</span><code id="prepare-command">allesfitter prepare …</code></div><button class="primary" type="submit">Start preparation</button></div>
+        </form>
+      </section>
+
+      <section id="tab-validate" class="tab-panel">
+        <div class="panel-heading"><div><p class="eyebrow">Configuration</p><h2>Inspect generated files</h2></div><p>Changes are saved directly to the target revision on disk.</p></div>
+        <div class="editor-tabs"><button data-file="params.csv" class="active">params.csv</button><button data-file="settings.csv">settings.csv</button><button data-file="params_star.csv">params_star.csv</button></div>
+        <div class="editor-wrap"><div class="editor-gutter" id="editor-lines">1</div><textarea id="file-editor" spellcheck="false" aria-label="Configuration file"></textarea></div>
+        <div class="editor-actions"><span id="editor-state">Select a prepared target.</span><button id="save-file" class="secondary">Save changes</button></div>
+      </section>
+
+      <section id="tab-run" class="tab-panel">
+        <div class="panel-heading"><div><p class="eyebrow">Inference</p><h2>Launch a simple job</h2></div><p>Every command, log, exit status, and timestamp remains in history.</p></div>
+        <form id="run-form" class="run-builder">
+          <label>Step<select name="kind"><option value="show-initial-guess">Show initial guess</option><option value="optimize">Optimize</option><option value="mcmc-fit">MCMC fit</option><option value="mcmc-output">MCMC output</option><option value="ns-fit">Nested-sampling fit</option><option value="ns-output">Nested-sampling output</option></select></label>
+          <label>Optimizer method<input name="method" value="cmaes"></label><label>Restarts<input name="restarts" type="number" min="1" value="1"></label><label>Seed<input name="seed" type="number" value="42"></label>
+          <label>Figure format<select name="file_extension"><option>.pdf</option><option>.png</option><option>.svg</option><option>.jpg</option></select></label>
+          <label class="check"><input name="append" type="checkbox"><span>Append existing chain</span></label><label class="check"><input name="overwrite" type="checkbox"><span>Overwrite output</span></label>
+          <button class="primary" type="submit">Launch job</button>
+        </form>
+        <div class="subheading"><h3>Target history</h3><span id="history-summary">No jobs</span></div>
+        <div id="job-history" class="job-history"></div>
+      </section>
+
+      <section id="tab-results" class="tab-panel">
+        <div class="panel-heading"><div><p class="eyebrow">Evidence</p><h2>Results and artifacts</h2></div><button id="refresh-artifacts" class="secondary">Refresh</button></div>
+        <div id="figure-gallery" class="figure-gallery"></div><div id="artifact-list" class="artifact-list"></div>
+      </section>
+    </main>
+
+    <aside class="job-inspector">
+      <div class="inspector-head"><p class="eyebrow">Job inspector</p><span id="job-status" class="status idle">idle</span></div>
+      <h2 id="job-title">No active job</h2>
+      <dl class="job-facts"><div><dt>Created</dt><dd id="job-created">—</dd></div><div><dt>Elapsed</dt><dd id="job-elapsed">—</dd></div><div><dt>Process</dt><dd id="job-pid">—</dd></div><div><dt>Exit code</dt><dd id="job-exit">—</dd></div></dl>
+      <div class="command-block"><span>Command</span><code id="job-command">Select a job to inspect its command.</code></div>
+      <div class="log-head"><span>Live output</span><button id="copy-log">Copy</button></div><pre id="job-log">Job output will appear here.</pre>
+      <button id="cancel-job" class="danger" disabled>Cancel job</button>
+    </aside>
+  </div>
+
+  <dialog id="target-dialog">
+    <form id="target-form" method="dialog">
+      <div class="dialog-head"><div><p class="eyebrow">New object</p><h2>Add a target</h2></div><button value="cancel" class="close" aria-label="Close">×</button></div>
+      <p>Choose the catalog identity used by the preparation script.</p>
+      <label>Display name<input name="name" required placeholder="TOI-1097"></label>
+      <label>Identifier type<select name="identifier_type"><option value="toi">TOI</option><option value="tic">TIC</option><option value="ctoi">CTOI</option><option value="name">NExSci name</option></select></label>
+      <label>Identifier<input name="identifier_value" required placeholder="1097"></label>
+      <div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button type="submit" value="default" class="primary">Add target</button></div>
+    </form>
+  </dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="/assets/app.js"></script>
+</body>
+</html>
