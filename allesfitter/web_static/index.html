@@ -34,6 +34,7 @@
         </div>
         <div class="head-meta">
           <span><small>Data directory</small><code id="target-path">—</code></span>
+          <button class="danger" id="delete-target">Delete</button>
           <button class="primary" id="prepare-top">Prepare data</button>
         </div>
       </header>
@@ -132,9 +133,8 @@
     <form id="target-form" method="dialog">
       <div class="dialog-head"><div><p class="eyebrow">New object</p><h2>Add a target</h2></div><button value="cancel" class="close" aria-label="Close">×</button></div>
       <p>Choose the catalog identity used by the preparation script.</p>
-      <label>Display name<input name="name" required placeholder="TOI-1097"></label>
-      <label>Identifier type<select name="identifier_type"><option value="toi">TOI</option><option value="tic">TIC</option><option value="ctoi">CTOI</option><option value="name">NExSci name</option></select></label>
-      <label>Identifier<input name="identifier_value" required placeholder="1097"></label>
+      <label>Catalog source<select name="identifier_type"><option value="toi">TOI</option><option value="tic">TIC</option><option value="ctoi">CTOI</option><option value="name">NExSci name</option></select></label>
+      <label>Name<input name="identifier_value" required placeholder="1097"></label>
       <div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button type="submit" value="default" class="primary">Add target</button></div>
     </form>
   </dialog>

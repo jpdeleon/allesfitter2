@@ -47,6 +47,16 @@ def _slug(value: str) -> str:
     return value or "target"
 
 
+_PREFIXES: dict[str, str] = {"toi": "TOI-", "tic": "TIC-", "ctoi": "CTOI-"}
+
+
+def _strip_catalog_prefix(identifier_type: str, raw: str) -> str:
+    prefix = _PREFIXES.get(identifier_type)
+    if prefix and raw.strip().upper().startswith(prefix):
+        return raw.strip()[len(prefix) :]
+    return raw.strip()
+
+
 def canonical_target_name(identifier_type: str, identifier_value: str, display_name: str) -> str:
     if identifier_type == "toi":
         return f"TOI-{str(identifier_value).zfill(4)}"
@@ -155,6 +165,11 @@ class WorkbenchDB:
         if item is None:
             raise KeyError("Target not found")
         return item
+
+    def delete_target(self, target_id: int) -> None:
+        with self.connect() as con:
+            con.execute("PRAGMA foreign_keys = ON")
+            con.execute("DELETE FROM targets WHERE id=?", (target_id,))
 
     def list_targets(self) -> list[dict[str, Any]]:
         with self.connect() as con:
@@ -393,10 +408,12 @@ class Workbench:
         self.runner = JobRunner(self.db, self.workspace)
 
     def create_target(self, payload: dict[str, Any]) -> dict[str, Any]:
-        identifier_type = str(payload.get("identifier_type", ""))
-        identifier_value = str(payload.get("identifier_value", "")).strip()
-        name = str(payload.get("name") or identifier_value).strip()
-        canonical = canonical_target_name(identifier_type, identifier_value, name)
+        identifier_type = str(payload.get("identifier_type", "")).strip().lower()
+        identifier_value = _strip_catalog_prefix(
+            identifier_type, str(payload.get("identifier_value", ""))
+        )
+        canonical = canonical_target_name(identifier_type, identifier_value, identifier_value)
+        name = str(payload.get("name") or canonical).strip()
         return self.db.create_target(
             name, identifier_type, identifier_value, self.workspace / _slug(canonical)
         )
@@ -416,6 +433,15 @@ class Workbench:
             con.execute("UPDATE jobs SET log_path=? WHERE id=?", (str(log_path), placeholder["id"]))
         self.runner.start(placeholder["id"])
         return self.db.get_job(placeholder["id"])
+
+    def delete_target(self, target_id: int) -> None:
+        target = self.db.get_target(target_id)
+        data_dir = Path(target["data_dir"])
+        if data_dir.exists():
+            import shutil
+
+            shutil.rmtree(data_dir)
+        self.db.delete_target(target_id)
 
     def state(self) -> dict[str, Any]:
         return {"targets": self.db.list_targets(), "jobs": self.db.list_jobs()}
@@ -579,6 +605,18 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
                 job_id = int(self.path.split("/")[3])
                 self.server.app.runner.cancel(job_id)
                 self._json(self.server.app.db.get_job(job_id))
+            else:
+                self.send_error(HTTPStatus.NOT_FOUND)
+        except (KeyError, ValueError, OSError) as exc:
+            self._error(exc, 404 if isinstance(exc, KeyError) else 400)
+
+    def do_DELETE(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+        try:
+            parts = self.path.split("/")
+            if len(parts) == 4 and parts[1] == "api" and parts[2] == "targets":
+                target_id = int(parts[3])
+                self.server.app.delete_target(target_id)
+                self._json({"deleted": target_id})
             else:
                 self.send_error(HTTPStatus.NOT_FOUND)
         except (KeyError, ValueError, OSError) as exc:
