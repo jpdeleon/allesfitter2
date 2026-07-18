@@ -1005,15 +1005,15 @@ def get_ns_posterior_samples(datadir, Nsamples=None, as_type="dic"):
     config.init(datadir)
     from .results import use_results_directory
 
-    use_results_directory(config.BASEMENT, "ns")
+    outdir = use_results_directory(config.BASEMENT, "ns")
 
     try:
-        f = gzip.GzipFile(os.path.join(datadir, "results", "save_ns.pickle.gz"), "rb")
+        f = gzip.GzipFile(os.path.join(outdir, "save_ns.pickle.gz"), "rb")
         results = pickle.load(f)
         f.close()
 
     except Exception:
-        with open(os.path.join(datadir, "results", "save_ns.pickle"), "rb") as f:
+        with open(os.path.join(outdir, "save_ns.pickle"), "rb") as f:
             results = pickle.load(f)
 
     return draw_ns_posterior_samples(results, Nsamples=Nsamples, as_type=as_type)

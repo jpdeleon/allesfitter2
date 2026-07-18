@@ -2,6 +2,18 @@ import numpy as np
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def isolate_results_dir(tmp_path_factory, monkeypatch):
+    """Redirect the results output root to a temp dir for every test.
+
+    Keeps fits and basement output out of the real ``~/ql/allesfitter`` default.
+    Tests that assert the default explicitly can ``monkeypatch.delenv`` it.
+    """
+    base = tmp_path_factory.mktemp("allesfitter_results")
+    monkeypatch.setenv("ALLESFITTER_RESULTS_DIR", str(base))
+    return base
+
+
 @pytest.fixture
 def sample_time():
     return np.linspace(0, 10, 100)

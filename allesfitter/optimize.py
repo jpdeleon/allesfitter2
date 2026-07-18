@@ -761,7 +761,11 @@ def optimize(
         improvement_threshold = 0.5 * b.ndim
 
     # Compute pickle path early so we can validate on resume and write on save.
-    outdir = getattr(b, "outdir", os.path.join(datadir, "results"))
+    outdir = getattr(b, "outdir", None)
+    if outdir is None:
+        from .results import target_output_directory
+
+        outdir = str(target_output_directory(datadir) / "results")
     cma_state_path = os.path.join(outdir, _CMA_STATE_FILENAME)
 
     if resume:

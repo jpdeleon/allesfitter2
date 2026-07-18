@@ -464,7 +464,7 @@ def test_save_writes_json(datadir):
         quiet=True,
         improvement_threshold=0.0,
     )
-    out = datadir / "results" / "optimize_save.json"
+    out = Path(config.BASEMENT.outdir) / "optimize_save.json"
     assert out.exists()
     payload = json.loads(out.read_text())
     for key in (
@@ -543,7 +543,7 @@ def test_cmaes_improves(datadir):
 
 def test_cmaes_saves_state_on_every_call(datadir):
     pytest.importorskip("cma")
-    pkl = datadir / "results" / "optimize_cma_state.pkl"
+    pkl = Path(config.BASEMENT.outdir) / "optimize_cma_state.pkl"
     assert not pkl.exists()
     optimize(
         str(datadir),
@@ -595,7 +595,7 @@ def test_cmaes_resume_continues_from_saved_state(datadir):
 
 def test_cmaes_resume_missing_pickle_warns_and_runs_fresh(datadir):
     pytest.importorskip("cma")
-    pkl = datadir / "results" / "optimize_cma_state.pkl"
+    pkl = Path(config.BASEMENT.outdir) / "optimize_cma_state.pkl"
     assert not pkl.exists()
     with pytest.warns(UserWarning, match="resume=True but"):
         res = optimize(
@@ -622,7 +622,7 @@ def test_cmaes_resume_ndim_mismatch_raises(datadir):
     pytest.importorskip("cma")
     import pickle as _pickle
 
-    pkl = datadir / "results" / "optimize_cma_state.pkl"
+    pkl = Path(config.BASEMENT.outdir) / "optimize_cma_state.pkl"
     pkl.parent.mkdir(exist_ok=True)
     # Forge a (stub, meta) tuple with the wrong ndim. The strategy object
     # is never touched — _load_cma_state validates meta first and bails.

@@ -354,7 +354,9 @@ class TestMCMCIntegration:
 
         allesfitter.mcmc_fit(setup_test_datadir)
 
-        save_file = os.path.join(setup_test_datadir, "mcmc_results", "mcmc_save.h5")
+        from allesfitter.results import results_directory
+
+        save_file = os.path.join(results_directory(setup_test_datadir, "mcmc"), "mcmc_save.h5")
         assert os.path.exists(save_file), "MCMC save file not created"
 
     @pytest.mark.slow
@@ -368,8 +370,10 @@ class TestMCMCIntegration:
 
         import emcee
 
+        from allesfitter.results import results_directory
+
         reader = emcee.backends.HDFBackend(
-            os.path.join(setup_test_datadir, "mcmc_results", "mcmc_save.h5")
+            os.path.join(results_directory(setup_test_datadir, "mcmc"), "mcmc_save.h5")
         )
 
         assert reader.iteration > 0

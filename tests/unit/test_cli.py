@@ -80,10 +80,13 @@ def test_show_params_labels_fit_status_column(tmp_path):
 
 
 def test_show_results_formats_posterior_and_derived_tables(tmp_path):
-    results_dir = tmp_path / "mcmc_results"
-    results_dir.mkdir()
-    legacy_dir = tmp_path / "results"
-    legacy_dir.mkdir()
+    from allesfitter.results import target_output_directory
+
+    root = target_output_directory(tmp_path)
+    results_dir = root / "mcmc_results"
+    results_dir.mkdir(parents=True)
+    legacy_dir = root / "results"
+    legacy_dir.mkdir(parents=True)
     (legacy_dir / "mcmc_table.csv").write_text(
         "#name,median,lower_error,upper_error,label,unit\nlegacy_parameter,99,1,1,legacy,\n"
     )
@@ -113,9 +116,11 @@ def test_show_results_formats_posterior_and_derived_tables(tmp_path):
     assert "legacy_parameter" not in result.output
 
 
-def test_show_results_finds_legacy_ns_table(tmp_path):
-    results_dir = tmp_path / "results"
-    results_dir.mkdir()
+def test_show_results_falls_back_to_results_subdir(tmp_path):
+    from allesfitter.results import target_output_directory
+
+    results_dir = target_output_directory(tmp_path) / "results"
+    results_dir.mkdir(parents=True)
     (results_dir / "ns_table.csv").write_text(
         "#name,median,lower_error,upper_error,label,unit\n"
         "b_period,2.3456789,0.0001,0.0002,$P_b$,d\n"

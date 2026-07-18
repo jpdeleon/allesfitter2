@@ -177,6 +177,27 @@ def grid(
 
 
 @app.command()
+def gui(
+    host: str = typer.Option(
+        "127.0.0.1",
+        "--host",
+        help="Bind address; keep localhost when using SSH port forwarding",
+    ),
+    port: int = typer.Option(5100, "--port", "-p", min=1, max=65535),
+    workspace: str = typer.Option(
+        ".allesfitter-web",
+        "--workspace",
+        "-w",
+        help="Directory for target data, job logs, and the SQLite history",
+    ),
+):
+    """Run the browser workbench for targets, preparation, fits, and results."""
+    from allesfitter.webapp import serve
+
+    serve(host=host, port=port, workspace=workspace)
+
+
+@app.command()
 def show_initial_guess(
     dir_path: str = typer.Argument(..., help="path to the data directory"),
     quiet: bool = typer.Option(False, "--quiet", "-q"),
@@ -498,10 +519,10 @@ def show_params(
     _console.print(f"[dim]{fitted} fitted, {fixed} fixed parameters[/]")
 
 
-def _find_result_table(base: Path, sampler: str) -> Path | None:
-    """Prefer sampler-specific output, then fall back to legacy results/."""
+def _find_result_table(root: Path, sampler: str) -> Path | None:
+    """Locate ``<sampler>_table.csv`` under the per-target output ``root``."""
     filename = f"{sampler}_table.csv"
-    for directory in (base / f"{sampler}_results", base / "results"):
+    for directory in (root / f"{sampler}_results", root / "results"):
         candidate = directory / filename
         if candidate.is_file():
             return candidate
@@ -605,20 +626,22 @@ def show_results(
     from rich.console import Console
     from rich.table import Table
 
+    from allesfitter.results import target_output_directory
+
     console = Console()
-    base = Path(dir_path).resolve()
+    root = target_output_directory(dir_path)
     discovered = False
 
     for sampler, label, color in (
         ("mcmc", "MCMC", "magenta"),
         ("ns", "Nested Sampling", "cyan"),
     ):
-        table_path = _find_result_table(base, sampler)
+        table_path = _find_result_table(root, sampler)
         if table_path is None:
             continue
         discovered = True
         rows = _read_result_rows(table_path, "name")
-        relative_path = table_path.relative_to(base)
+        relative_path = table_path.relative_to(root)
         table = Table(
             title=f"{label} Posterior Results",
             caption=str(relative_path),
@@ -665,7 +688,7 @@ def show_results(
         derived_rows = _read_result_rows(derived_path, "property")
         derived_table = Table(
             title=f"{label} Derived Results",
-            caption=str(derived_path.relative_to(base)),
+            caption=str(derived_path.relative_to(root)),
             caption_style="dim",
             box=box.SIMPLE_HEAVY,
             title_justify="left",
@@ -695,7 +718,7 @@ def show_results(
         console.print()
 
     if not discovered:
-        console.print(f"[red]Error:[/] No processed result tables found under {base}")
+        console.print(f"[red]Error:[/] No processed result tables found under {root}")
         console.print(
             "[dim]Run `allesfitter mcmc-output <dir>` or `allesfitter ns-output <dir>` first.[/]"
         )
