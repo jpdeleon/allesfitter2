@@ -1586,6 +1586,41 @@ def _draw_event_axvlines(
 ###############################################################################
 #::: plot individual transits
 ###############################################################################
+def get_global_transit_labels(base, companion, tmid_observed_transits, period):
+    """Map per-instrument transit midtimes onto the global transit numbering.
+
+    ``afplot_per_transit`` derives its midtimes from a *single* instrument's
+    time array, but ``{companion}_ttv_transit_N`` in params.csv is indexed over
+    *all* photometric instruments stitched together and sorted in time (see
+    ``Basement.setup_ttv_fit``, which is also what ``calculate_model`` and
+    ``ttv.csv`` use). Numbering the panels per instrument therefore mislabels
+    every instrument that does not cover the earliest transit, and pairs each
+    panel with the wrong ``_ttv_transit_N`` parameter.
+
+    Matching is done by nearest midtime rather than by epoch number, because
+    the plot's midtimes come from the posterior median while the global list
+    was built from the initial ``params``; the two drift slightly. Transits are
+    one period apart, so a half-period tolerance resolves this unambiguously.
+
+    Returns a list of 1-based global indices, with ``None`` wherever no global
+    transit matches or the global list is unavailable (e.g. ``fit_ttvs=False``,
+    where the caller falls back to per-instrument numbering).
+    """
+    tmid_global = base.data.get(companion + "_tmid_observed_transits", None)
+    if tmid_global is None or len(tmid_global) == 0:
+        return [None] * len(tmid_observed_transits)
+
+    tmid_global = np.asarray(tmid_global, dtype=float)
+    tolerance = abs(period) / 2.0
+
+    labels = []
+    for t in tmid_observed_transits:
+        offsets = np.abs(tmid_global - t)
+        nearest = int(np.argmin(offsets))
+        labels.append(nearest + 1 if offsets[nearest] <= tolerance else None)
+    return labels
+
+
 def afplot_per_transit(samples, inst, companion, base=None, kwargs_dict=None):
     _init_plotting()
     import matplotlib.pyplot as plt
@@ -1673,6 +1708,13 @@ def afplot_per_transit(samples, inst, companion, base=None, kwargs_dict=None):
     tmid_observed_transits = tmid_observed_transits[first_transit:last_transit]
     N_transits = len(tmid_observed_transits)
 
+    #::: panels must carry the *global* transit number, so that "Transit N" in
+    #::: the plot matches `{companion}_ttv_transit_N` in params.csv and row N of
+    #::: ttv.csv. Falls back to the per-instrument count when unavailable.
+    global_labels = get_global_transit_labels(
+        base, companion, tmid_observed_transits, params_median[companion + "_period"]
+    )
+
     if N_transits > 0:
         fig, axes = plt.subplots(
             N_transits, 1, figsize=(6, 4 * N_transits), sharey=True, tight_layout=True
@@ -1681,7 +1723,10 @@ def afplot_per_transit(samples, inst, companion, base=None, kwargs_dict=None):
         axes[0].set(title=inst)
 
         for i, t in tqdm(enumerate(tmid_observed_transits), total=N_transits):
-            transit_label = first_transit + i
+            #::: global index (1-based) where known, else this instrument's own count
+            transit_label = (
+                global_labels[i] if global_labels[i] is not None else first_transit + i + 1
+            )
             ax = axes[i]
 
             #::: mark data
@@ -1737,10 +1782,19 @@ def afplot_per_transit(samples, inst, companion, base=None, kwargs_dict=None):
                 # ran `prepare_allesfit ... --ttv` only against `--results_dir`
                 # so params2.csv has TTV rows but params.csv does not). Skip
                 # the TTV-midtime axvline rather than crashing the whole plot.
-                _ttv_key = companion + "_ttv_transit_" + str(transit_label + 1)
-                if _ttv_key in params_median:
+                # `transit_label` is the global index here, so this is the same
+                # parameter the model itself applies to this transit.
+                _ttv_key = companion + "_ttv_transit_" + str(transit_label)
+                if global_labels[i] is not None and _ttv_key in params_median:
                     ax.axvline(
                         t + params_median[_ttv_key], color="r", lw=2, ls="--", label="TTV midtime"
+                    )
+                elif global_labels[i] is None:
+                    warnings.warn(
+                        f"fit_ttvs=True but the transit at t={t} of inst='{inst}' does not "
+                        f"match any entry of '{companion}_tmid_observed_transits'; "
+                        "skipping TTV midtime line for this transit.",
+                        stacklevel=2,
                     )
                 else:
                     warnings.warn(
@@ -1754,7 +1808,7 @@ def afplot_per_transit(samples, inst, companion, base=None, kwargs_dict=None):
             ax.text(
                 0.95,
                 0.95,
-                "Transit " + str(transit_label + 1),
+                "Transit " + str(transit_label),
                 va="top",
                 ha="right",
                 transform=ax.transAxes,

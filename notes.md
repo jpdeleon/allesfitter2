@@ -444,6 +444,33 @@ where `-r` specifies the path to the directory of your previous run. The `-s` fl
 
 You can then copy the values or re-name the file entirely to `params.csv`. You may fix all the transit, lightcurve, and baseline parameters (default is 1) and then add all the necessary ttv parameters e.g. `b_ttv_transit_1` in `params.csv`. Set `fit_ttvs,True` in `settings.csv` and run `python run.py` with a different directory name e.g. `allesfitter.ns_fit('ttv')`. This procedure is useful not only for TTVs but also for other fits with iterative refinement. For more info, see files in the [TOI-216 example](https://github.com/MNGuenther/allesfitter/tree/master/paper/TOI-216).
 
+### How `{companion}_ttv_transit_N` is numbered
+
+`N` is a **global, 1-based index over all photometric instruments at once**, not
+a per-instrument counter. `Basement.setup_ttv_fit` stitches the `time` column of
+every instrument in `inst_phot` together, sorts it, and keeps the linear-ephemeris
+midtimes that any instrument actually covers (within `fast_fit_width`). `N` is the
+position in *that* list, and it is what `calculate_model`, `prepare_ttv_fit`, and
+`ttv.csv` all use.
+
+So with `inst_phot,spoc120 qlp200 qlp600 qlp1800`, an instrument covering only the
+later transits gets high `N` values — e.g. in `examples/TOI-6454_ttv`, the three
+transits in `qlp600.csv` are `b_ttv_transit_3`, `_4`, `_5`, not `_1`, `_2`, `_3`.
+
+Three ways to read off the mapping:
+
+- **`results/ttv.csv`** — one row per global index, in order, with the epoch number and `tc(BJD)`. Row `N` is `{companion}_ttv_transit_N`.
+- **The per-transit plots** — the `Transit N` label in `*_per_transit_*.pdf` *is* the global `N` (`afplot_per_transit` numbered these per instrument before Aug 2026; see the fix note below).
+- **Directly** — `config.BASEMENT.data['b_tmid_observed_transits'][N-1]` is the linear-prediction midtime for `b_ttv_transit_N`.
+
+> **Fixed (Aug 2026):** `afplot_per_transit` previously labelled panels with a
+> per-instrument counter *and* drew the red "TTV midtime" line from
+> `{companion}_ttv_transit_{per-instrument index}`. For every instrument that did
+> not cover the earliest transit, the label was wrong and the line used a
+> different TTV parameter than the red model curve. Panels are now numbered with
+> the global index and the line uses the matching parameter. The `Nth` suffix in
+> the plot *filenames* is still a per-instrument page marker, not a transit ID.
+
 ## Performance & caching (`simulate_PDF` disk cache)
 
 General performance behaviour:
