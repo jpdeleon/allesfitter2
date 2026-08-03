@@ -24,6 +24,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
+from .results import DEFAULT_OUTPUT_BASE, OUTPUT_BASE_ENV
+
 ASSET_DIR = Path(__file__).with_name("web_static")
 IDENTIFIER_TYPES = {"toi", "ctoi", "tic", "name"}
 JOB_KINDS = {
@@ -354,12 +356,14 @@ class JobRunner:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         env = os.environ.copy()
         env["ALLESFITTER_NONINTERACTIVE"] = "1"
-        # Keep a workbench's results inside its workspace: with the workspace as
-        # the output root, results_directory() resolves to <workspace>/<target>/
-        # <sampler>_results, i.e. next to each target's data_dir where the GUI
-        # discovers artifacts. CLI/script runs leave this unset and default to
-        # ~/ql/allesfitter.
-        env["ALLESFITTER_RESULTS_DIR"] = str(self.workspace)
+        # Keep a workbench's results inside its workspace (~/ql/allesfitter by
+        # default): with the workspace as the shared output root,
+        # results_directory() resolves to <workspace>/<target>/<sampler>_results,
+        # i.e. next to each target's data_dir where the GUI discovers artifacts.
+        # Setting it explicitly also shields GUI jobs from an ambient value in
+        # the user's shell. Manual CLI/script runs leave it unset and write
+        # their results into the data directory itself.
+        env[OUTPUT_BASE_ENV] = str(self.workspace)
         try:
             with log_path.open("ab", buffering=0) as output:
                 with self._lock:
@@ -647,10 +651,19 @@ class WorkbenchHTTPServer(ThreadingHTTPServer):
         super().__init__(address, WorkbenchHandler)
 
 
-def serve(
-    host: str = "127.0.0.1", port: int = 5100, workspace: str | Path = ".allesfitter-web"
-) -> None:
-    app = Workbench(Path(workspace))
+def resolve_workspace(workspace: str | Path | None) -> Path:
+    """Return the workspace directory, defaulting to the shared results root.
+
+    The workspace holds target data, results, job logs, and the SQLite history,
+    so leaving it unset collects every GUI run under ``~/ql/allesfitter``.
+    """
+    if not workspace:
+        return DEFAULT_OUTPUT_BASE
+    return Path(workspace).expanduser()
+
+
+def serve(host: str = "127.0.0.1", port: int = 5100, workspace: str | Path | None = None) -> None:
+    app = Workbench(resolve_workspace(workspace))
     server = WorkbenchHTTPServer((host, port), app)
     print(f"allesfitter workbench: http://{host}:{port}")
     print(f"workspace: {app.workspace}")

@@ -3,15 +3,14 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def isolate_results_dir(tmp_path_factory, monkeypatch):
-    """Redirect the results output root to a temp dir for every test.
+def isolate_results_dir(monkeypatch):
+    """Clear the shared results root so every test uses the shipped default.
 
-    Keeps fits and basement output out of the real ``~/ql/allesfitter`` default.
-    Tests that assert the default explicitly can ``monkeypatch.delenv`` it.
+    Unset, results land inside each test's own (temporary) data directory, so
+    nothing leaks into ``~/ql/allesfitter`` or a value exported in the shell.
+    Tests covering the shared-root mode set the variable themselves.
     """
-    base = tmp_path_factory.mktemp("allesfitter_results")
-    monkeypatch.setenv("ALLESFITTER_RESULTS_DIR", str(base))
-    return base
+    monkeypatch.delenv("ALLESFITTER_RESULTS_DIR", raising=False)
 
 
 @pytest.fixture

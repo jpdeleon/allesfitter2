@@ -184,11 +184,12 @@ def gui(
         help="Bind address; keep localhost when using SSH port forwarding",
     ),
     port: int = typer.Option(5100, "--port", "-p", min=1, max=65535),
-    workspace: str = typer.Option(
-        ".allesfitter-web",
+    workspace: str | None = typer.Option(
+        None,
         "--workspace",
         "-w",
-        help="Directory for target data, job logs, and the SQLite history",
+        help="Directory for target data, results, job logs, and the SQLite "
+        "history (default: ~/ql/allesfitter)",
     ),
 ):
     """Run the browser workbench for targets, preparation, fits, and results."""

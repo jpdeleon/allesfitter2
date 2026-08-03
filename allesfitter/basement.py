@@ -419,9 +419,10 @@ class Basement:
         self.quiet = quiet
         self.now = f"{datetime.now():%Y-%m-%d_%H-%M-%S}"
         self.datadir = datadir
-        # Default (pre-sampler) output goes to the per-target results root,
-        # e.g. ~/ql/allesfitter/<target>/results. use_results_directory later
-        # swaps this for mcmc_results/ns_results during a fit.
+        # Default (pre-sampler) output goes next to the data (<datadir>/results),
+        # or to <root>/<target>/results when a shared results root is configured.
+        # use_results_directory later swaps this for mcmc_results/ns_results
+        # during a fit.
         from .results import target_output_directory
 
         self.outdir = str(target_output_directory(datadir) / "results")

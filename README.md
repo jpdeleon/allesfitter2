@@ -122,13 +122,17 @@ HD39091/
    allesfitter.ns_output('.')   # parameter derivation
    ```
 3. **Execute:** `python run.py` — MCMC and nested-sampling outputs are saved separately
-   under a per-target results root. By default the root is `~/ql/allesfitter`, so the
-   above target writes to `~/ql/allesfitter/HD39091/mcmc_results/` and
-   `~/ql/allesfitter/HD39091/ns_results/`. The target name is the data directory's
-   basename. Override the root with the `ALLESFITTER_RESULTS_DIR` environment variable
-   (e.g. `ALLESFITTER_RESULTS_DIR=. python run.py` keeps results next to the data).
-   The browser workbench (`allesfitter gui`) sets this automatically so its results
-   stay inside the workspace.
+   inside the data directory, so the above target writes to `HD39091/mcmc_results/` and
+   `HD39091/ns_results/`. The same holds for the CLI: `uv run allesfitter ns-fit HD39091`
+   writes to `HD39091/ns_results/`.
+
+   Set the `ALLESFITTER_RESULTS_DIR` environment variable to collect results from many
+   targets under one shared root instead. Each target then gets its own subdirectory,
+   named after its data directory's basename — with
+   `ALLESFITTER_RESULTS_DIR=~/ql/allesfitter` the target above writes to
+   `~/ql/allesfitter/HD39091/mcmc_results/`. The browser workbench
+   (`allesfitter gui`) sets this to its workspace automatically, which defaults to
+   `~/ql/allesfitter`.
 
 By default `fast_fit,True` restricts evaluation to transit windows. For a quick
 preliminary run, loosen `ns_tol` (e.g. `10` or `100`); use `ns_tol,0.01` only for
@@ -180,12 +184,14 @@ Then forward the port from your local machine:
 ssh -L 5100:127.0.0.1:5100 user@remote-machine
 ```
 
-Open `http://127.0.0.1:5100`. The workspace stores target directories, job
-logs, and `workbench.sqlite3`; commands run non-interactively without a shell.
+Open `http://127.0.0.1:5100`. The workspace stores target directories, their
+results, job logs, and `workbench.sqlite3`; commands run non-interactively
+without a shell. Omit `--workspace` to use `~/ql/allesfitter`, which keeps
+every workbench target and its fits in one place.
 
-`show-results <dir>` resolves the same per-target results root as the fit
-commands (default `~/ql/allesfitter/<dir-basename>`, or `ALLESFITTER_RESULTS_DIR`
-when set), reads `mcmc_results/` and `ns_results/` there (falling back to a
+`show-results <dir>` resolves results the same way as the fit commands (inside
+`<dir>`, or under `$ALLESFITTER_RESULTS_DIR/<dir-basename>` when that variable
+is set), reads `mcmc_results/` and `ns_results/` there (falling back to a
 `results/` subdirectory), and shows both samplers when both outputs are available.
 
 The following option tables document the `prepare` command.

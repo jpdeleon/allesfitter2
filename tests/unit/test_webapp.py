@@ -6,7 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from allesfitter.webapp import Workbench, WorkbenchDB, build_job_command, build_prepare_command
+from allesfitter.webapp import (
+    Workbench,
+    WorkbenchDB,
+    build_job_command,
+    build_prepare_command,
+    resolve_workspace,
+)
 
 
 @pytest.fixture()
@@ -137,6 +143,19 @@ def test_static_manifest_data_is_json_serializable(tmp_path: Path):
     app = Workbench(tmp_path / "workspace")
     app.create_target({"name": "TIC-1", "identifier_type": "tic", "identifier_value": "1"})
     json.dumps(app.state())
+
+
+def test_workspace_defaults_to_the_shared_results_root():
+    """Without --workspace the GUI collects targets and results in ~/ql/allesfitter."""
+    from allesfitter.results import DEFAULT_OUTPUT_BASE
+
+    assert resolve_workspace(None) == DEFAULT_OUTPUT_BASE
+    assert resolve_workspace("") == DEFAULT_OUTPUT_BASE
+
+
+def test_explicit_workspace_overrides_the_default(tmp_path: Path):
+    assert resolve_workspace(tmp_path / "workspace") == tmp_path / "workspace"
+    assert resolve_workspace("~/somewhere") == Path.home() / "somewhere"
 
 
 def test_workbench_runner_keeps_results_inside_workspace(tmp_path: Path, monkeypatch):

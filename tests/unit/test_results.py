@@ -21,15 +21,52 @@ def _save_ns_result(run, logz, logzerr, dirname="ns_results"):
         pickle.dump({"logz": np.array([logz]), "logzerr": np.array([logzerr])}, stream)
 
 
-def test_output_base_defaults_to_home_ql_allesfitter(monkeypatch):
+def test_output_base_is_unset_without_environment_override(monkeypatch):
     monkeypatch.delenv("ALLESFITTER_RESULTS_DIR", raising=False)
-    assert output_base() == DEFAULT_OUTPUT_BASE
-    assert DEFAULT_OUTPUT_BASE == Path.home() / "ql" / "allesfitter"
+    assert output_base() is None
 
 
 def test_output_base_honours_environment_override(monkeypatch, tmp_path):
     monkeypatch.setenv("ALLESFITTER_RESULTS_DIR", str(tmp_path))
     assert output_base() == tmp_path
+
+
+def test_gui_default_output_base_is_home_ql_allesfitter():
+    assert DEFAULT_OUTPUT_BASE == Path.home() / "ql" / "allesfitter"
+
+
+def test_results_written_inside_datadir_without_override(monkeypatch, tmp_path):
+    """A manual terminal run keeps its results in the data directory."""
+    monkeypatch.delenv("ALLESFITTER_RESULTS_DIR", raising=False)
+    datadir = tmp_path / "data" / "HIP67522"
+    datadir.mkdir(parents=True)
+
+    mcmc = results_directory(datadir, "mcmc", for_write=True)
+    ns = results_directory(datadir, "ns", for_write=True)
+
+    assert mcmc == str(datadir / "mcmc_results")
+    assert ns == str(datadir / "ns_results")
+    assert Path(mcmc).is_dir()
+    assert Path(ns).is_dir()
+
+
+def test_target_output_directory_without_override_is_the_datadir(monkeypatch, tmp_path):
+    monkeypatch.delenv("ALLESFITTER_RESULTS_DIR", raising=False)
+    datadir = tmp_path / "data" / "TOI-1097"
+    datadir.mkdir(parents=True)
+
+    assert target_output_directory(datadir) == datadir.resolve()
+    # Relative paths and trailing slashes resolve to the same directory.
+    monkeypatch.chdir(datadir.parent)
+    assert target_output_directory("TOI-1097/") == datadir.resolve()
+
+
+def test_empty_environment_override_falls_back_to_in_place_output(monkeypatch, tmp_path):
+    monkeypatch.setenv("ALLESFITTER_RESULTS_DIR", "")
+    datadir = tmp_path / "TOI-42"
+    datadir.mkdir()
+
+    assert results_directory(datadir, "ns") == str(datadir / "ns_results")
 
 
 def test_results_written_under_per_target_output_root(monkeypatch, tmp_path):

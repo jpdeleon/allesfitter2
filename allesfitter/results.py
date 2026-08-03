@@ -1,13 +1,15 @@
 """Resolve allesfitter result directories.
 
-All results are written under a single per-target output root. By default the
-root is ``~/ql/allesfitter``; each target then gets its own subdirectory named
-after the data directory, e.g. ``~/ql/allesfitter/HIP67522/mcmc_results``.
+By default results stay with the data they came from: a manual run of
+``allesfitter mcmc-fit <dir_path>`` (or ``run.py``, or a notebook) writes to
+``<dir_path>/mcmc_results`` and ``<dir_path>/ns_results``.
 
-The root can be redirected with the ``ALLESFITTER_RESULTS_DIR`` environment
-variable. The browser workbench (GUI) sets this to its workspace so a
-workbench keeps its results next to the target data; command-line and script
-runs leave it unset and use the default.
+Setting the ``ALLESFITTER_RESULTS_DIR`` environment variable switches to a
+shared output root instead, where every target gets its own subdirectory named
+after its data directory, e.g. ``<root>/HIP67522/mcmc_results``. The browser
+workbench (GUI) sets the variable to its workspace, which defaults to
+:data:`DEFAULT_OUTPUT_BASE` (``~/ql/allesfitter``), so GUI runs collect their
+results there instead of scattering them across the filesystem.
 """
 
 from __future__ import annotations
@@ -17,24 +19,25 @@ from pathlib import Path
 
 RESULTS_DIR_NAMES = {"mcmc": "mcmc_results", "ns": "ns_results"}
 
-#: Environment variable that overrides the output root.
+#: Environment variable that selects a shared per-target output root.
 OUTPUT_BASE_ENV = "ALLESFITTER_RESULTS_DIR"
 
-#: Default output root when the environment variable is unset.
+#: Shared output root used by the GUI when no workspace is given.
 DEFAULT_OUTPUT_BASE = Path.home() / "ql" / "allesfitter"
 
 
-def output_base() -> Path:
-    """Return the root directory that holds every target's results.
+def output_base() -> Path | None:
+    """Return the shared per-target output root, or ``None`` for in-place output.
 
-    Reads :data:`OUTPUT_BASE_ENV` at call time and falls back to
-    :data:`DEFAULT_OUTPUT_BASE`. Reading lazily lets the GUI (and tests) set
-    the variable per process without re-importing the module.
+    Reads :data:`OUTPUT_BASE_ENV` at call time; when it is unset or empty each
+    target's results belong next to its own data directory. Reading lazily lets
+    the GUI (and tests) set the variable per process without re-importing the
+    module.
     """
     override = os.environ.get(OUTPUT_BASE_ENV)
     if override:
         return Path(override).expanduser()
-    return DEFAULT_OUTPUT_BASE
+    return None
 
 
 def target_name(datadir) -> str:
@@ -47,17 +50,25 @@ def target_name(datadir) -> str:
 
 
 def target_output_directory(datadir) -> Path:
-    """Return ``<output_base>/<target_name>`` for ``datadir``."""
-    return output_base() / target_name(datadir)
+    """Return the directory that holds ``datadir``'s result folders.
+
+    That is ``datadir`` itself by default, or ``<output_base>/<target_name>``
+    when a shared output root is configured.
+    """
+    base = output_base()
+    if base is None:
+        return Path(datadir).expanduser().resolve()
+    return base / target_name(datadir)
 
 
 def results_directory(datadir, sampler, *, for_write=False):
-    """Return the result directory for ``sampler`` under the output root.
+    """Return the result directory for ``sampler``.
 
-    ``mcmc`` output goes to ``<root>/<target>/mcmc_results`` and ``ns`` output
-    to ``<root>/<target>/ns_results``. When ``for_write`` is true the directory
-    is created; otherwise the path is returned whether or not it exists so
-    callers can test for existing output themselves.
+    ``mcmc`` output goes to ``<target_output_directory>/mcmc_results`` and
+    ``ns`` output to ``<target_output_directory>/ns_results``. When
+    ``for_write`` is true the directory is created; otherwise the path is
+    returned whether or not it exists so callers can test for existing output
+    themselves.
     """
     try:
         dirname = RESULTS_DIR_NAMES[sampler]
