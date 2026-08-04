@@ -423,6 +423,51 @@ baseline_flux_qlp,sample_GP_Matern32
 ```
 The pipeline will expect two lightcurves named `spoc.csv` and `qlp.csv`.
 
+### TARS light curves (not supported by lightkurve)
+
+`lightkurve.read` cannot ingest TARS (TESS All-Sky Rotation Survey) HLSP files:
+
+```
+LightkurveError: Not recognized as a supported data product:
+  .../hlsp_tars_tess_ffi_s0034-0000000146413471_tess_v01_lc.fits
+```
+
+This is **not** fixed by upgrading. `detect_filetype` keys on `ORIGIN` /
+`CREATOR` / `PROCVER` or on distinctive column sets, and a TARS file has none of
+them — it is identified only by `HLSPID='TARS'`, and its `LIGHTCURVE` extension
+holds just `TIME` and `FLUX`. There is no `tars.py` reader and no "tars" string
+in `detect.py` in the pinned 2.4.2, in 2.6.0 (latest release), or in `main`.
+Supported HLSPs are QLP, ELEANOR/GSFC-ELEANOR-LITE, PATHOS, TASOC, KEPSEISMIC,
+CDIPS, TGLC, K2SFF, EVEREST, K2SC, K2VARCAT.
+
+Use `allesfitter.tars` instead:
+
+```python
+from allesfitter.tars import read_tars, tars_to_csv
+
+lc = read_tars("hlsp_tars_tess_ffi_s0034-..._lc.fits")  # a normal TessLightCurve
+tars_to_csv(lc, "tars.csv")                             # allesfitter instrument CSV
+```
+
+`read_tars` returns a `TessLightCurve` in BTJD (TDB) that supports the usual
+lightkurve API (`flatten`, `fold`, `bin`, `append`, `to_pandas`, …).
+`tars_to_csv` converts BTJD to full BJD_TDB and writes the three columns
+allesfitter expects.
+
+**Uncertainties.** TARS ships no `FLUX_ERR` column, so `read_tars` leaves
+`flux_err` as NaN — and `Basement.load_data` rejects NaN outright:
+
+> There are NaN values in "tars.csv". Please make sure everything is fine with
+> your data, then exclude these rows from the file and restart.
+
+`tars_to_csv` therefore applies the same rule
+`scripts/prepare_allesfit.py` uses for QLP: when `flux_err` is **entirely** NaN
+it is replaced by **1.0** for every row; when only *some* values are NaN those
+rows are dropped instead, so genuine uncertainties are never clobbered. A
+constant error is a sentinel, not a measurement — it weights every point equally
+and leaves the absolute scale to the fitted `ln_err_flux_<inst>` term, so keep
+`error_flux_tars,sample` in `settings.csv`.
+
 ## Lightcurves from different exposure times
 
 You should also be specific which exposure time to use. By default, 120s is good enough to produce reliable results.

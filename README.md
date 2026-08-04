@@ -29,6 +29,7 @@ full walkthrough in [notes.md](notes.md).
 | **Noise / error model** | Per-instrument white-noise jitter; correlated noise via GP | `error_flux_<inst>,sample`, `ln_err_flux_<inst>` | — |
 | **Dilution / contamination** | Per-instrument depth dilution (`(1−dil)` scaling) with degeneracy guidance | `dil_<inst>` | [link](notes.md#fitting-dilution-dil_inst-in-a-chromatic-model) |
 | **Stellar variability / spots / flares** | GP stellar-variability term; spot and flare models | `stellar_var_*`, `spots.py`, `flares/` | — |
+| **TARS light curves** | Reader for TARS HLSP files, which lightkurve cannot ingest at any version | `allesfitter.tars.read_tars` | [link](notes.md#tars-light-curves-not-supported-by-lightkurve) |
 | **TTVs** | Per-transit timing offsets via iterative refinement from a prior run (`N` is a global index across all `inst_phot`, see [numbering](notes.md#how-companion_ttv_transit_n-is-numbered)) | `fit_ttvs,True`, `b_ttv_transit_N` | [link](notes.md#using-a-previous-run-for-a-ttv-fit) |
 | **Stellar-density prior** | Break the `Rp/R★`–`a/R★`–`i` degeneracy from R★, M★ | `use_host_density_prior,True` + `params_star.csv` | — |
 | **Required transit geometry** | Condition an individual photometric companion on producing a primary transit, including eccentric and grazing geometries | `require_<companion>_transit,True` | — |
