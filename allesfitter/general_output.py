@@ -1621,6 +1621,37 @@ def get_global_transit_labels(base, companion, tmid_observed_transits, period):
     return labels
 
 
+def get_observed_transits_for_inst(samples, inst, companion, base=None):
+    """Midtimes of the transits one instrument actually covers.
+
+    Extracted so that ``afplot_per_transit`` (which plots them) and
+    ``iter_per_transit_pages`` (which needs the ordering *before* rendering
+    anything, in order to interleave instruments by transit time) can never
+    disagree about which transits an instrument has.
+
+    Returns ``(params_median, zoomwindow, tmid_observed_transits)`` with the
+    zoomwindow in days and the full, unpaginated list of midtimes.
+    """
+    if base is None:
+        base = config.BASEMENT
+
+    params_median, _params_ll, _params_ul = get_params_from_samples(samples)
+
+    zoomwindow, _y_zoomwindow, _phase_shift = guesstimator(
+        params_median, companion, base=base, inst=inst
+    )
+    zoomwindow /= 24.0  # in days
+    T_tra_tot = zoomwindow / 3.0  # in days
+
+    tmid_observed_transits = get_tmid_observed_transits(
+        base.data[inst]["time"],
+        params_median[companion + "_epoch"],
+        params_median[companion + "_period"],
+        T_tra_tot,
+    )
+    return params_median, zoomwindow, tmid_observed_transits
+
+
 def afplot_per_transit(samples, inst, companion, base=None, kwargs_dict=None):
     _init_plotting()
     import matplotlib.pyplot as plt
@@ -1684,21 +1715,14 @@ def afplot_per_transit(samples, inst, companion, base=None, kwargs_dict=None):
     # ==========================================================================
     #::: load data and models
     # ==========================================================================
-    params_median, params_ll, params_ul = get_params_from_samples(samples)
-
-    zoomwindow, y_zoomwindow, phase_shift = guesstimator(
-        params_median, companion, base=base, inst=inst
+    params_median, zoomwindow, tmid_observed_transits = get_observed_transits_for_inst(
+        samples, inst, companion, base=base
     )
-    zoomwindow /= 24.0  # in days
-    T_tra_tot = zoomwindow / 3.0  # in days
 
     x = base.data[inst]["time"]
     y = 1.0 * base.data[inst][key]
     yerr_w = calculate_yerr_w(params_median, inst, key)
 
-    tmid_observed_transits = get_tmid_observed_transits(
-        x, params_median[companion + "_epoch"], params_median[companion + "_period"], T_tra_tot
-    )
     total_transits = len(tmid_observed_transits)
     last_transit = (
         first_transit + max_transits
@@ -2191,8 +2215,69 @@ def iter_per_transit_pages(samples, companion, kwargs_dict=None):
                 first_transit = -1
 
 
+def iter_per_transit_pages_sorted(samples, companion, kwargs_dict=None):
+    """Yield ``(inst, fig, tmid)`` one transit per figure, in chronological order.
+
+    ``iter_per_transit_pages`` walks instrument by instrument, so the pages come
+    out in ``inst_phot`` order — which is rarely the order the transits were
+    observed in. Here the transits of every instrument are collected first,
+    sorted by midtime, and only then rendered, so transit numbers ascend through
+    the concatenated PDF and a transit covered by two instruments yields two
+    consecutive figures.
+
+    Sorting is by midtime rather than by the global TTV index so that the order
+    is still chronological when ``fit_ttvs`` is off and no global index exists.
+    Ties (the same transit seen by several instruments) keep ``inst_phot`` order.
+
+    ``max_transits`` is forced to 1 — interleaving instruments requires one
+    transit per figure. The caller's ``kwargs_dict`` is left unmodified.
+    """
+    if kwargs_dict is None:
+        kwargs_dict = {}
+
+    #::: work out the order before rendering anything, so only one figure is
+    #::: ever alive at a time
+    schedule = []
+    for inst_order, inst in enumerate(config.BASEMENT.settings["inst_phot"]):
+        try:
+            _params_median, _zoomwindow, tmid_observed_transits = get_observed_transits_for_inst(
+                samples, inst, companion
+            )
+        except Exception as e:
+            warnings.warn(
+                f"could not determine the transits of inst='{inst}' for companion='{companion}': "
+                f"{type(e).__name__}: {e}",
+                stacklevel=2,
+            )
+            continue
+        for i, tmid in enumerate(tmid_observed_transits):
+            schedule.append((float(tmid), inst_order, inst, i))
+
+    schedule.sort()
+
+    for tmid, _inst_order, inst, first_transit in schedule:
+        page_kwargs = dict(kwargs_dict)
+        page_kwargs["first_transit"] = first_transit
+        page_kwargs["max_transits"] = 1
+        try:
+            fig, _axes, _last_transit, _total_transits = afplot_per_transit(
+                samples, inst, companion, kwargs_dict=page_kwargs
+            )
+        except Exception as e:
+            warnings.warn(
+                f"afplot_per_transit failed for inst='{inst}' companion='{companion}' "
+                f"first_transit={first_transit}: {type(e).__name__}: {e}",
+                stacklevel=2,
+            )
+            continue
+        yield inst, fig, tmid
+
+
 def _save_per_transit_pdf(samples, companion, kwargs_dict, file_extension):
     """Write every per-transit page of one companion into a single multi-page PDF.
+
+    Pages are ordered chronologically (one transit each), not by ``inst_phot``,
+    so transit numbers ascend through the file.
 
     Returns the output path, or ``None`` when the companion produced no pages
     (in which case no file is created — ``PdfPages`` would otherwise leave an
@@ -2207,7 +2292,7 @@ def _save_per_transit_pdf(samples, companion, kwargs_dict, file_extension):
 
     pdf = None
     try:
-        for _inst, fig, _last_transit in iter_per_transit_pages(samples, companion, kwargs_dict):
+        for _inst, fig, _tmid in iter_per_transit_pages_sorted(samples, companion, kwargs_dict):
             if pdf is None:
                 #::: opened lazily so a companion with no pages leaves no file
                 pdf = PdfPages(outpath)

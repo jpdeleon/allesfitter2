@@ -475,22 +475,35 @@ Three ways to read off the mapping:
 ### Per-transit plot files from `show_initial_guess`
 
 With **more than one** entry in `inst_phot`, `show_initial_guess` writes **one
-multi-page PDF per planet**:
+multi-page PDF per planet**, instead of the previous one-file-per-instrument-and-page
+layout (`initial_guess_per_transit_qlp600_b_3th.pdf`):
 
 ```
-results/initial_guess_per_transit_b.pdf   # page 1 spoc120, page 2 qlp200, page 3 qlp600, ...
+results/initial_guess_per_transit_b.pdf
 results/initial_guess_per_transit_c.pdf
 ```
 
-instead of the previous one-file-per-instrument-and-page layout
-(`initial_guess_per_transit_qlp600_b_3th.pdf`). Pages follow `inst_phot` order,
-and each instrument still paginates at `max_transits` (default 20) panels per
-page. Because the instrument is no longer in the filename, it is now printed as
-the **title of every panel**, not just the top one.
+**Pages are ordered chronologically, one transit each** — *not* in `inst_phot`
+order, which is rarely the order the transits were observed in. Transit numbers
+therefore ascend as you page through the file, and a transit covered by two
+instruments produces two consecutive pages. For companion b of
+`examples/TOI-6454_ttv` (`inst_phot,spoc120 qlp200 qlp600 qlp1800`):
 
-Two cases keep the old per-instrument filenames:
+| page | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
+|---|---|---|---|---|---|---|---|---|---|
+| transit | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 8 |
+| instrument | qlp1800 | qlp1800 | qlp600 | qlp600 | qlp600 | qlp200 | qlp200 | spoc120 | qlp200 |
 
-- a single `inst_phot` — there is nothing to concatenate;
+Ordering keys on the transit midtime rather than the global TTV index, so it is
+still chronological when `fit_ttvs` is off; ties (one transit, several
+instruments) keep `inst_phot` order. Since the instrument is in neither the
+filename nor the page grouping any more, it is printed as the **title of every
+panel**.
+
+Two cases keep the old per-instrument filenames, `inst_phot` ordering, and
+`max_transits` (default 20) panels per figure:
+
+- a single `inst_phot` — there is nothing to concatenate or interleave;
 - a raster `file_extension` (`.png`, `.jpg`, …) — only PDF holds multiple pages. A warning names the fallback.
 
 The posterior per-transit plots from `mcmc_output` / `ns_output`
