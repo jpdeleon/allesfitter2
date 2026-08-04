@@ -5,7 +5,14 @@ import pytest
 from astropy.io import fits
 
 from allesfitter.basement import _load_inst_csv
-from allesfitter.tars import PLACEHOLDER_FLUX_ERR, TESS_BJD_OFFSET, read_tars, tars_to_csv
+from allesfitter.tars import (
+    PLACEHOLDER_FLUX_ERR,
+    TESS_BJD_OFFSET,
+    is_tars_file,
+    patch_lightkurve,
+    read_tars,
+    tars_to_csv,
+)
 
 TIME_BTJD = np.array([2228.75, 2228.76, 2228.77, 2228.78])
 FLUX = np.array([1.0001, 0.9998, 1.0003, 0.9995])
@@ -140,6 +147,81 @@ def test_tars_to_csv_drops_rows_instead_of_overwriting_partial_nans(tmp_path):
     assert n_rows == len(TIME_BTJD) - 2
     _time, _flux, flux_err, _custom, _cov = _load_inst_csv(str(out))
     np.testing.assert_allclose(flux_err, 1.45e-3)
+
+
+def test_is_tars_file_discriminates_products(tmp_path):
+    # Arrange
+    tars = write_tars_fits(tmp_path / "tars_lc.fits")
+    qlp = write_tars_fits(tmp_path / "qlp_lc.fits", hlspid="QLP")
+
+    # Act / Assert
+    assert is_tars_file(tars) is True
+    assert is_tars_file(qlp) is False
+
+
+def test_is_tars_file_is_false_for_unopenable_targets(tmp_path):
+    # Arrange: URLs, S3 URIs and truncated downloads must not raise here
+    not_fits = tmp_path / "notes.txt"
+    not_fits.write_text("definitely not a FITS file")
+
+    # Act / Assert
+    assert is_tars_file(str(not_fits)) is False
+    assert is_tars_file(str(tmp_path / "missing.fits")) is False
+    assert is_tars_file("https://example.invalid/x_lc.fits") is False
+
+
+def test_patch_lightkurve_makes_lk_read_accept_tars(tmp_path):
+    # Arrange
+    import lightkurve as lk
+
+    path = write_tars_fits(tmp_path / "tars_lc.fits")
+    patch_lightkurve()
+
+    # Act
+    lc = lk.read(path)
+
+    # Assert
+    assert type(lc).__name__ == "TessLightCurve"
+    np.testing.assert_allclose(lc.time.value, TIME_BTJD)
+
+
+def test_patch_lightkurve_rebinds_the_name_search_uses(tmp_path):
+    # Arrange: SearchResult.download_all calls lightkurve.search's own `read`,
+    # so patching only lightkurve.io.read would leave downloads broken
+    import lightkurve
+    import lightkurve.search
+
+    patch_lightkurve()
+
+    # Act / Assert
+    assert lightkurve.search.read is lightkurve.read
+    assert lightkurve.io.read is lightkurve.read
+
+
+def test_patch_lightkurve_leaves_other_products_to_lightkurve(tmp_path):
+    # Arrange: a non-TARS file must still take lightkurve's own code path
+    import lightkurve as lk
+
+    patch_lightkurve()
+    path = write_tars_fits(tmp_path / "qlp_lc.fits", hlspid="QLP")
+
+    # Act: lightkurve reads this stub through its own generic reader
+    lc = lk.read(path)
+
+    # Assert: it did not go through read_tars, which stamps its own provenance
+    assert lc.meta.get("FLUX_ORIGIN") != "TARS"
+    assert lc.meta.get("AUTHOR") != "TARS"
+
+
+def test_patch_lightkurve_is_idempotent():
+    # Arrange
+    patch_lightkurve()
+
+    # Act: a second call must not wrap `read` again
+    applied_again = patch_lightkurve()
+
+    # Assert
+    assert applied_again is False
 
 
 def test_tars_to_csv_output_passes_basement_load_data_validation(tmp_path):

@@ -436,11 +436,41 @@ This is **not** fixed by upgrading. `detect_filetype` keys on `ORIGIN` /
 `CREATOR` / `PROCVER` or on distinctive column sets, and a TARS file has none of
 them — it is identified only by `HLSPID='TARS'`, and its `LIGHTCURVE` extension
 holds just `TIME` and `FLUX`. There is no `tars.py` reader and no "tars" string
-in `detect.py` in the pinned 2.4.2, in 2.6.0 (latest release), or in `main`.
-Supported HLSPs are QLP, ELEANOR/GSFC-ELEANOR-LITE, PATHOS, TASOC, KEPSEISMIC,
-CDIPS, TGLC, K2SFF, EVEREST, K2SC, K2VARCAT.
+in `detect.py` in 2.6.0 (the version required here) or in `main`. Supported HLSPs
+are QLP, ELEANOR/GSFC-ELEANOR-LITE, PATHOS, TASOC, KEPSEISMIC, CDIPS, TGLC,
+K2SFF, EVEREST, K2SC, K2VARCAT.
 
-Use `allesfitter.tars` instead:
+`allesfitter.tars` fills the gap.
+
+**`prepare_allesfit -p tars` works** — the script calls `patch_lightkurve()` at
+import, so no extra step is needed:
+
+```bash
+prepare_allesfit -name "TOI-6454" -s 34 -p tars --lc-only -dir toi6454
+# -> TOI-6454_tars_s34_exp600s.csv, 3474 rows
+```
+
+To use TARS from your own code, apply the patch yourself and then use lightkurve
+normally:
+
+```python
+from allesfitter.tars import patch_lightkurve
+patch_lightkurve()                       # idempotent
+
+import lightkurve as lk
+lk.read("hlsp_tars_..._lc.fits")                            # TessLightCurve
+lk.search_lightcurve("TOI-6454", author="TARS").download_all()   # all sectors
+```
+
+`patch_lightkurve` registers a `"tars"` reader with astropy's I/O registry — the
+same mechanism lightkurve uses for QLP, TASOC and friends — and wraps `read` so
+TARS is routed to `read_tars` while every other product is delegated untouched.
+`read` is rebound in `lightkurve`, `lightkurve.io`, `lightkurve.io.read` **and
+`lightkurve.search`**: the last one matters because `search.py` does
+`from .io import read` at import time, so patching only `lightkurve.io` would
+leave `download_all()` broken.
+
+Or bypass lightkurve entirely:
 
 ```python
 from allesfitter.tars import read_tars, tars_to_csv
@@ -463,7 +493,9 @@ allesfitter expects.
 `tars_to_csv` therefore applies the same rule
 `scripts/prepare_allesfit.py` uses for QLP: when `flux_err` is **entirely** NaN
 it is replaced by **1.0** for every row; when only *some* values are NaN those
-rows are dropped instead, so genuine uncertainties are never clobbered. A
+rows are dropped instead, so genuine uncertainties are never clobbered. Going
+through `prepare_allesfit -p tars` gets you the same thing from the script's own
+code path, which logs `Setting flux error column = 1`. A
 constant error is a sentinel, not a measurement — it weights every point equally
 and leaves the absolute scale to the fitted `ln_err_flux_<inst>` term, so keep
 `error_flux_tars,sample` in `settings.csv`.

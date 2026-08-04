@@ -7,8 +7,8 @@ lightkurve cannot ingest TARS products — ``lightkurve.read`` raises
 distinctive column sets, and a TARS file carries none of those: it is
 identified solely by ``HLSPID='TARS'`` in the primary header, and its
 LIGHTCURVE extension holds just ``TIME`` and ``FLUX``. Verified absent from
-lightkurve 2.4.2 (pinned here), 2.6.0 (latest release), and ``main`` — there is
-no ``tars.py`` reader and no "tars" string in ``detect.py``.
+lightkurve 2.6.0 (the version required here) and ``main`` — there is no
+``tars.py`` reader and no "tars" string in ``detect.py``.
 
 Usage::
 
@@ -16,6 +16,13 @@ Usage::
 
     lc = read_tars("hlsp_tars_..._lc.fits")     # a normal TessLightCurve
     tars_to_csv(lc, "tars.csv")                 # allesfitter instrument CSV
+
+:func:`patch_lightkurve` additionally teaches lightkurve itself to recognise
+TARS, so ``lk.read`` and ``search_lightcurve(author='TARS').download_all()``
+work and ``prepare_allesfit -p tars`` runs end to end::
+
+    from allesfitter.tars import patch_lightkurve
+    patch_lightkurve()
 """
 
 import os
@@ -32,6 +39,9 @@ TESS_BJD_OFFSET = 2457000
 #::: NaN (e.g. QLP): it makes every point equally weighted and lets the fitted
 #::: `ln_err_flux_<inst>` term set the actual scale.
 PLACEHOLDER_FLUX_ERR = 1.0
+
+#::: marks the installed lightkurve as already patched by patch_lightkurve()
+_PATCH_FLAG = "_allesfitter_tars_patched"
 
 
 def read_tars(path, flux_err=None):
@@ -109,6 +119,108 @@ def read_tars(path, flux_err=None):
             "HLSPVER": primary.get("HLSPVER"),
         },
     )
+
+
+def is_tars_file(path_or_url):
+    """True when the target is a readable TARS product (``HLSPID='TARS'``).
+
+    Never raises: anything unopenable (URL, S3 URI, truncated download, a
+    non-FITS path) is simply "not TARS", so the caller falls back to
+    lightkurve's own handling and its error messages.
+    """
+    try:
+        with fits.open(path_or_url) as hdulist:
+            return str(hdulist[0].header.get("HLSPID", "")).strip().upper() == "TARS"
+    except Exception:
+        return False
+
+
+def patch_lightkurve(flux_err=None):
+    """Teach the installed lightkurve to recognise TARS products.
+
+    lightkurve dispatches on :func:`detect_filetype`, whose branches all miss
+    TARS, so ``lk.read`` and therefore ``SearchResult.download_all`` raise
+    ``LightkurveError: Not recognized as a supported data product``. This
+    registers a ``"tars"`` reader with astropy's I/O registry (the same
+    mechanism lightkurve uses for QLP, TASOC, CDIPS, ...) and wraps ``read`` so
+    TARS files are routed to :func:`read_tars` and everything else is delegated
+    untouched.
+
+    ``read`` has to be rebound in several namespaces: ``lightkurve.search``
+    does ``from .io import read`` at import time, so patching only
+    ``lightkurve.io.read`` would leave ``download_all`` still broken.
+
+    Parameters
+    ----------
+    flux_err : float, optional
+        Uncertainty handed to :func:`read_tars` for TARS products. TARS has no
+        error column, so the default leaves ``flux_err`` as NaN.
+
+    Returns
+    -------
+    bool
+        True if the patch was applied, False if it was already in place
+        (calling this repeatedly is safe and will not re-wrap ``read``).
+
+    Notes
+    -----
+    ``flux_column`` and ``quality_bitmask``, which ``download_all`` forwards,
+    are ignored for TARS: it publishes a single, already-normalized ``FLUX``
+    column and no quality flags.
+    """
+    import importlib
+
+    import lightkurve
+    import lightkurve.io as _lk_io
+    import lightkurve.io.detect as _lk_detect
+    import lightkurve.search as _lk_search
+    from astropy.io import registry
+    from lightkurve.lightcurve import LightCurve
+
+    #::: `lightkurve.io.read` the attribute is the *function* (io/__init__.py does
+    #::: `from .read import read`), which shadows the submodule of the same name;
+    #::: import_module goes through sys.modules and returns the real module
+    _lk_read = importlib.import_module("lightkurve.io.read")
+
+    if getattr(lightkurve, _PATCH_FLAG, False):
+        return False
+
+    def _read_tars_lightcurve(path_or_url, **kwargs):
+        #::: swallow the kwargs download_all forwards; see Notes above
+        kwargs.pop("flux_column", None)
+        kwargs.pop("quality_bitmask", None)
+        return read_tars(path_or_url, flux_err=kwargs.pop("flux_err", flux_err))
+
+    registry.register_reader("tars", LightCurve, _read_tars_lightcurve, force=True)
+
+    _original_detect = _lk_detect.detect_filetype
+
+    def detect_filetype(hdulist):
+        try:
+            if str(hdulist[0].header.get("HLSPID", "")).strip().upper() == "TARS":
+                return "TARS"
+        except Exception:
+            pass
+        return _original_detect(hdulist)
+
+    _original_read = _lk_read.read
+
+    def read(path_or_url, **kwargs):
+        if is_tars_file(path_or_url):
+            return _read_tars_lightcurve(path_or_url, **kwargs)
+        return _original_read(path_or_url, **kwargs)
+
+    #::: `detect_filetype` and `read` are imported by value into several
+    #::: namespaces, so every binding has to be replaced, not just the origin
+    for module in (_lk_detect, _lk_read):
+        if hasattr(module, "detect_filetype"):
+            module.detect_filetype = detect_filetype
+    for module in (_lk_read, _lk_io, _lk_search, lightkurve):
+        if hasattr(module, "read"):
+            module.read = read
+
+    setattr(lightkurve, _PATCH_FLAG, True)
+    return True
 
 
 def tars_to_csv(lc, path, bjd_offset=TESS_BJD_OFFSET):

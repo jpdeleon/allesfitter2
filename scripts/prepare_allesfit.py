@@ -51,6 +51,7 @@ from allesfitter.orbits import (
     circular_geometry_from_transit_duration,
     circular_transit_duration,
 )
+from allesfitter.tars import patch_lightkurve
 from allesfitter.utils.scripting import (
     a_from_rhoprs,
     as_from_rhop,
@@ -62,6 +63,10 @@ from allesfitter.utils.scripting import (
     get_tois,
     rho_from_mr,
 )
+
+#::: lightkurve cannot read TARS products on its own, so `-p tars` would die
+#::: inside download_all(); this teaches it the format before any search runs
+patch_lightkurve()
 
 logger.remove()
 log_format = "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{message}</level>"

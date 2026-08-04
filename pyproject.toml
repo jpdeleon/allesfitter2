@@ -24,7 +24,7 @@ dependencies = [
     "corner==2.2.1",
     "pandas>=2.1.0",
     "astropy>=5.3",
-    "lightkurve==2.4.2",
+    "lightkurve>=2.6.0",
     "tess-point",
     "scipy>=1.11.3",
     "numpy>=1.26.0,<3.0",
@@ -56,6 +56,9 @@ dev = [
 ultranest = [
     "ultranest>=4.0",
     "h5py",  # required by ultranest for its log_dir/resume backend
+]
+cmaes = [
+    "cma>=3.0",  # required by optimize(method='cmaes'); tests skip silently without it
 ]
 
 [project.urls]
