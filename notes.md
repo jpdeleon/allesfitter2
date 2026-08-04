@@ -461,6 +461,7 @@ Three ways to read off the mapping:
 
 - **`results/ttv.csv`** — one row per global index, in order, with the epoch number and `tc(BJD)`. Row `N` is `{companion}_ttv_transit_N`.
 - **The per-transit plots** — the `Transit N` label in `*_per_transit_*.pdf` *is* the global `N` (`afplot_per_transit` numbered these per instrument before Aug 2026; see the fix note below).
+- **`ttv_preparation/ttv_initial_guess_params.csv`** — written by `prepare_ttv_fit` in the same global order, ready to paste into `params.csv`.
 - **Directly** — `config.BASEMENT.data['b_tmid_observed_transits'][N-1]` is the linear-prediction midtime for `b_ttv_transit_N`.
 
 > **Fixed (Aug 2026):** `afplot_per_transit` previously labelled panels with a
@@ -470,6 +471,30 @@ Three ways to read off the mapping:
 > different TTV parameter than the red model curve. Panels are now numbered with
 > the global index and the line uses the matching parameter. The `Nth` suffix in
 > the plot *filenames* is still a per-instrument page marker, not a transit ID.
+
+### Per-transit plot files from `show_initial_guess`
+
+With **more than one** entry in `inst_phot`, `show_initial_guess` writes **one
+multi-page PDF per planet**:
+
+```
+results/initial_guess_per_transit_b.pdf   # page 1 spoc120, page 2 qlp200, page 3 qlp600, ...
+results/initial_guess_per_transit_c.pdf
+```
+
+instead of the previous one-file-per-instrument-and-page layout
+(`initial_guess_per_transit_qlp600_b_3th.pdf`). Pages follow `inst_phot` order,
+and each instrument still paginates at `max_transits` (default 20) panels per
+page. Because the instrument is no longer in the filename, it is now printed as
+the **title of every panel**, not just the top one.
+
+Two cases keep the old per-instrument filenames:
+
+- a single `inst_phot` — there is nothing to concatenate;
+- a raster `file_extension` (`.png`, `.jpg`, …) — only PDF holds multiple pages. A warning names the fallback.
+
+The posterior per-transit plots from `mcmc_output` / `ns_output`
+(`{mcmc,ns}_fit_per_transit_<inst>_<companion>_<N>th.pdf`) are unchanged.
 
 ## Performance & caching (`simulate_PDF` disk cache)
 

@@ -1720,7 +1720,6 @@ def afplot_per_transit(samples, inst, companion, base=None, kwargs_dict=None):
             N_transits, 1, figsize=(6, 4 * N_transits), sharey=True, tight_layout=True
         )
         axes = np.atleast_1d(axes)
-        axes[0].set(title=inst)
 
         for i, t in tqdm(enumerate(tmid_observed_transits), total=N_transits):
             #::: global index (1-based) where known, else this instrument's own count
@@ -1804,7 +1803,10 @@ def afplot_per_transit(samples, inst, companion, base=None, kwargs_dict=None):
                     )
 
             #::: axes decoration
-            ax.set(xlabel="Time", ylabel=ylabel)
+            #::: every panel carries the instrument, not just the top one: the
+            #::: per-companion PDFs concatenate several instruments into one
+            #::: file, where the instrument is no longer part of the filename.
+            ax.set(xlabel="Time", ylabel=ylabel, title=inst)
             ax.text(
                 0.95,
                 0.95,
@@ -2150,6 +2152,74 @@ def logprint_initial_guess():
 ###############################################################################
 #::: plot initial guess
 ###############################################################################
+def iter_per_transit_pages(samples, companion, kwargs_dict=None):
+    """Yield ``(inst, fig, last_transit)`` for every per-transit page of a companion.
+
+    Walks each instrument in ``inst_phot`` and pages through its transits using
+    ``afplot_per_transit``'s ``first_transit`` / ``max_transits`` pagination, so
+    callers can either write one file per page or collect the pages into a
+    single multi-page PDF.
+
+    A plotting failure is warned about and ends that instrument's pagination
+    (rather than being silently skipped, which used to make per-transit files
+    disappear without a clue); the remaining instruments still get plotted.
+    """
+    if kwargs_dict is None:
+        kwargs_dict = {}
+
+    for inst in config.BASEMENT.settings["inst_phot"]:
+        first_transit = 0
+        while first_transit >= 0:
+            try:
+                kwargs_dict["first_transit"] = first_transit
+                fig, axes, last_transit, total_transits = afplot_per_transit(
+                    samples, inst, companion, kwargs_dict=kwargs_dict
+                )
+            except Exception as e:
+                warnings.warn(
+                    f"afplot_per_transit failed for inst='{inst}' "
+                    + f"companion='{companion}' first_transit={first_transit}: {type(e).__name__}: {e}",
+                    stacklevel=2,
+                )
+                break
+
+            yield inst, fig, last_transit
+
+            if total_transits > 0 and last_transit < total_transits - 1:
+                first_transit = last_transit
+            else:
+                first_transit = -1
+
+
+def _save_per_transit_pdf(samples, companion, kwargs_dict, file_extension):
+    """Write every per-transit page of one companion into a single multi-page PDF.
+
+    Returns the output path, or ``None`` when the companion produced no pages
+    (in which case no file is created — ``PdfPages`` would otherwise leave an
+    unreadable zero-page PDF behind).
+    """
+    import matplotlib.pyplot as plt
+    from matplotlib.backends.backend_pdf import PdfPages
+
+    outpath = os.path.join(
+        config.BASEMENT.outdir, "initial_guess_per_transit_" + companion + file_extension
+    )
+
+    pdf = None
+    try:
+        for _inst, fig, _last_transit in iter_per_transit_pages(samples, companion, kwargs_dict):
+            if pdf is None:
+                #::: opened lazily so a companion with no pages leaves no file
+                pdf = PdfPages(outpath)
+            pdf.savefig(fig, bbox_inches="tight")
+            plt.close(fig)
+    finally:
+        if pdf is not None:
+            pdf.close()
+
+    return outpath if pdf is not None else None
+
+
 def plot_initial_guess(
     return_figs=False,
     kwargs_dict=None,
@@ -2185,44 +2255,42 @@ def plot_initial_guess(
                 plt.close(fig)
         if kwargs_dict is None:
             kwargs_dict = {}
+        #::: with several photometric instruments the per-transit pages are
+        #::: concatenated into one multi-page PDF per planet, instead of one
+        #::: file per instrument and page. Only PDF supports multiple pages,
+        #::: so raster formats keep the per-instrument filenames.
+        n_inst_phot = len(config.BASEMENT.settings["inst_phot"])
+        combine_per_companion = n_inst_phot > 1 and file_extension == ".pdf"
+        if n_inst_phot > 1 and file_extension != ".pdf":
+            warnings.warn(
+                f"file_extension='{file_extension}' cannot hold multiple pages; writing one "
+                "per-transit file per instrument instead of one per planet. Use '.pdf' to "
+                "get a single combined file.",
+                stacklevel=2,
+            )
+
         for companion in config.BASEMENT.settings["companions_phot"]:
-            for inst in config.BASEMENT.settings["inst_phot"]:
-                first_transit = 0
-                while first_transit >= 0:
-                    try:
-                        kwargs_dict["first_transit"] = first_transit
-                        fig, axes, last_transit, total_transits = afplot_per_transit(
-                            samples, inst, companion, kwargs_dict=kwargs_dict
-                        )
-                        fig.savefig(
-                            os.path.join(
-                                config.BASEMENT.outdir,
-                                "initial_guess_per_transit_"
-                                + inst
-                                + "_"
-                                + companion
-                                + "_"
-                                + str(last_transit)
-                                + "th"
-                                + file_extension,
-                            ),
-                            bbox_inches="tight",
-                        )
-                        plt.close(fig)
-                        if total_transits > 0 and last_transit < total_transits - 1:
-                            first_transit = last_transit
-                        else:
-                            first_transit = -1
-                    except Exception as e:
-                        # Surface the failure instead of silently moving on —
-                        # otherwise per-transit PDFs go missing without a
-                        # clue. Still break the inner loop so we don't spin.
-                        warnings.warn(
-                            f"afplot_per_transit failed for inst='{inst}' "
-                            + f"companion='{companion}' first_transit={first_transit}: {type(e).__name__}: {e}",
-                            stacklevel=2,
-                        )
-                        first_transit = -1
+            if combine_per_companion:
+                _save_per_transit_pdf(samples, companion, kwargs_dict, file_extension)
+            else:
+                for inst, fig, last_transit in iter_per_transit_pages(
+                    samples, companion, kwargs_dict
+                ):
+                    fig.savefig(
+                        os.path.join(
+                            config.BASEMENT.outdir,
+                            "initial_guess_per_transit_"
+                            + inst
+                            + "_"
+                            + companion
+                            + "_"
+                            + str(last_transit)
+                            + "th"
+                            + file_extension,
+                        ),
+                        bbox_inches="tight",
+                    )
+                    plt.close(fig)
         return None
 
     else:

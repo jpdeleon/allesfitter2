@@ -121,6 +121,11 @@ HD39091/
    allesfitter.ns_fit('.')      # nested sampling
    allesfitter.ns_output('.')   # parameter derivation
    ```
+   With more than one `inst_phot`, `show_initial_guess` writes the per-transit
+   plots as one multi-page PDF per planet
+   (`results/initial_guess_per_transit_<companion>.pdf`, one page per
+   instrument, instrument shown in each panel title) — see
+   [details](notes.md#per-transit-plot-files-from-show_initial_guess).
 3. **Execute:** `python run.py` — MCMC and nested-sampling outputs are saved separately
    inside the data directory, so the above target writes to `HD39091/mcmc_results/` and
    `HD39091/ns_results/`. The same holds for the CLI: `uv run allesfitter ns-fit HD39091`
