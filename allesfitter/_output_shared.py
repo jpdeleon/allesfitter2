@@ -15,13 +15,14 @@ Currently shared here:
 
 import csv
 import os
+import warnings
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 from . import config
 from ._figure_output import normalize_file_extension
-from .general_output import afplot_per_transit
+from .general_output import _save_per_transit_pdf, afplot_per_transit
 
 
 def save_per_transit_plots(posterior_samples, prefix, file_extension=".pdf"):
@@ -36,18 +37,45 @@ def save_per_transit_plots(posterior_samples, prefix, file_extension=".pdf"):
         The (subsampled) posterior draws used for plotting, exactly as passed
         to :func:`allesfitter.general_output.afplot_per_transit`.
     prefix : str
-        Output-filename prefix, ``'mcmc'`` or ``'ns'``. Files are written as
-        ``<outdir>/<prefix>_fit_per_transit_<inst>_<companion>_<N>th.pdf``.
+        Output-filename prefix, ``'mcmc'`` or ``'ns'``.
 
     Notes
     -----
-    Behaviour is preserved from the original in-line loops: any plotting error
-    ends the per-transit loop for that companion/instrument pair (previously a
-    bare ``except:``; narrowed to ``except Exception`` so ``KeyboardInterrupt``
-    and ``SystemExit`` still propagate).
+    For ``.pdf`` output (the default), every instrument's transits are
+    combined into a single chronologically-ordered multi-page file per
+    companion, ``<outdir>/<prefix>_fit_per_transit_<companion>.pdf`` —
+    mirroring ``initial_guess_per_transit_<companion>.pdf`` from
+    ``allesfitter show-initial-guess`` — instead of one file per
+    instrument/page. Raster formats can't hold multiple pages, so they keep
+    the original one-file-per-instrument-per-page naming,
+    ``<outdir>/<prefix>_fit_per_transit_<inst>_<companion>_<N>th<ext>``.
+
+    Any plotting error ends the per-transit loop for that companion/instrument
+    pair (narrowed to ``except Exception`` so ``KeyboardInterrupt`` and
+    ``SystemExit`` still propagate).
     """
     file_extension = normalize_file_extension(file_extension)
-    for companion in config.BASEMENT.settings["companions_phot"]:
+    companions = config.BASEMENT.settings["companions_phot"]
+    n_inst_phot = len(config.BASEMENT.settings["inst_phot"])
+
+    if file_extension == ".pdf":
+        for companion in companions:
+            outpath = os.path.join(
+                config.BASEMENT.outdir,
+                prefix + "_fit_per_transit_" + companion + file_extension,
+            )
+            _save_per_transit_pdf(posterior_samples, companion, {}, outpath)
+        return
+
+    if n_inst_phot > 1:
+        warnings.warn(
+            f"file_extension='{file_extension}' cannot hold multiple pages; writing one "
+            "per-transit file per instrument instead of one per planet. Use '.pdf' to "
+            "get a single combined file.",
+            stacklevel=2,
+        )
+
+    for companion in companions:
         for inst in config.BASEMENT.settings["inst_phot"]:
             first_transit = 0
             while first_transit >= 0:

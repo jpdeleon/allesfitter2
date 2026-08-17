@@ -577,14 +577,19 @@ instruments) keep `inst_phot` order. Since the instrument is in neither the
 filename nor the page grouping any more, it is printed as the **title of every
 panel**.
 
-Two cases keep the old per-instrument filenames, `inst_phot` ordering, and
+One case keeps the old per-instrument filenames, `inst_phot` ordering, and
 `max_transits` (default 20) panels per figure:
 
-- a single `inst_phot` — there is nothing to concatenate or interleave;
-- a raster `file_extension` (`.png`, `.jpg`, …) — only PDF holds multiple pages. A warning names the fallback.
+- a raster `file_extension` (`.png`, `.jpg`, …) — only PDF holds multiple pages. A warning names the fallback (when more than one `inst_phot` is configured).
 
-The posterior per-transit plots from `mcmc_output` / `ns_output`
-(`{mcmc,ns}_fit_per_transit_<inst>_<companion>_<N>th.pdf`) are unchanged.
+`mcmc_output` / `ns_output` write the same one-PDF-per-planet layout for their
+posterior per-transit plots, `{mcmc,ns}_fit_per_transit_<companion>.pdf`
+(`_output_shared.save_per_transit_plots`, reusing `general_output`'s
+`_save_per_transit_pdf`). Unlike `show_initial_guess`, this combines even with
+a **single** `inst_phot`: `afplot_per_transit`'s `max_transits=20` default
+means one instrument's transits alone can span several pages, so a lone
+instrument still benefits from concatenation. The raster fallback keeps
+`{mcmc,ns}_fit_per_transit_<inst>_<companion>_<N>th<ext>`.
 
 ## Performance & caching (`simulate_PDF` disk cache)
 

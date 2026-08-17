@@ -2273,22 +2273,18 @@ def iter_per_transit_pages_sorted(samples, companion, kwargs_dict=None):
         yield inst, fig, tmid
 
 
-def _save_per_transit_pdf(samples, companion, kwargs_dict, file_extension):
+def _save_per_transit_pdf(samples, companion, kwargs_dict, outpath):
     """Write every per-transit page of one companion into a single multi-page PDF.
 
     Pages are ordered chronologically (one transit each), not by ``inst_phot``,
     so transit numbers ascend through the file.
 
-    Returns the output path, or ``None`` when the companion produced no pages
-    (in which case no file is created — ``PdfPages`` would otherwise leave an
-    unreadable zero-page PDF behind).
+    Returns ``outpath`` on success, or ``None`` when the companion produced no
+    pages (in which case no file is created — ``PdfPages`` would otherwise
+    leave an unreadable zero-page PDF behind).
     """
     import matplotlib.pyplot as plt
     from matplotlib.backends.backend_pdf import PdfPages
-
-    outpath = os.path.join(
-        config.BASEMENT.outdir, "initial_guess_per_transit_" + companion + file_extension
-    )
 
     pdf = None
     try:
@@ -2356,7 +2352,11 @@ def plot_initial_guess(
 
         for companion in config.BASEMENT.settings["companions_phot"]:
             if combine_per_companion:
-                _save_per_transit_pdf(samples, companion, kwargs_dict, file_extension)
+                outpath = os.path.join(
+                    config.BASEMENT.outdir,
+                    "initial_guess_per_transit_" + companion + file_extension,
+                )
+                _save_per_transit_pdf(samples, companion, kwargs_dict, outpath)
             else:
                 for inst, fig, last_transit in iter_per_transit_pages(
                     samples, companion, kwargs_dict

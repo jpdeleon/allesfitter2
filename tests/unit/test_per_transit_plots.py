@@ -219,10 +219,11 @@ def test_save_per_transit_pdf_concatenates_all_instruments(
     fake_afplot()
 
     # Act
-    outpath = general_output._save_per_transit_pdf(np.zeros((1, 1)), "b", {}, ".pdf")
+    expected = str(tmp_path / "initial_guess_per_transit_b.pdf")
+    outpath = general_output._save_per_transit_pdf(np.zeros((1, 1)), "b", {}, expected)
 
     # Assert: one file per planet, one page per transit
-    assert outpath == str(tmp_path / "initial_guess_per_transit_b.pdf")
+    assert outpath == expected
     assert count_pdf_pages(outpath) == 3
 
 
@@ -235,7 +236,8 @@ def test_save_per_transit_pdf_writes_no_file_without_pages(
     fake_afplot()
 
     # Act
-    outpath = general_output._save_per_transit_pdf(np.zeros((1, 1)), "b", {}, ".pdf")
+    expected = str(tmp_path / "initial_guess_per_transit_b.pdf")
+    outpath = general_output._save_per_transit_pdf(np.zeros((1, 1)), "b", {}, expected)
 
     # Assert: a zero-page PDF would be unreadable, so none is created
     assert outpath is None
