@@ -1608,6 +1608,24 @@ def get_global_transit_labels(base, companion, tmid_observed_transits, period):
     """
     tmid_global = base.data.get(companion + "_tmid_observed_transits", None)
     if tmid_global is None or len(tmid_global) == 0:
+        try:
+            times_combined = []
+            for inst in base.settings.get("inst_phot", []):
+                if inst in base.data and "time" in base.data[inst]:
+                    times_combined += list(base.data[inst]["time"])
+            if len(times_combined) > 0:
+                times_combined = np.sort(times_combined)
+                window = base.settings.get("fast_fit_width", 8.0 / 24.0)
+                tmid_global = get_tmid_observed_transits(
+                    times_combined,
+                    base.params[companion + "_epoch"],
+                    base.params[companion + "_period"],
+                    window,
+                )
+        except Exception:
+            pass
+
+    if tmid_global is None or len(tmid_global) == 0:
         return [None] * len(tmid_observed_transits)
 
     tmid_global = np.asarray(tmid_global, dtype=float)
