@@ -240,13 +240,26 @@ class allesclass:
         except Exception:
             pass
 
-        print("working")
-
         from .results import results_directory
 
         ns_outdir = results_directory(datadir, "ns")
         mcmc_outdir = results_directory(datadir, "mcmc")
-        if os.path.exists(os.path.join(ns_outdir, "save_ns.pickle.gz")):
+        ns_save_path = os.path.join(ns_outdir, "save_ns.pickle.gz")
+        mcmc_save_path = os.path.join(mcmc_outdir, "mcmc_save.h5")
+        ns_available = os.path.exists(ns_save_path)
+        mcmc_available = os.path.exists(mcmc_save_path)
+
+        if ns_available and mcmc_available:
+            print(
+                f"Both NS and MCMC results found; using NS (priority): {ns_outdir}\n"
+                f"  ignoring MCMC results at: {mcmc_outdir}"
+            )
+        elif ns_available:
+            print(f"Using NS results: {ns_outdir}")
+        elif mcmc_available:
+            print(f"Using MCMC results: {mcmc_outdir}")
+
+        if ns_available:
             from . import nested_sampling_output
 
             config.BASEMENT.outdir = ns_outdir
@@ -261,7 +274,7 @@ class allesclass:
                 general_output.get_params_from_samples(self.posterior_samples)
             )
 
-        elif os.path.exists(os.path.join(mcmc_outdir, "mcmc_save.h5")):
+        elif mcmc_available:
             import emcee
 
             from .mcmc_output import (
