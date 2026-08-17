@@ -1059,14 +1059,25 @@ def main():
     #                 help="-sector=-1 uses most recent TESS sector (default); try -sector=all to use all",
     #                 default=None)
     ap.add_argument(
-        "-e", "--exptime", help="exposure time (default=None)", type=float, default=None
+        "-e",
+        "--exptime",
+        help="exposure time(s) in seconds (default=None, auto-detected). Accepts "
+        "multiple, one per --pipeline (or a single value shared by all pipelines), "
+        "e.g. -p spoc qlp -e 120 600",
+        type=float,
+        nargs="+",
+        default=None,
     )
     ap.add_argument(
         "-p",
         "--pipeline",
-        help="TESS/Kepler data pipeline (default='spoc')",
+        help="TESS/Kepler data pipeline(s) (default='spoc'). Accepts multiple, one "
+        "per --filename, to download each instrument from its own pipeline in a "
+        "single run, e.g. -f spoc120 qlp600 -p spoc qlp -e 120 600. A single "
+        "--pipeline value still only downloads the first --filename, as before.",
         type=str,
-        default="spoc",
+        nargs="+",
+        default=["spoc"],
     )
     ap.add_argument(
         "-f",
@@ -1201,11 +1212,26 @@ def main():
 
         mission = args.mission.lower()
         ticid = args.tic
-        pipeline = args.pipeline
         sector = args.sector
-        exptime = args.exptime
-        lc_type = "sap_flux" if pipeline == "qlp" else args.lc_type + "_flux"
         quality_bitmask = args.quality
+
+        # -p/-e each accept multiple values now. Pair them positionally so
+        # `-p spoc qlp -e 120 600` downloads one file per (pipeline, exptime);
+        # a single -e is broadcast across every -p, and omitting -e leaves
+        # every pipeline to auto-detect its own exptime (unchanged default).
+        pipelines = args.pipeline
+        exptimes = args.exptime
+        if exptimes is None:
+            exptimes = [None] * len(pipelines)
+        elif len(exptimes) == 1:
+            exptimes = exptimes * len(pipelines)
+        elif len(exptimes) != len(pipelines):
+            logger.error(
+                f"--exptime has {len(exptimes)} entries but --pipeline has "
+                f"{len(pipelines)} entries; give one --exptime per --pipeline, "
+                "or a single value shared by all."
+            )
+            sys.exit(1)
 
         if args.tic:
             query_name = f"TIC {ticid}"
@@ -1220,85 +1246,90 @@ def main():
             query_name = args.name
             label = args.name.strip().replace(" ", "")
 
-        result = lk.search_lightcurve(query_name, author=pipeline, exptime=exptime, mission=mission)
+        for pipeline, exptime in zip(pipelines, exptimes):
+            lc_type = "sap_flux" if pipeline == "qlp" else args.lc_type + "_flux"
 
-        if not result:
-            logger.error("No lightcurve found. Check inputs.")
-            sys.exit()
-
-        # Keep segment labels as strings so K2 campaigns like '11a'/'11b'
-        # (which can't cast to int) are preserved alongside TESS sectors.
-        sectors = [_parse_segment_label(s) for s in result.mission]
-        unique_sectors = sorted(set(sectors), key=_natural_segment_sort_key)
-
-        # Handle sector flag (args.sector is a list like ["all"] or [10])
-        if sector == ["all"]:
-            sector_to_use = unique_sectors
-        else:
-            sector_to_use = sector if isinstance(sector, list) else [sector]
-
-        idx = [str(s) in [str(x) for x in sector_to_use] for s in sectors]
-
-        if sum(idx) == 0:
-            _w = _segment_word(mission).capitalize()
-            msg = f"{_w} {sector} not available. Available: {unique_sectors}"
-            logger.error(msg)
-            sys.exit()
-
-        filtered_result = result[idx]
-
-        unique_exptimes = filtered_result.table.to_pandas().exptime.unique()
-        exptime = unique_exptimes[0] if exptime is None else exptime
-
-        if len(sector_to_use) != len(filtered_result):
-            filtered_result, exptime = _handle_multiple_exptimes(
-                filtered_result,
-                unique_exptimes,
-                logger,
-                context=f"{_segment_word(mission)}={sector_to_use}",
-                expected_n=len(sector_to_use),
+            result = lk.search_lightcurve(
+                query_name, author=pipeline, exptime=exptime, mission=mission
             )
 
-        lc = _safe_stitch(
-            filtered_result.download_all(flux_column=lc_type, quality_bitmask=quality_bitmask),
-            logger=logger,
-        )
-        if lc is None:
-            logger.error("No usable segments downloaded.")
-            sys.exit()
+            if not result:
+                logger.error(f"No lightcurve found for pipeline={pipeline}. Check inputs.")
+                sys.exit()
 
-        df = lc.to_pandas()
-        if len(df) == 0:
-            logger.error("Lightcurve data is empty.")
-            sys.exit()
+            # Keep segment labels as strings so K2 campaigns like '11a'/'11b'
+            # (which can't cast to int) are preserved alongside TESS sectors.
+            sectors = [_parse_segment_label(s) for s in result.mission]
+            unique_sectors = sorted(set(sectors), key=_natural_segment_sort_key)
 
-        # Handle time (lightkurve uses time as index; add mission BJD offset)
-        _bjd_offset = {"tess": 2457000, "k2": 2454833, "kepler": 2454833}.get(mission, 2457000)
-        df["time"] = df.index + _bjd_offset
-        df = df.reset_index(drop=True).sort_values(by="time")
+            # Handle sector flag (args.sector is a list like ["all"] or [10])
+            if sector == ["all"]:
+                sector_to_use = unique_sectors
+            else:
+                sector_to_use = sector if isinstance(sector, list) else [sector]
 
-        cols = ["time", "flux", "flux_err"]
-        msg = f"Somehow, `flux_err` is all NaN.\n{df[cols]}\n"
-        if len(df["flux_err"].dropna(axis="index")) == 0:
-            df["flux_err"] = 1
-            msg += "Setting flux error column = 1 (See allesfitter documentation)."
-            logger.error(msg)
-        df2 = df[cols].dropna(axis="index")
+            idx = [str(s) in [str(x) for x in sector_to_use] for s in sectors]
 
-        # Build output filename
-        sector_str = (
-            "_".join(map(str, sector_to_use))
-            if isinstance(sector_to_use, list)
-            else str(sector_to_use)
-        )
-        fn = f"{label}_{pipeline}_s{sector_str}_exp{int(exptime)}s.csv"
-        fp = Path(basedir, fn)
-        fp.parent.mkdir(parents=True, exist_ok=True)
+            if sum(idx) == 0:
+                _w = _segment_word(mission).capitalize()
+                msg = f"{_w} {sector} not available. Available: {unique_sectors}"
+                logger.error(msg)
+                sys.exit()
 
-        df2[cols].to_csv(fp, sep=",", header=False, index=False)
-        logger.info(f"Saved: {fp}")
-        logger.info(f"Ndata: {len(df2):,}")
-        logger.info("Lightcurve saved. Exiting (--lc-only mode).")
+            filtered_result = result[idx]
+
+            unique_exptimes = filtered_result.table.to_pandas().exptime.unique()
+            exptime = unique_exptimes[0] if exptime is None else exptime
+
+            if len(sector_to_use) != len(filtered_result):
+                filtered_result, exptime = _handle_multiple_exptimes(
+                    filtered_result,
+                    unique_exptimes,
+                    logger,
+                    context=f"{_segment_word(mission)}={sector_to_use}",
+                    expected_n=len(sector_to_use),
+                )
+
+            lc = _safe_stitch(
+                filtered_result.download_all(flux_column=lc_type, quality_bitmask=quality_bitmask),
+                logger=logger,
+            )
+            if lc is None:
+                logger.error("No usable segments downloaded.")
+                sys.exit()
+
+            df = lc.to_pandas()
+            if len(df) == 0:
+                logger.error("Lightcurve data is empty.")
+                sys.exit()
+
+            # Handle time (lightkurve uses time as index; add mission BJD offset)
+            _bjd_offset = {"tess": 2457000, "k2": 2454833, "kepler": 2454833}.get(mission, 2457000)
+            df["time"] = df.index + _bjd_offset
+            df = df.reset_index(drop=True).sort_values(by="time")
+
+            cols = ["time", "flux", "flux_err"]
+            msg = f"Somehow, `flux_err` is all NaN.\n{df[cols]}\n"
+            if len(df["flux_err"].dropna(axis="index")) == 0:
+                df["flux_err"] = 1
+                msg += "Setting flux error column = 1 (See allesfitter documentation)."
+                logger.error(msg)
+            df2 = df[cols].dropna(axis="index")
+
+            # Build output filename
+            sector_str = (
+                "_".join(map(str, sector_to_use))
+                if isinstance(sector_to_use, list)
+                else str(sector_to_use)
+            )
+            fn = f"{label}_{pipeline}_s{sector_str}_exp{int(exptime)}s.csv"
+            fp = Path(basedir, fn)
+            fp.parent.mkdir(parents=True, exist_ok=True)
+
+            df2[cols].to_csv(fp, sep=",", header=False, index=False)
+            logger.info(f"Saved: {fp}")
+            logger.info(f"Ndata: {len(df2):,}")
+        logger.info("Lightcurve(s) saved. Exiting (--lc-only mode).")
         return
 
     if results_dir:
@@ -1466,7 +1497,6 @@ def main():
         ticid = args.tic
         ctoiid = args.ctoi
         name = args.name
-        exptime = args.exptime
         mission = args.mission.lower()
         quality_bitmask = args.quality
         sigma = args.sigma
@@ -1474,6 +1504,43 @@ def main():
         ttv = args.ttv
         fns = args.filename if isinstance(args.filename, list) else [args.filename]
         fn = fns[0]  # first instrument (used where a single filename is needed)
+
+        # -p/-e each accept multiple values. A single -p (the default) keeps
+        # the original behaviour: only fns[0] is downloaded, and any other
+        # --filename entries are expected to already exist on disk (e.g. from
+        # a prior --lc-only run) — see the achromatic warning below. Passing
+        # one -p per -f instead downloads every instrument in this one run,
+        # each from its own pipeline/exptime, e.g.
+        # -f spoc120 qlp600 -p spoc qlp -e 120 600.
+        pipeline_list = args.pipeline
+        if len(pipeline_list) > 1 and len(pipeline_list) != len(fns):
+            logger.error(
+                f"--pipeline has {len(pipeline_list)} entries but --filename has "
+                f"{len(fns)} entries; give one --pipeline per --filename to "
+                "download each instrument, or a single --pipeline value to "
+                "download just the first --filename."
+            )
+            sys.exit(1)
+        n_download = len(pipeline_list)
+
+        exptimes = args.exptime
+        if exptimes is None:
+            exptimes = [None] * n_download
+        elif len(exptimes) == 1:
+            exptimes = exptimes * n_download
+        elif len(exptimes) != n_download:
+            logger.error(
+                f"--exptime has {len(exptimes)} entries but --pipeline has "
+                f"{n_download} entries; give one --exptime per --pipeline, "
+                "or a single value shared by all."
+            )
+            sys.exit(1)
+        # t_exp_{inst} in settings.csv is resolved per downloaded instrument
+        # below; instruments beyond n_download (declared via --filename but
+        # not downloaded here) fall back to this first exptime, matching the
+        # single-pipeline behaviour prior to multi-pipeline support.
+        t_exp_by_inst: dict[str, float] = {}
+        exptime = exptimes[0]
 
         # ----------------------------------------------------------------- #
         # Bandpass resolution for chromatic mode.
@@ -1562,9 +1629,6 @@ def main():
 
         # Mission-appropriate BJD offset used when reconstructing full BJD.
         bjd_offset = {"tess": 2457000, "k2": 2454833, "kepler": 2454833}[mission]
-
-        pipeline = args.pipeline
-        lc_type = "sap_flux" if pipeline == "qlp" else args.lc_type + "_flux"
 
         overwrite = args.overwrite
         update_db = args.update_db
@@ -2033,298 +2097,313 @@ fig = allesfitter.show_initial_guess(dir_path)
             except Exception as e:
                 logger.info(f"Error: {e}")
 
-        # search all available data for reference
-        all_lcs = lk.search_lightcurve(query_name, mission=mission)
-        logger.info(all_lcs)
-        if len(all_lcs) > 0:
-            pipelines = set([i.lower() for i in all_lcs.author])
-            logger.info(f"Available Pipelines: {pipelines}")
-        else:
-            msg = "No light curves found."
-            logger.error(msg)
-            sys.exit()
-        unique_exptimes = all_lcs.table.to_pandas().exptime.unique()
-        logger.info(f"Available Exp. times: {unique_exptimes}")
-        idx = [i == pipeline.lower() for i in pipelines]
-        if sum(idx) == 0:
-            msg = f"pipeline={pipeline} not in {pipelines}"
-            logger.error(msg)
-            sys.exit()
+        # One iteration per (fn, pipeline, exptime) triple. With the default
+        # single -p, this loop runs once for fns[0], exactly as before.
+        for fn, pipeline, exptime in zip(fns[:n_download], pipeline_list, exptimes):
+            lc_type = "sap_flux" if pipeline == "qlp" else args.lc_type + "_flux"
 
-        # search only requested data
-        result = lk.search_lightcurve(query_name, author=pipeline, exptime=exptime, mission=mission)
-        if result:
-            # K2 campaigns 11a/11b cannot cast to int. Keep labels as
-            # strings throughout and natural-sort for display.
-            sectors = [_parse_segment_label(s) for s in result.mission]
-            unique_sectors = sorted(set(sectors), key=_natural_segment_sort_key)
-            if sector_flag == "all_sector":
-                # case: sector='all'
-                # `sectors` mirrors `result.mission` (one row per exposure
-                # time / flux column), so it has duplicates and is in search
-                # order. Log the deduped+sorted view for human readability.
-                _w_p = _segment_word(mission, plural=True)
-                logger.info(
-                    f"Using {pipeline.upper()} pipeline in {len(unique_sectors)} {_w_p}: {unique_sectors}"
-                )
-                unique_exptimes = result.table.to_pandas().exptime.unique()
-                if len(unique_exptimes) > 1:
-                    result, exptime = _handle_multiple_exptimes(
-                        result,
-                        unique_exptimes,
-                        logger,
-                        context=f"all {_w_p}",
-                        expected_n=len(unique_sectors),
+            # search all available data for reference
+            all_lcs = lk.search_lightcurve(query_name, mission=mission)
+            logger.info(all_lcs)
+            if len(all_lcs) > 0:
+                available_pipelines = set([i.lower() for i in all_lcs.author])
+                logger.info(f"Available Pipelines: {available_pipelines}")
+            else:
+                msg = "No light curves found."
+                logger.error(msg)
+                sys.exit()
+            unique_exptimes = all_lcs.table.to_pandas().exptime.unique()
+            logger.info(f"Available Exp. times: {unique_exptimes}")
+            idx = [i == pipeline.lower() for i in available_pipelines]
+            if sum(idx) == 0:
+                msg = f"pipeline={pipeline} not in {available_pipelines}"
+                logger.error(msg)
+                sys.exit()
+
+            # search only requested data
+            result = lk.search_lightcurve(
+                query_name, author=pipeline, exptime=exptime, mission=mission
+            )
+            if result:
+                # K2 campaigns 11a/11b cannot cast to int. Keep labels as
+                # strings throughout and natural-sort for display.
+                sectors = [_parse_segment_label(s) for s in result.mission]
+                unique_sectors = sorted(set(sectors), key=_natural_segment_sort_key)
+                if sector_flag == "all_sector":
+                    # case: sector='all'
+                    # `sectors` mirrors `result.mission` (one row per exposure
+                    # time / flux column), so it has duplicates and is in search
+                    # order. Log the deduped+sorted view for human readability.
+                    _w_p = _segment_word(mission, plural=True)
+                    logger.info(
+                        f"Using {pipeline.upper()} pipeline in {len(unique_sectors)} {_w_p}: {unique_sectors}"
                     )
-                exptime = unique_exptimes[0] if exptime is None else exptime
-                lc = _safe_stitch(
-                    result.download_all(flux_column=lc_type, quality_bitmask=quality_bitmask),
-                    logger=logger,
-                )
-                if lc is None:
-                    logger.error("No usable segments downloaded.")
-                    sys.exit()
-                logger.info(
-                    "The lightcurves were not flattened/de-trended to avoid removing transits."
-                )
-                # Header sanity check: only meaningful when a single segment
-                # was downloaded. After stitching multiple segments the
-                # collapsed lc.{sector,campaign,quarter} can't sensibly equal
-                # any one of them (and for K2 11a/11b the alpha suffix would
-                # never match the int the LightCurve carries).
-                _seg = (
-                    getattr(lc, "sector", None)
-                    or getattr(lc, "campaign", None)
-                    or getattr(lc, "quarter", None)
-                )
-                if _seg is not None and len(unique_sectors) == 1:
-                    assert _segments_match(_seg, unique_sectors[-1])
-                if pipeline == "spoc":
-                    _lc1_for_meta = result.download_all(
-                        quality_bitmask=quality_bitmask, flux_column="pdcsap_flux"
-                    )
-                    lc1 = _safe_stitch(_lc1_for_meta, logger=logger)
-                    lc2 = _safe_stitch(
-                        result.download_all(
-                            quality_bitmask=quality_bitmask, flux_column="sap_flux"
-                        ),
+                    unique_exptimes = result.table.to_pandas().exptime.unique()
+                    if len(unique_exptimes) > 1:
+                        result, exptime = _handle_multiple_exptimes(
+                            result,
+                            unique_exptimes,
+                            logger,
+                            context=f"all {_w_p}",
+                            expected_n=len(unique_sectors),
+                        )
+                    exptime = unique_exptimes[0] if exptime is None else exptime
+                    lc = _safe_stitch(
+                        result.download_all(flux_column=lc_type, quality_bitmask=quality_bitmask),
                         logger=logger,
                     )
-            elif sector_flag == "multi_sector":
-                # case: sector int or list
-                _w = _segment_word(mission)
-                _w_p = _segment_word(mission, plural=True)
-                idx = [any(_segments_match(i, s) for s in sector) for i in sectors]
-                msg = f"{pipeline.upper()} lightcurves for {_w}={sector} is not available. Try {_w}={unique_sectors}."
-                assert sum(idx) > 0, logger.error(msg)
+                    if lc is None:
+                        logger.error("No usable segments downloaded.")
+                        sys.exit()
+                    logger.info(
+                        "The lightcurves were not flattened/de-trended to avoid removing transits."
+                    )
+                    # Header sanity check: only meaningful when a single segment
+                    # was downloaded. After stitching multiple segments the
+                    # collapsed lc.{sector,campaign,quarter} can't sensibly equal
+                    # any one of them (and for K2 11a/11b the alpha suffix would
+                    # never match the int the LightCurve carries).
+                    _seg = (
+                        getattr(lc, "sector", None)
+                        or getattr(lc, "campaign", None)
+                        or getattr(lc, "quarter", None)
+                    )
+                    if _seg is not None and len(unique_sectors) == 1:
+                        assert _segments_match(_seg, unique_sectors[-1])
+                    if pipeline == "spoc":
+                        _lc1_for_meta = result.download_all(
+                            quality_bitmask=quality_bitmask, flux_column="pdcsap_flux"
+                        )
+                        lc1 = _safe_stitch(_lc1_for_meta, logger=logger)
+                        lc2 = _safe_stitch(
+                            result.download_all(
+                                quality_bitmask=quality_bitmask, flux_column="sap_flux"
+                            ),
+                            logger=logger,
+                        )
+                elif sector_flag == "multi_sector":
+                    # case: sector int or list
+                    _w = _segment_word(mission)
+                    _w_p = _segment_word(mission, plural=True)
+                    idx = [any(_segments_match(i, s) for s in sector) for i in sectors]
+                    msg = f"{pipeline.upper()} lightcurves for {_w}={sector} is not available. Try {_w}={unique_sectors}."
+                    assert sum(idx) > 0, logger.error(msg)
 
-                filtered_result = result[idx]
-                unique_exptimes = filtered_result.table.to_pandas().exptime.unique()
-                msg = f"Using {pipeline.upper()} pipeline in {len(sector)} {_w_p}: {sector} (exptime={unique_exptimes} sec).\n"
-                if sector_flag != "all_sector":
-                    msg += f"Otherwise use {_w}=({unique_sectors}, all))."
-                logger.info(msg)
-                if len(sector) > len(filtered_result):
-                    msg = f"Not all {_w}={sector} have exptime={exptime} sec.\n"
-                    msg = f"Try to limit the {_w_p}.\n"
-                    logger.error(msg)
-                    sys.exit()
-                elif len(sector) < len(filtered_result):
-                    filtered_result, exptime = _handle_multiple_exptimes(
-                        filtered_result,
-                        unique_exptimes,
-                        logger,
-                        context=f"the given {_w_p}",
-                        expected_n=len(sector),
-                    )
-                assert len(sector) == len(filtered_result)
-                exptime = unique_exptimes[0] if exptime is None else exptime
-                lc = _safe_stitch(
-                    filtered_result.download_all(
-                        quality_bitmask=quality_bitmask, flux_column=lc_type
-                    ),
-                    logger=logger,
-                )
-                if lc is None:
-                    logger.error("No usable segments downloaded.")
-                    sys.exit()
-                logger.info(
-                    "The lightcurves were not flattened/de-trended to avoid removing transits."
-                )
-                _w = _segment_word(mission)
-                _seg = (
-                    getattr(lc, "sector", None)
-                    or getattr(lc, "campaign", None)
-                    or getattr(lc, "quarter", None)
-                )
-                msg = f"{_w}={_seg} in header not in requested {_w}={sector}"
-                # Skip the header check when multiple segments were stitched —
-                # the collapsed attribute can't represent more than one.
-                if _seg is not None and len(sector) == 1:
-                    assert any(_segments_match(_seg, s) for s in sector), logger.error(msg)
-                if pipeline == "spoc":
-                    _lc1_for_meta = filtered_result.download_all(
-                        quality_bitmask=quality_bitmask, flux_column="pdcsap_flux"
-                    )
-                    lc1 = _safe_stitch(_lc1_for_meta, logger=logger)
-                    lc2 = _safe_stitch(
+                    filtered_result = result[idx]
+                    unique_exptimes = filtered_result.table.to_pandas().exptime.unique()
+                    msg = f"Using {pipeline.upper()} pipeline in {len(sector)} {_w_p}: {sector} (exptime={unique_exptimes} sec).\n"
+                    if sector_flag != "all_sector":
+                        msg += f"Otherwise use {_w}=({unique_sectors}, all))."
+                    logger.info(msg)
+                    if len(sector) > len(filtered_result):
+                        msg = f"Not all {_w}={sector} have exptime={exptime} sec.\n"
+                        msg = f"Try to limit the {_w_p}.\n"
+                        logger.error(msg)
+                        sys.exit()
+                    elif len(sector) < len(filtered_result):
+                        filtered_result, exptime = _handle_multiple_exptimes(
+                            filtered_result,
+                            unique_exptimes,
+                            logger,
+                            context=f"the given {_w_p}",
+                            expected_n=len(sector),
+                        )
+                    assert len(sector) == len(filtered_result)
+                    exptime = unique_exptimes[0] if exptime is None else exptime
+                    lc = _safe_stitch(
                         filtered_result.download_all(
-                            quality_bitmask=quality_bitmask, flux_column="sap_flux"
+                            quality_bitmask=quality_bitmask, flux_column=lc_type
                         ),
                         logger=logger,
                     )
-            else:
-                if sector_flag == "first":
-                    idx = 0
-                    sector = sectors[idx]
-                elif sector_flag == "last" or sector_flag == "default":
-                    idx = -1
-                    sector = sectors[idx]
-
-                filtered_result = result[idx]
-                lc = filtered_result.download(
-                    quality_bitmask=quality_bitmask, flux_column=lc_type
-                ).normalize()
-                unique_exptimes = filtered_result.table.to_pandas().exptime.unique()
-                # logger.info(f"Exp times: {unique_exptimes}")
-                exptime = unique_exptimes[0] if exptime is None else exptime
-                _seg = (
-                    getattr(lc, "sector", None)
-                    or getattr(lc, "campaign", None)
-                    or getattr(lc, "quarter", None)
-                )
-                if _seg is not None:
-                    assert _segments_match(_seg, sector)
-                logger.info(
-                    f"Using {pipeline.upper()} pipeline in {_segment_word(mission)} {sector}."
-                )
-                if pipeline == "spoc":
-                    lc1 = filtered_result.download(
-                        quality_bitmask=quality_bitmask, flux_column="pdcsap_flux"
-                    ).normalize()
-                    _lc1_for_meta = lc1  # single LightCurve carries its own .meta
-                    lc2 = filtered_result.download(
-                        quality_bitmask=quality_bitmask, flux_column="sap_flux"
-                    ).normalize()
-            if sigma:
-                nbefore = len(lc)
-                lc = lc.remove_outliers(sigma=sigma)
-                nafter = len(lc)
-                if nbefore > nafter:
-                    diff = nbefore - nafter
-                    logger.info(f"Removed {diff} outliers using sigma={sigma}.")
-                if pipeline == "spoc":
-                    lc1 = lc1.remove_outliers(sigma=sigma)
-                    lc2 = lc2.remove_outliers(sigma=sigma)
-            if sector_flag == "all_sector":
-                secs = "s".join(map(str, unique_sectors))
-            else:
-                if isinstance(sector, list):
-                    secs = "s".join(map(str, sector))
+                    if lc is None:
+                        logger.error("No usable segments downloaded.")
+                        sys.exit()
+                    logger.info(
+                        "The lightcurves were not flattened/de-trended to avoid removing transits."
+                    )
+                    _w = _segment_word(mission)
+                    _seg = (
+                        getattr(lc, "sector", None)
+                        or getattr(lc, "campaign", None)
+                        or getattr(lc, "quarter", None)
+                    )
+                    msg = f"{_w}={_seg} in header not in requested {_w}={sector}"
+                    # Skip the header check when multiple segments were stitched —
+                    # the collapsed attribute can't represent more than one.
+                    if _seg is not None and len(sector) == 1:
+                        assert any(_segments_match(_seg, s) for s in sector), logger.error(msg)
+                    if pipeline == "spoc":
+                        _lc1_for_meta = filtered_result.download_all(
+                            quality_bitmask=quality_bitmask, flux_column="pdcsap_flux"
+                        )
+                        lc1 = _safe_stitch(_lc1_for_meta, logger=logger)
+                        lc2 = _safe_stitch(
+                            filtered_result.download_all(
+                                quality_bitmask=quality_bitmask, flux_column="sap_flux"
+                            ),
+                            logger=logger,
+                        )
                 else:
-                    secs = str(sector)
-            if pipeline == "spoc" and len(lc1) == len(lc2):
-                fig, axs = plt.subplots(2, 1, figsize=(8, 6), sharex=True)
-                _ = lc1.scatter(ax=axs[0], zorder=2, label="PDCSAP", c="C0")
-                _ = lc2.scatter(ax=axs[0], zorder=1, label="SAP", c="C1")
-                axs[0].set_title(
-                    f"{_segment_word(mission).capitalize()}={secs}\nexptime={int(exptime)}s"
-                )
-                (lc1 - lc2).scatter(ax=axs[1], label="difference", c="k")
-                fp = outdir.joinpath(
-                    f"{target_name}_{mission}_{lc_type.split('_')[0]}_s{secs}_exp{int(exptime)}s"
-                )
-                fig.savefig(fp.with_suffix(".png"))
-                # Record SPOC CROWDSAP -> allesfitter dilution next to the lightcurve
-                # so users can fill in dil_<inst> in params.csv without guessing.
-                contam_fp = outdir.joinpath("spoc_contamination.txt")
-                try:
-                    summary = _write_spoc_contamination(_lc1_for_meta, contam_fp, mission)
-                    if summary:
-                        logger.info(f"Saved: {contam_fp}")
-                        # Prepend a commented normal-prior dilution row above the
-                        # existing uniform row so users can opt into the
-                        # SPOC-informed prior without recomputing the value.
-                        params_fp = outdir.joinpath("params.csv")
-                        if _inject_dilution_normal_prior(
-                            params_fp,
-                            fn,
-                            median=summary["median_dilution"],
-                            std=summary["std_dilution"],
-                        ):
-                            logger.info(
-                                f"params.csv: added commented SPOC normal-prior row for dil_{fn} "
-                                f"(median={summary['median_dilution']:.4f}, "
-                                f"n_segments={summary['n_segments']})"
-                            )
+                    if sector_flag == "first":
+                        idx = 0
+                        sector = sectors[idx]
+                    elif sector_flag == "last" or sector_flag == "default":
+                        idx = -1
+                        sector = sectors[idx]
+
+                    filtered_result = result[idx]
+                    lc = filtered_result.download(
+                        quality_bitmask=quality_bitmask, flux_column=lc_type
+                    ).normalize()
+                    unique_exptimes = filtered_result.table.to_pandas().exptime.unique()
+                    # logger.info(f"Exp times: {unique_exptimes}")
+                    exptime = unique_exptimes[0] if exptime is None else exptime
+                    _seg = (
+                        getattr(lc, "sector", None)
+                        or getattr(lc, "campaign", None)
+                        or getattr(lc, "quarter", None)
+                    )
+                    if _seg is not None:
+                        assert _segments_match(_seg, sector)
+                    logger.info(
+                        f"Using {pipeline.upper()} pipeline in {_segment_word(mission)} {sector}."
+                    )
+                    if pipeline == "spoc":
+                        lc1 = filtered_result.download(
+                            quality_bitmask=quality_bitmask, flux_column="pdcsap_flux"
+                        ).normalize()
+                        _lc1_for_meta = lc1  # single LightCurve carries its own .meta
+                        lc2 = filtered_result.download(
+                            quality_bitmask=quality_bitmask, flux_column="sap_flux"
+                        ).normalize()
+                if sigma:
+                    nbefore = len(lc)
+                    lc = lc.remove_outliers(sigma=sigma)
+                    nafter = len(lc)
+                    if nbefore > nafter:
+                        diff = nbefore - nafter
+                        logger.info(f"Removed {diff} outliers using sigma={sigma}.")
+                    if pipeline == "spoc":
+                        lc1 = lc1.remove_outliers(sigma=sigma)
+                        lc2 = lc2.remove_outliers(sigma=sigma)
+                if sector_flag == "all_sector":
+                    secs = "s".join(map(str, unique_sectors))
+                else:
+                    if isinstance(sector, list):
+                        secs = "s".join(map(str, sector))
                     else:
-                        logger.info(
-                            "CROWDSAP not present in SPOC header — skipping spoc_contamination.txt."
+                        secs = str(sector)
+                if pipeline == "spoc" and len(lc1) == len(lc2):
+                    fig, axs = plt.subplots(2, 1, figsize=(8, 6), sharex=True)
+                    _ = lc1.scatter(ax=axs[0], zorder=2, label="PDCSAP", c="C0")
+                    _ = lc2.scatter(ax=axs[0], zorder=1, label="SAP", c="C1")
+                    axs[0].set_title(
+                        f"{_segment_word(mission).capitalize()}={secs}\nexptime={int(exptime)}s"
+                    )
+                    (lc1 - lc2).scatter(ax=axs[1], label="difference", c="k")
+                    fp = outdir.joinpath(
+                        f"{target_name}_{mission}_{lc_type.split('_')[0]}_s{secs}_exp{int(exptime)}s"
+                    )
+                    fig.savefig(fp.with_suffix(".png"))
+                    # Record SPOC CROWDSAP -> allesfitter dilution next to the lightcurve
+                    # so users can fill in dil_<inst> in params.csv without guessing.
+                    contam_fp = outdir.joinpath(f"{fn}_spoc_contamination.txt")
+                    try:
+                        summary = _write_spoc_contamination(_lc1_for_meta, contam_fp, mission)
+                        if summary:
+                            logger.info(f"Saved: {contam_fp}")
+                            # Prepend a commented normal-prior dilution row above the
+                            # existing uniform row so users can opt into the
+                            # SPOC-informed prior without recomputing the value.
+                            params_fp = outdir.joinpath("params.csv")
+                            if _inject_dilution_normal_prior(
+                                params_fp,
+                                fn,
+                                median=summary["median_dilution"],
+                                std=summary["std_dilution"],
+                            ):
+                                logger.info(
+                                    f"params.csv: added commented SPOC normal-prior row for dil_{fn} "
+                                    f"(median={summary['median_dilution']:.4f}, "
+                                    f"n_segments={summary['n_segments']})"
+                                )
+                        else:
+                            logger.info(
+                                "CROWDSAP not present in SPOC header — skipping spoc_contamination.txt."
+                            )
+                    except Exception as _e:
+                        logger.warning(f"Could not write spoc_contamination.txt: {_e}")
+                else:
+                    ax = lc.scatter(label=pipeline)
+                    ax.set_title(
+                        f"{_segment_word(mission).capitalize()}={secs}\nexptime={int(exptime)}s"
+                    )
+                    fp = outdir.joinpath(
+                        f"{target_name}_{mission}_{pipeline}_s{secs}_exp{int(exptime)}s"
+                    )
+                    ax.figure.savefig(fp.with_suffix(".png"))
+                logger.info(f"Saved: {fp.with_suffix('.png')}")
+                df = lc.to_pandas()
+                msg = "Somehow, the lightcurve data is empty."
+                assert len(df) > 0, logger.error(msg)
+                df["time"] = df.index + bjd_offset
+                df = df.reset_index(drop=True).sort_values(by="time")
+                cols = ["time", "flux", "flux_err"]
+                msg = f"Somehow, `flux_err` is all NaN.\n{df[cols]}\n"
+                if len(df["flux_err"].dropna(axis="index")) == 0:
+                    df["flux_err"] = 1
+                    msg += "Setting flux error column = 1 (See allesfitter documentation)."
+                    logger.error(msg)
+                df2 = df[cols].dropna(axis="index")
+                msg = "Lightcurve is all NaN. No lightcurve downloaded."
+                assert len(df2) > 0, logger.error(msg)
+                df2[cols].to_csv(fp.with_suffix(".csv"), sep=",", header=False, index=False)
+                logger.info(f"Saved: {fp.with_suffix('.csv')}")
+                # Also save under the instrument label allesfitter expects
+                # (inst_phot in settings.csv). This is the file the fit and
+                # allesclass load at runtime.
+                inst_fp = outdir.joinpath(f"{fn}.csv")
+                df2[cols].to_csv(inst_fp, sep=",", header=False, index=False)
+                logger.info(f"Saved: {inst_fp}")
+
+                # Refine the GP / noise prior bounds for this instrument using
+                # the actual cadence, baseline, and per-cadence scatter of the
+                # downloaded lightcurve. Replaces the generic, hardcoded
+                # bounds with data-aware ones (see _dataset_aware_gp_bounds).
+                try:
+                    _tdur_d = _gp_protective_tdur_days(companion_tdur_hours)
+                    _gp = _dataset_aware_gp_bounds(
+                        df2["time"].to_numpy(),
+                        df2["flux"].to_numpy(),
+                        tdur_days=_tdur_d,
+                    )
+                    if _gp is not None:
+                        _update_params_gp_bounds(
+                            outdir.joinpath("params.csv"), fn, _gp, logger=logger
                         )
                 except Exception as _e:
-                    logger.warning(f"Could not write spoc_contamination.txt: {_e}")
+                    logger.warning(f"Could not refine GP priors for {fn}: {_e}")
+
+                logger.info(f"Ndata: {len(df):,}")
+                logger.info(df[cols].head())
+                if debug:
+                    logger.info(df.head())
+
+                # t_exp_{inst} in settings.csv is resolved from the exptime
+                # actually used for this instrument's download, not a single
+                # global value — necessary once pipelines have different
+                # cadences (e.g. SPOC 120 s + QLP 600 s).
+                t_exp_by_inst[fn] = exptime
+
+                # TTV rows are appended at the very end of main() once all
+                # config files and the {fn}.csv lightcurve are on disk — that
+                # lets us use allesclass(outdir).BASEMENT.data to pick up the
+                # same observed-transit counts the fit will compute.
             else:
-                ax = lc.scatter(label=pipeline)
-                ax.set_title(
-                    f"{_segment_word(mission).capitalize()}={secs}\nexptime={int(exptime)}s"
-                )
-                fp = outdir.joinpath(
-                    f"{target_name}_{mission}_{pipeline}_s{secs}_exp{int(exptime)}s"
-                )
-                ax.figure.savefig(fp.with_suffix(".png"))
-            logger.info(f"Saved: {fp.with_suffix('.png')}")
-            df = lc.to_pandas()
-            msg = "Somehow, the lightcurve data is empty."
-            assert len(df) > 0, logger.error(msg)
-            df["time"] = df.index + bjd_offset
-            df = df.reset_index(drop=True).sort_values(by="time")
-            cols = ["time", "flux", "flux_err"]
-            msg = f"Somehow, `flux_err` is all NaN.\n{df[cols]}\n"
-            if len(df["flux_err"].dropna(axis="index")) == 0:
-                df["flux_err"] = 1
-                msg += "Setting flux error column = 1 (See allesfitter documentation)."
+                msg = f"No lightcurve downloaded for pipeline={pipeline}. Check inputs."
                 logger.error(msg)
-            df2 = df[cols].dropna(axis="index")
-            msg = "Lightcurve is all NaN. No lightcurve downloaded."
-            assert len(df2) > 0, logger.error(msg)
-            df2[cols].to_csv(fp.with_suffix(".csv"), sep=",", header=False, index=False)
-            logger.info(f"Saved: {fp.with_suffix('.csv')}")
-            # Also save under the instrument label allesfitter expects
-            # (inst_phot in settings.csv). This is the file the fit and
-            # allesclass load at runtime.
-            inst_fp = outdir.joinpath(f"{fn}.csv")
-            df2[cols].to_csv(inst_fp, sep=",", header=False, index=False)
-            logger.info(f"Saved: {inst_fp}")
-
-            # Refine the GP / noise prior bounds for this instrument using
-            # the actual cadence, baseline, and per-cadence scatter of the
-            # downloaded lightcurve. Replaces the generic, hardcoded
-            # bounds with data-aware ones (see _dataset_aware_gp_bounds).
-            try:
-                _tdur_d = _gp_protective_tdur_days(companion_tdur_hours)
-                _gp = _dataset_aware_gp_bounds(
-                    df2["time"].to_numpy(),
-                    df2["flux"].to_numpy(),
-                    tdur_days=_tdur_d,
-                )
-                if _gp is not None:
-                    _update_params_gp_bounds(outdir.joinpath("params.csv"), fn, _gp, logger=logger)
-            except Exception as _e:
-                logger.warning(f"Could not refine GP priors for {fn}: {_e}")
-
-            logger.info(f"Ndata: {len(df):,}")
-            logger.info(df[cols].head())
-            if debug:
-                logger.info(df.head())
-
-            # TTV rows are appended at the very end of main() once all
-            # config files and the {fn}.csv lightcurve are on disk — that
-            # lets us use allesclass(outdir).BASEMENT.data to pick up the
-            # same observed-transit counts the fit will compute.
-        else:
-            msg = "No lightcurve downloaded. Check inputs."
-            logger.error(msg)
-            sys.exit()
+                sys.exit()
 
         # =====Create settings.csv===== #
         text2 = """#name,value
@@ -2392,16 +2471,21 @@ ns_tol,100
 #####################################,\n"""
         # Resolve exposure time strictly from input: --exptime (in seconds)
         # when supplied, else the value lightkurve reported for the selected
-        # data (also in seconds). The settings.csv row is the direct
-        # seconds → days conversion. We never derive exptime from
-        # np.diff(time) — that conflates sampling cadence with actual exposure
-        # and corrupts ellc's exposure-time integration.
-        exptime_sec = int(round(args.exptime if args.exptime is not None else exptime))
-        t_exp_val = exptime_sec / 86400.0
-        assert t_exp_val < 1, f"t_exp_val should be < 1 day, got {t_exp_val}"
+        # data (also in seconds). Each downloaded instrument keeps its own
+        # resolved exptime (t_exp_by_inst) — necessary once pipelines have
+        # different cadences (e.g. SPOC 120 s + QLP 600 s). An instrument
+        # declared via --filename but not downloaded here (the single -p
+        # case, where only fns[0] is fetched) falls back to fns[0]'s
+        # exptime, matching pre-multi-pipeline behaviour. We never derive
+        # exptime from np.diff(time) — that conflates sampling cadence with
+        # actual exposure and corrupts ellc's exposure-time integration.
         text2 += "### crucial only for long (>600s) exposure times,\n"
+        _fallback_exptime = t_exp_by_inst[fns[0]]
         for inst in fns:
-            text2 += f"t_exp_{inst},{t_exp_val:.6f}\n"
+            _exptime_sec = int(round(t_exp_by_inst.get(inst, _fallback_exptime)))
+            _t_exp_val = _exptime_sec / 86400.0
+            assert _t_exp_val < 1, f"t_exp_val should be < 1 day, got {_t_exp_val}"
+            text2 += f"t_exp_{inst},{_t_exp_val:.6f}\n"
             text2 += f"#t_exp_{inst},0.020833\n"
             text2 += f"#t_exp_n_int_{inst},10\n"
         text2 += """###############################################################################,

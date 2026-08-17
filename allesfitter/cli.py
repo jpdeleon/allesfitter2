@@ -48,8 +48,20 @@ def prepare(
     ),
     campaign: str | None = typer.Option(None, "-c", "--campaign", help="K2 campaign"),
     quarter: str | None = typer.Option(None, "-q", "--quarter", help="Kepler quarter"),
-    exptime: float | None = typer.Option(None, "-e", "--exptime", help="exposure time (seconds)"),
-    pipeline: str = typer.Option("spoc", "-p", "--pipeline", help="TESS/Kepler data pipeline"),
+    exptime: list[float] | None = typer.Option(
+        None,
+        "-e",
+        "--exptime",
+        help="exposure time(s) in seconds; repeat once per --pipeline, or pass a "
+        "single value shared by all pipelines",
+    ),
+    pipeline: list[str] = typer.Option(
+        ["spoc"],
+        "-p",
+        "--pipeline",
+        help="TESS/Kepler data pipeline(s); repeat once per --filename to "
+        "download each instrument from its own pipeline in one run",
+    ),
     filename: list[str] | None = typer.Option(
         None, "-f", "--filename", help="lightcurve filename(s)"
     ),
@@ -114,9 +126,9 @@ def prepare(
     if quarter is not None:
         argv += ["-q", str(quarter)]
     if exptime is not None:
-        argv += ["-e", str(exptime)]
-    if pipeline != "spoc":
-        argv += ["-p", pipeline]
+        argv += ["-e"] + [str(v) for v in exptime]
+    if pipeline != ["spoc"]:
+        argv += ["-p"] + pipeline
     if filename:
         argv += ["-f"] + filename
     if mission != "tess":

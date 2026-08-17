@@ -409,23 +409,26 @@ Either bound is optional (one-sided clipping). Clipped points are removed from t
 
 You should be specific which lightcurve produced by which pipeline to use. SPOC produces two lightcurves `pdcsap` and `sap` and `pdcsap` is usually better so it is used by default. Inspect the plots in the `.png` file which shows both `pdcsap` and `sap` lightcurves. In the event you want to use `sap` instead, then specify `-lc sap` in the script.
 
-In case you want to study the impact on derived transit parameters by the choice of lightcurves produced by two different TESS pipelines, try
+In case you want to study the impact on derived transit parameters by the choice of lightcurves produced by two different TESS pipelines, give one `-p` per `-f` in a single call:
 ```bash
-$ prepare_allesfit -name "HD 39091" -s 1 -p spoc -f spoc -dir spoc
-$ prepare_allesfit -name "HD 39091" -s 1 -p qlp -f qlp -dir qlp
+$ prepare_allesfit -name "HD 39091" -s 1 -f spoc qlp -p spoc qlp
 ```
-Note that two directories are produced. Before fitting, you should manually combine each parameter file into one `params.csv` and `settings.csv`. In `settings.csv`, set `inst_phot,spoc qlp` to specify that two instruments are used for fitting. You should also indicate two names in limb darkening, error, and baseline model parameters e.g.
+This downloads both instruments into one output directory as `spoc.csv` and
+`qlp.csv`, and `params.csv`/`settings.csv` already carry `inst_phot,spoc qlp`
+plus the per-instrument limb-darkening, error, and baseline rows (`host_ld_law_spoc`,
+`host_ld_law_qlp`, `error_flux_spoc`, `error_flux_qlp`, `baseline_flux_spoc`,
+`baseline_flux_qlp`, …) — no manual merging needed.
+
+`-p` only accepts multiple pipelines when it matches the count of `-f`; a
+single `-p` (the default) still only downloads `-f`'s first instrument, and
+any further `-f` names are expected to already exist on disk (e.g. from a
+prior `--lc-only` run) — that's the older two-command workflow:
+```bash
+$ prepare_allesfit -name "HD 39091" -s 1 -p spoc -f spoc -dir spoc --lc-only
+$ prepare_allesfit -name "HD 39091" -s 1 -p qlp -f qlp -dir qlp --lc-only
 ```
-host_ld_law_spoc,quad
-host_ld_law_qlp,quad
-...
-error_flux_spoc,sample
-error_flux_qlp,sample
-...
-baseline_flux_spoc,sample_GP_Matern32
-baseline_flux_qlp,sample_GP_Matern32
-```
-The pipeline will expect two lightcurves named `spoc.csv` and `qlp.csv`.
+still useful when you want to inspect or reuse each pipeline's raw download
+independently before merging.
 
 ### TARS light curves (not supported by lightkurve)
 
@@ -508,12 +511,19 @@ and leaves the absolute scale to the fitted `ln_err_flux_<inst>` term, so keep
 
 You should also be specific which exposure time to use. By default, 120s is good enough to produce reliable results.
 
-In case you want the effect of the choice of lightcurves with different exposure times, try
+In case you want the effect of the choice of lightcurves with different exposure times, give one `-p`/`-e` per `-f` in a single call (repeat the pipeline name if it's the same pipeline at different cadences):
 ```bash
-$ prepare_allesfit -toi HD39091 -s -1 -p qlp -e 200 -f qlp200 -dir qlp200
-$ prepare_allesfit -toi HD39091 -s -1 -p qlp -e 600 -f qlp600 -dir qlp600
+$ prepare_allesfit -toi HD39091 -s -1 -f qlp200 qlp600 -p qlp qlp -e 200 600
 ```
-As before, you should merge the outputs into one `params.csv` and `settings.csv`. In case only long cadence e.g. exp=1800s data is available, you should also set `t_exp_qlp1800,0.02` which is the exposure time in unit of days for the `qlp1800` lightcurve.
+This writes `qlp200.csv` and `qlp600.csv` into one output directory, and
+`settings.csv` gets each instrument's own `t_exp_<inst>` (in days) resolved
+from *its* exposure time automatically — no manual edit needed, even when
+mixing exposure times across pipelines, e.g. `-f spoc120 qlp600 -p spoc qlp -e 120 600`.
+
+As before, `-e`/`-p` given as a single value only apply to `-f`'s first
+instrument; further `-f` names must already exist on disk (the older
+two-command `--lc-only` workflow — see above), and in that case you'll need
+to set e.g. `t_exp_qlp1800,0.02` (exposure time in days) by hand.
 
 ## Using a previous run for a TTV fit
 

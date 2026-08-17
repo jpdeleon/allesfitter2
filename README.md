@@ -231,8 +231,8 @@ Each accepts explicit numbers/labels (`-s 1 3 5`), `-1` for the most recent (def
 | Option | Description | Default |
 |--------|-------------|---------|
 | `-m, --mission <NAME>` | `tess`, `k2`, or `kepler` | `tess` |
-| `-e, --exptime <SEC>` | Exposure time in seconds (`120`, `200`, `600`, `1800`); written to `settings.csv` as `t_exp_<inst>` in days | None (lightkurve metadata) |
-| `-p, --pipeline <NAME>` | Data pipeline | `spoc` |
+| `-e, --exptime <SEC>...` | Exposure time(s) in seconds (`120`, `200`, `600`, `1800`); written to `settings.csv` as `t_exp_<inst>` in days. Accepts multiple, one per `--pipeline`, or a single value shared by all | None (lightkurve metadata) |
+| `-p, --pipeline <NAME>...` | Data pipeline(s). A single value (default) downloads only the first `--filename`, as before. Give one `--pipeline` per `--filename` to download every instrument — each from its own pipeline/exptime — in one run, e.g. `-f spoc120 qlp600 -p spoc qlp -e 120 600` | `spoc` |
 | `-lc, --lc_type <TYPE>` | Light curve type | `pdcsap` |
 | `-sig, --sigma <N>` | Sigma clipping threshold | None |
 | `-qb, --quality <LEVEL>` | Quality bitmask (`none`/`default`/`hard`/`hardest`) | `default` |
