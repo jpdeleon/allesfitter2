@@ -205,7 +205,7 @@ The user's `params.csv` initial values + a stochastic emcee pre-run only get you
 import allesfitter
 
 allesfitter.show_initial_guess('.')
-res = allesfitter.optimize('.', method='cmaes', polish=True, n_restarts=4)
+res = allesfitter.optimize('.', method='differential_evolution', refine=True, n_restarts=4)
 if res.accepted:
     print(f"optimize OK: lnprob {res.lnprob_initial:+.1f} -> {res.lnprob_opt:+.1f} "
           f"(Δ={res.delta_lnprob:+.1f}) in {res.nfev} evals, {res.wallclock_s:.1f}s")
@@ -223,13 +223,15 @@ The first time an accepted result actually overwrites `params.csv`, `optimize()`
 
 | `method=` | When to prefer | Notes |
 |---|---|---|
-| `'cmaes'` *(default)* | Almost everything in 10–50 dims | Requires `pip install cma`. Derivative-free, self-tuning step size, handles multimodal GP marginal likelihoods. Best general choice. |
-| `'dual_annealing'` | scipy-only environments | Single chain; slower than CMA-ES wall-clock but no extra dep. |
-| `'differential_evolution'` | Highly multimodal or `ndim > 40` | Population-based, parallel via `workers=N`. Needs more tuning. |
+| `'differential_evolution'` *(default)* | Almost everything, especially highly multimodal or `ndim > 40` | Population-based, no extra dependency, parallel across CPU cores via `workers=N`. |
+| `'cmaes'` | 10–50 dims, single-chain | Requires `pip install cma`. Derivative-free, self-tuning step size, handles multimodal GP marginal likelihoods. |
+| `'dual_annealing'` | scipy-only environments | Single chain; slower than CMA-ES/DE wall-clock but no extra dep. |
 | `'L-BFGS-B'` | Already near the MAP / want a fast local polish | Finite-diff gradient; gets stuck on local maxima. |
 | `'Powell'` | Derivative-free local | Drop-in for L-BFGS-B when finite-diff is too noisy. |
 
-`polish=True` (default) appends a short L-BFGS-B refine to any global method.
+`refine=True` (default) appends a short L-BFGS-B refine to any global method.
+
+**Speeding up `differential_evolution`.** Its per-generation population evaluations parallelize across processes via `workers=N` (`N=-1` uses all cores). The CLI (`uv run allesfitter optimize <dir>`) exposes this as `--workers`/`-w`, defaulting to half the machine's CPU cores, and a `--maxfevals` budget flag. The remaining per-eval cost is dominated by the transit-model backend (e.g. `ellc.fluxes`), so parallel workers and a tighter `maxfevals`/`n_restarts` budget are the main levers short of swapping the transit backend.
 
 ### Acceptance gates
 

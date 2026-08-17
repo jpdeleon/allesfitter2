@@ -1,3 +1,5 @@
+import importlib
+
 from typer.testing import CliRunner
 
 import allesfitter.cli as cli_module
@@ -59,6 +61,50 @@ def test_prepare_forwards_tic_transit_arguments_before_running_script(monkeypatc
         "--depth-err",
         "100.0",
     ]
+
+
+def test_optimize_defaults_to_differential_evolution_with_half_cpu_workers(monkeypatch, tmp_path):
+    received = {}
+    optimize_submodule = importlib.import_module("allesfitter.optimize")
+    monkeypatch.setattr(
+        optimize_submodule,
+        "optimize",
+        lambda dir_path, **kwargs: received.update(kwargs),
+    )
+
+    result = CliRunner().invoke(app, ["optimize", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    assert received["method"] == "differential_evolution"
+    assert received["workers"] == cli_module._default_workers()
+    assert received["workers"] >= 1
+    assert received["maxfevals"] is None
+
+
+def test_optimize_forwards_workers_and_maxfevals_overrides(monkeypatch, tmp_path):
+    received = {}
+    optimize_submodule = importlib.import_module("allesfitter.optimize")
+    monkeypatch.setattr(
+        optimize_submodule,
+        "optimize",
+        lambda dir_path, **kwargs: received.update(kwargs),
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "optimize",
+            str(tmp_path),
+            "--workers",
+            "4",
+            "--maxfevals",
+            "200",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert received["workers"] == 4
+    assert received["maxfevals"] == 200
 
 
 def test_show_params_labels_fit_status_column(tmp_path):

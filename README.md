@@ -34,7 +34,7 @@ full walkthrough in [notes.md](notes.md).
 | **Stellar-density prior** | Break the `Rp/R★`–`a/R★`–`i` degeneracy from R★, M★ | `use_host_density_prior,True` + `params_star.csv` | — |
 | **Required transit geometry** | Condition an individual photometric companion on producing a primary transit, including eccentric and grazing geometries | `require_<companion>_transit,True` | — |
 | **Inference engines** | Nested sampling (evidence + multimodal) and MCMC | `ns_fit` / `mcmc_fit` | — |
-| **Warm-start optimizer** | Global optimizer (CMA-ES default) lands the sampler in a good basin, with safe acceptance gates and CMA warm-resume | `allesfitter.optimize(...)` | [link](notes.md#warm-starting-mcmc--ns-with-allesfitteroptimize) |
+| **Warm-start optimizer** | Global optimizer (`differential_evolution` default, parallelizable across CPU cores via `--workers`) lands the sampler in a good basin, with safe acceptance gates and CMA warm-resume | `allesfitter.optimize(...)` | [link](notes.md#warm-starting-mcmc--ns-with-allesfitteroptimize) |
 | **Fast / binned evaluation** | Transit-window-only evaluation (`fast_fit`); load-time binning with auto supersampling | `fast_fit,True`, `binning`/`binning_<inst>` | [link](notes.md#choosing-settings--priors-by-use-case) |
 | **Raw-flux clipping** | Drop out-of-window points from the fit, keep them flagged on plots | `flux_min_raw` / `flux_max_raw` | [link](notes.md#raw-flux-outlier-clipping) |
 | **Data preparation** | Auto-download + multi-pipeline light curves (TESS/K2/Kepler) and full config generation | `prepare_allesfit` CLI | [CLI](#command-line-options) |

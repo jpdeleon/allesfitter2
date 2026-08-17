@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import math
+import os
 import sys
 from pathlib import Path
 
@@ -14,6 +15,13 @@ app = typer.Typer(
     help="A global inference framework for photometry and RV",
     no_args_is_help=True,
 )
+
+
+def _default_workers() -> int:
+    """Half of the machine's CPU cores (at least 1), used as the default
+    parallelism for differential_evolution."""
+    cpu_count = os.cpu_count() or 1
+    return max(1, cpu_count // 2)
 
 
 def _version_callback(value: bool):
@@ -228,7 +236,7 @@ def show_initial_guess(
 def optimize(
     dir_path: str = typer.Argument(..., help="path to the data directory"),
     method: str = typer.Option(
-        "cmaes",
+        "differential_evolution",
         "--method",
         "-m",
         help="optimizer: cmaes, dual_annealing, differential_evolution, L-BFGS-B, ...",
@@ -236,6 +244,17 @@ def optimize(
     no_refine: bool = typer.Option(False, "--no-refine", help="skip L-BFGS-B refinement"),
     restarts: int = typer.Option(1, "--restarts", "-n", help="number of multistart restarts"),
     seed: int = typer.Option(42, "--seed", help="random seed"),
+    workers: int = typer.Option(
+        _default_workers(),
+        "--workers",
+        "-w",
+        help="parallel workers for differential_evolution (default: half of CPU cores); ignored by other methods",
+    ),
+    maxfevals: int = typer.Option(
+        None,
+        "--maxfevals",
+        help="per-restart evaluation/iteration budget (default: optimizer's own default)",
+    ),
     quiet: bool = typer.Option(False, "--quiet", "-q"),
 ):
     """Global optimization to warm-start MCMC / nested sampling."""
@@ -247,6 +266,8 @@ def optimize(
         refine=not no_refine,
         n_restarts=restarts,
         seed=seed,
+        workers=workers,
+        maxfevals=maxfevals,
         quiet=quiet,
     )
 
