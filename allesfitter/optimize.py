@@ -313,6 +313,19 @@ def _run_cmaes(
     )
 
 
+def _backup_params_csv(datadir) -> None:
+    """Copy ``params.csv`` to ``params.csv.orig`` before its first mutation.
+
+    An existing ``params.csv.orig`` is left untouched, so the backup always
+    holds the pre-optimize values from *before any* ``optimize()`` call in
+    this datadir ever mutated the file — not just the state before the most
+    recent one.
+    """
+    dst = os.path.join(datadir, "params.csv.orig")
+    if not os.path.exists(dst):
+        shutil.copy2(os.path.join(datadir, "params.csv"), dst)
+
+
 def _write_theta_to_params_csv(datadir, fitkeys, theta) -> None:
     """Overwrite the ``value`` column of ``params.csv`` for rows in *fitkeys*.
 
@@ -900,6 +913,7 @@ def optimize(
     if accepted and mutate_basement:
         theta_params = _theta_in_params_frame(b, theta_best)
         b.theta_0 = np.asarray(theta_best, dtype=float)
+        _backup_params_csv(datadir)
         _write_theta_to_params_csv(datadir, b.fitkeys, theta_params)
 
     result = OptimizeResult(

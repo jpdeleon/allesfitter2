@@ -217,6 +217,8 @@ allesfitter.mcmc_output('.')
 
 The optimum is pushed into `config.BASEMENT.theta_0` *and* written into the `value` column of the fitted rows in `params.csv` on disk, only when **all** acceptance gates pass — otherwise both are left untouched and the next sampler call sees the original initial values. The disk write matters even for same-process chains like the one above: `mcmc_fit()` / `ns_fit()` / `show_initial_guess()` each call `config.init(datadir)` internally, which rebuilds `BASEMENT` from `params.csv` — an in-memory-only `theta_0` update would otherwise be silently discarded before `mcmc_fit()` ever saw it. When `shift_epoch=True`, optimized epochs are converted back to the original `params.csv` reference frame before they are written; the next initialization therefore recenters both the epoch and its prior together while reconstructing the same optimized ephemeris. This also means `optimize()` mutates your `params.csv` in place on acceptance; keep it under version control (or `mutate_basement=False`) if you want to inspect the diff before committing to it. It's what makes `optimize()` safe to call unconditionally in `run.py`.
 
+The first time an accepted result actually overwrites `params.csv`, `optimize()` also copies the pre-overwrite file to `params.csv.orig` in the same directory. That backup is written once and never touched again — a second, third, ... accepted run does **not** refresh it — so `params.csv.orig` always holds the values from before *any* `optimize()` call ever mutated the file, not just the most recent one. Delete it manually if you want a fresh baseline to diff against.
+
 ### Methods
 
 | `method=` | When to prefer | Notes |

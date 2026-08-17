@@ -20,6 +20,8 @@ Coverage:
      params.csv epoch frame and reload with the correctly shifted prior.
  10. Baseline-first optimization masks transits, freezes science parameters,
      restores the full data, and passes the baseline solution to the joint fit.
+ 11. Accepted + mutating optimize() backs up params.csv to params.csv.orig
+     before its first overwrite, and never clobbers that backup on later runs.
 """
 
 from __future__ import annotations
@@ -307,6 +309,94 @@ def test_accepted_optimize_persists_to_params_csv(datadir):
     reloaded = dict(zip(config.BASEMENT.fitkeys, config.BASEMENT.theta_0))
     for key, value in zip(res.fitkeys, res.theta_opt):
         assert reloaded[key] == pytest.approx(value)
+
+
+def test_accepted_optimize_backs_up_params_csv_before_overwriting(datadir):
+    params_csv_before = (datadir / "params.csv").read_text()
+    res = optimize(
+        str(datadir),
+        method="L-BFGS-B",
+        refine=False,
+        n_restarts=1,
+        save=False,
+        quiet=True,
+        improvement_threshold=0.0,
+        skip_bounds_check=True,
+    )
+    assert res.accepted
+
+    backup_path = datadir / "params.csv.orig"
+    assert backup_path.exists()
+    assert backup_path.read_text() == params_csv_before
+    assert (datadir / "params.csv").read_text() != params_csv_before
+
+
+def test_accepted_optimize_preserves_first_backup_across_repeated_runs(datadir):
+    """Only the very first mutation should be backed up — a second accepted
+    run must not clobber params.csv.orig with the (already-mutated)
+    intermediate state, or the true pre-optimize values become unrecoverable."""
+    original_params_csv = (datadir / "params.csv").read_text()
+
+    res1 = optimize(
+        str(datadir),
+        method="L-BFGS-B",
+        refine=False,
+        n_restarts=1,
+        save=False,
+        quiet=True,
+        improvement_threshold=0.0,
+        skip_bounds_check=True,
+    )
+    assert res1.accepted
+    after_first_run = (datadir / "params.csv").read_text()
+    assert (datadir / "params.csv.orig").read_text() == original_params_csv
+
+    config.init(str(datadir))
+    res2 = optimize(
+        str(datadir),
+        method="L-BFGS-B",
+        refine=False,
+        n_restarts=1,
+        save=False,
+        quiet=True,
+        improvement_threshold=0.0,
+        skip_bounds_check=True,
+    )
+    assert res2.accepted
+    assert (datadir / "params.csv").read_text() != after_first_run
+    # The backup still reflects the very first pre-optimize state, not the
+    # state right before this second run.
+    assert (datadir / "params.csv.orig").read_text() == original_params_csv
+
+
+def test_mutate_basement_false_does_not_back_up_params_csv(datadir):
+    res = optimize(
+        str(datadir),
+        method="L-BFGS-B",
+        refine=False,
+        n_restarts=1,
+        save=False,
+        quiet=True,
+        improvement_threshold=0.0,
+        mutate_basement=False,
+        skip_bounds_check=True,
+    )
+    assert res.accepted
+    assert not (datadir / "params.csv.orig").exists()
+
+
+def test_rejected_optimize_does_not_back_up_params_csv(datadir):
+    res = optimize(
+        str(datadir),
+        method="L-BFGS-B",
+        refine=False,
+        n_restarts=1,
+        save=False,
+        quiet=True,
+        improvement_threshold=1e30,
+    )
+    assert res.accepted is False
+    assert not (datadir / "params.csv.orig").exists()
 
 
 def test_accepted_optimize_persists_shifted_epoch_in_input_frame(tmp_path, monkeypatch):
