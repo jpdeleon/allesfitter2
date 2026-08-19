@@ -179,25 +179,44 @@ def _plot_candidate(
     flux_flat: np.ndarray,
 ) -> plt.Figure:
     """One figure per candidate, stacked top to bottom: the full raw light
-    curve, the full flattened (detrended) light curve with this candidate's
-    TLS model overlaid, the TLS periodogram (harmonics + known-planet
-    reference lines), and phase-folded data + TLS model."""
+    curve with the best-fit baseline model overlaid, the full flattened
+    (detrended) light curve with this candidate's TLS model overlaid, the
+    TLS periodogram (harmonics + known-planet reference lines), and
+    phase-folded data + TLS model."""
     fig = plt.figure(figsize=(12, 14), tight_layout=True)
     gs = fig.add_gridspec(4, 2, height_ratios=[1, 1, 1, 1.2])
 
     ax_raw = fig.add_subplot(gs[0, :])
-    ax_raw.plot(time_raw, flux_raw, ".", color="silver", ms=2, rasterized=True)
+    ax_raw.plot(time_raw, flux_raw, ".", color="silver", ms=2, rasterized=True, label="Raw data")
+    # flux_raw - flux_flat is exactly the (noiseless, smooth) best-fit
+    # baseline calculate_baseline predicted; +1 puts it back on the raw
+    # flux's ~1 level instead of the ~0 level it sits at as a subtracted term.
+    baseline_on_time_raw = flux_raw - flux_flat + 1.0
+    ax_raw.plot(
+        time_raw, baseline_on_time_raw, "-", color="C1", lw=1, zorder=2, label="Best-fit baseline"
+    )
     ax_raw.set(xlabel="Time (BJD)", ylabel="Raw flux", title="Raw light curve")
+    ax_raw.legend(loc="upper right", fontsize=8)
 
     ax_flat = fig.add_subplot(gs[1, :], sharex=ax_raw)
-    ax_flat.plot(time_flat, flux_flat, ".", color="silver", ms=2, rasterized=True, zorder=1)
+    ax_flat.plot(
+        time_flat,
+        flux_flat,
+        ".",
+        color="silver",
+        ms=2,
+        rasterized=True,
+        zorder=1,
+        label="Flattened data",
+    )
     model_on_time_flat = np.interp(
         time_flat, results["model_lightcurve_time"], results["model_lightcurve_model"]
     )
-    ax_flat.plot(time_flat, model_on_time_flat, "r-", lw=1, zorder=2)
+    ax_flat.plot(time_flat, model_on_time_flat, "r-", lw=1, zorder=2, label="TLS model")
     ax_flat.set(
         xlabel="Time (BJD)", ylabel="Flattened flux", title="Flattened (detrended) light curve"
     )
+    ax_flat.legend(loc="upper right", fontsize=8)
 
     ax0 = fig.add_subplot(gs[2, :])
     ax0.plot(results["periods"], results["power"], "k-", lw=0.8, rasterized=True)
