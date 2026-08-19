@@ -123,6 +123,37 @@ def test_transit_requirement_settings_are_explicit_per_companion():
     )
 
 
+def test_exposure_interpolation_settings_writes_t_exp_and_commented_binning():
+    text = prep._exposure_interpolation_settings(["tess"], {"tess": 120.0})
+
+    assert "t_exp_tess,0.001389\n" in text
+    assert "#t_exp_tess,0.020833\n" in text
+    assert "#t_exp_n_int_tess,10\n" in text
+    assert "#binning_tess,0.001389\n" in text
+
+
+def test_exposure_interpolation_settings_binning_matches_t_exp_per_instrument():
+    # Different instruments/exptimes -> each binning_<inst> stub must match
+    # that instrument's own t_exp_<inst>, not some other instrument's.
+    text = prep._exposure_interpolation_settings(
+        ["spoc120", "qlp600"], {"spoc120": 120.0, "qlp600": 600.0}
+    )
+
+    assert "t_exp_spoc120,0.001389\n" in text
+    assert "#binning_spoc120,0.001389\n" in text
+    assert "t_exp_qlp600,0.006944\n" in text
+    assert "#binning_qlp600,0.006944\n" in text
+
+
+def test_exposure_interpolation_settings_falls_back_to_first_instrument_exptime():
+    # An instrument declared via --filename but not present in t_exp_by_inst
+    # (not downloaded this run) falls back to fns[0]'s resolved exptime.
+    text = prep._exposure_interpolation_settings(["spoc120", "qlp600"], {"spoc120": 120.0})
+
+    assert "t_exp_qlp600,0.001389\n" in text
+    assert "#binning_qlp600,0.001389\n" in text
+
+
 def test_tic_transit_arguments_avoid_prompts():
     supplied = {
         "period": 3.5,

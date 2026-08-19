@@ -155,6 +155,30 @@ def _transit_requirement_settings(companions):
     return "".join(f"require_{companion}_transit,True\n" for companion in companions)
 
 
+def _exposure_interpolation_settings(fns, t_exp_by_inst):
+    """Return the per-instrument ``t_exp_<inst>``/``binning_<inst>`` rows.
+
+    ``t_exp_<inst>`` is the resolved exposure time (seconds -> days). The
+    commented ``binning_<inst>`` stub is pre-filled with that same value:
+    if a user enables ``binning_<inst>`` (rebinning the light curve),
+    ``t_exp_<inst>`` has to be updated to match the new bin width, so
+    exposure-time supersampling integrates over the width the data now
+    actually spans rather than the original (now-superseded) native
+    cadence.
+    """
+    text = "### crucial only for long (>600s) exposure times,\n"
+    fallback_exptime = t_exp_by_inst[fns[0]]
+    for inst in fns:
+        exptime_sec = int(round(t_exp_by_inst.get(inst, fallback_exptime)))
+        t_exp_val = exptime_sec / 86400.0
+        assert t_exp_val < 1, f"t_exp_val should be < 1 day, got {t_exp_val}"
+        text += f"t_exp_{inst},{t_exp_val:.6f}\n"
+        text += f"#t_exp_{inst},0.020833\n"
+        text += f"#t_exp_n_int_{inst},10\n"
+        text += f"#binning_{inst},{t_exp_val:.6f}\n"
+    return text
+
+
 def _write_spoc_contamination(lc_or_collection, outpath, mission):
     """Extract CROWDSAP from SPOC headers and convert to allesfitter dilution.
 
@@ -2628,15 +2652,7 @@ ns_tol,100
         # exptime, matching pre-multi-pipeline behaviour. We never derive
         # exptime from np.diff(time) — that conflates sampling cadence with
         # actual exposure and corrupts ellc's exposure-time integration.
-        text2 += "### crucial only for long (>600s) exposure times,\n"
-        _fallback_exptime = t_exp_by_inst[fns[0]]
-        for inst in fns:
-            _exptime_sec = int(round(t_exp_by_inst.get(inst, _fallback_exptime)))
-            _t_exp_val = _exptime_sec / 86400.0
-            assert _t_exp_val < 1, f"t_exp_val should be < 1 day, got {_t_exp_val}"
-            text2 += f"t_exp_{inst},{_t_exp_val:.6f}\n"
-            text2 += f"#t_exp_{inst},0.020833\n"
-            text2 += f"#t_exp_n_int_{inst},10\n"
+        text2 += _exposure_interpolation_settings(fns, t_exp_by_inst)
         text2 += """###############################################################################,
 # Baseline settings per instrument: sample / hybrid,
 # if 'sample_offset' one corresponding parameter called 'baseline_offset_key_inst' has to be given in params.csv,
