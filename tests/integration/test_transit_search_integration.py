@@ -125,16 +125,17 @@ def test_transit_search_recovers_unmodeled_injected_transit(
     allesfitter.ns_fit(datadir)
 
     ns_results_dir = os.path.join(datadir, "ns_results")
-    summary = transit_search(
+    result = transit_search(
         ns_results_dir,
-        sde_threshold=5.0,
+        sde_min=5.0,
         period_min=1.0,
         period_max=8.0,
         quiet=True,
     )
 
-    assert len(summary) >= 1
-    best = max(summary, key=lambda c: c["SDE"])
+    candidates = result["candidates"]
+    assert len(candidates) >= 1
+    best = max(candidates, key=lambda c: c["SDE"])
     assert is_multiple_of(best["period"], 5.5, tolerance=0.05)
     assert os.path.exists(best["h5"])
     assert os.path.exists(best["figure"])
@@ -144,3 +145,25 @@ def test_transit_search_recovers_unmodeled_injected_transit(
 
     summary_csv = os.path.join(datadir, "transit_search_results", "candidates_summary.csv")
     assert os.path.exists(summary_csv)
+
+    # Companion b (the known, modeled planet) should be independently
+    # recoverable from its own detrended, other-companion-masked data. The
+    # recovery check's own narrow TLS bracket must lock onto b's own signal
+    # — not the (much stronger) unmodeled 5.5 d transit that isn't masked
+    # out here — and its recovered epoch must line up with b's known one.
+    # Whether SDE also clears --sde-min isn't asserted: the fast/coarse NS
+    # settings used here for test speed give a posterior (and thus this
+    # SDE) that varies run to run, so gating on that specific number would
+    # make this test flaky without testing anything the fields below don't
+    # already cover.
+    known_recovery = result["known_recovery"]
+    assert len(known_recovery) == 1
+    b_row = known_recovery[0]
+    assert b_row["companion"] == "b"
+    assert b_row["bracket_ignored"] is False
+    assert b_row["epoch_match"] is True
+    assert is_multiple_of(b_row["recovered_period"], _B_PERIOD, tolerance=0.05)
+    assert os.path.exists(b_row["figure"])
+
+    recovery_csv = os.path.join(datadir, "transit_search_results", "known_planets_recovery.csv")
+    assert os.path.exists(recovery_csv)

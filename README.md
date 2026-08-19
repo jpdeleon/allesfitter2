@@ -39,7 +39,7 @@ full walkthrough in [notes.md](notes.md).
 | **Raw-flux clipping** | Drop out-of-window points from the fit, keep them flagged on plots | `flux_min_raw` / `flux_max_raw` | [link](notes.md#raw-flux-outlier-clipping) |
 | **Data preparation** | Auto-download + multi-pipeline light curves (TESS/K2/Kepler) and full config generation | `prepare_allesfit` CLI | [CLI](#command-line-options) |
 | **Robust post-processing** | OOM-safe diagnostic plots for high-dim fits; centralized JSONL run log | `ns_output` / `mcmc_output`, `log_run` | [plots](notes.md#oom-safe-diagnostic-plots-for-high-dim-fits) · [run log](notes.md#tracking-long-running-fits-with-the-centralized-run-log) |
-| **Blind transit search** | Detrend with the best fit, mask known planets, iteratively search the residual with TLS until SDE drops below threshold; per-candidate figure + quicklook-style `.h5` (readable by `--h5`) | `transit-search` CLI | [CLI](#blind-transit-search-transit-search) |
+| **Blind transit search** | Detrend with the best fit, verify each known planet is independently recoverable, mask them, then iteratively search the residual with TLS until SDE drops below threshold; per-candidate figure + quicklook-style `.h5` (readable by `--h5`) | `transit-search` CLI | [CLI](#blind-transit-search-transit-search) |
 
 **Inputs.** Two CSVs are a contract: `settings.csv` declares *what* is modelled
 (companions, instruments, baseline/error model per instrument, achromatic vs
@@ -191,22 +191,38 @@ un-modeled transiting signals in the residual light curve:
    every known companion's ephemeris.
 2. Reconstructs each instrument's full raw light curve (before any
    `fast_fit` windowing) and subtracts the best-fit baseline model from it.
-3. Masks out every known companion's transits (period/epoch from the
+3. Before masking anything, checks each known companion's own
+   recoverability: isolates it (masks every *other* known companion, but not
+   itself) and runs a narrow TLS scan bracketing its own period (±5% by
+   default). This flags a marginal known planet instead of silently masking
+   it away with no record of whether it was ever really detectable.
+4. Masks out every known companion's transits (period/epoch from the
    posterior, duration from the transit-chord equation).
-4. Runs `transitleastsquares` on what's left, masking each new detection
+5. Runs `transitleastsquares` on what's left, masking each new detection
    and repeating, until the found signal's SDE drops below
-   `--sde-threshold` (default `5.0`).
+   `--sde-min` (default `8.0`).
 
 ```bash
-uv run allesfitter transit-search HD39091/ns_results --sde-threshold 6
+uv run allesfitter transit-search HD39091/ns_results --sde-min 6
 ```
 
-For each candidate above threshold, it writes to `--outdir` (default
+For every known companion, it writes to `--outdir` (default
 `<target>/transit_search_results/`):
 
-- `candidate_<N>.pdf` — raw light curve, flattened (detrended) light curve
-  with the candidate's TLS model overlaid, the TLS periodogram (harmonics
-  and known-planet periods marked), and phase-folded data + model.
+- `known_<companion>_recovery.pdf` — same layout as a candidate figure
+  (below), but periodogram zoomed to that companion's own narrow
+  period bracket.
+- `known_planets_recovery.csv` — one row per known companion: known vs.
+  recovered period/epoch, SDE, SNR, whether the recovered epoch lines up
+  with the known one (`epoch_match`), and whether it counts as `recovered`
+  (`epoch_match` and SDE ≥ `--sde-min`).
+
+For each blind-search candidate above threshold, it writes:
+
+- `candidate_<N>.pdf` — raw light curve (with the best-fit baseline model
+  overlaid), flattened (detrended) light curve with the candidate's TLS
+  model overlaid, the TLS periodogram (harmonics and known-planet periods
+  marked), and phase-folded data + model.
 - `candidate_<N>_tls.h5` — a quicklook-format TLS results file, readable by
   `prepare -tic/-toi ... --h5 candidate_<N>_tls.h5` to seed a new
   `params.csv` companion row for a confirmed candidate (see
@@ -216,9 +232,11 @@ For each candidate above threshold, it writes to `--outdir` (default
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--sde-threshold` | Keep searching while the found signal's SDE stays at or above this value | `5.0` |
-| `--period-min`, `--period-max` | Period search range (days) | TLS's own default |
+| `--sde-min` | Keep searching while the found signal's SDE stays at or above this value; also gates whether a known companion counts as `recovered` | `8.0` |
+| `--period-min`, `--period-max` | Blind-search period range (days); doesn't affect the known-companion recovery check | TLS's own default |
 | `--mask-width-factor` | Mask known companions out to this many times their transit duration | `1.5` |
+| `--skip-known-recovery-check` | Skip step 3 entirely and go straight to the blind search | off |
+| `--recovery-period-frac` | Half-width of the recovery check's period bracket, as a fraction of each companion's own period | `0.05` |
 | `-o, --outdir <DIR>` | Output directory | `<target>/transit_search_results` |
 | `-e, --file-extension` | Figure format (`pdf`, `png`, `jpg`, `svg`, `webp`) | `.pdf` |
 | `--max-candidates` | Safety cap on the number of candidates kept | `20` |

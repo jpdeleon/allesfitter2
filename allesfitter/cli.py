@@ -379,11 +379,12 @@ def transit_search(
     results_dir: str = typer.Argument(
         ..., help="path to an mcmc_results or ns_results directory from a completed fit"
     ),
-    sde_threshold: float = typer.Option(
-        5.0,
-        "--sde-threshold",
+    sde_min: float = typer.Option(
+        8.0,
+        "--sde-min",
         help="keep the iterative TLS search going while the found signal's SDE stays "
-        "at or above this value",
+        "at or above this value; also gates whether a known companion counts as "
+        "recovered",
     ),
     period_min: float | None = typer.Option(
         None, "--period-min", help="minimum period to search (days)"
@@ -411,6 +412,18 @@ def transit_search(
     mission: str = typer.Option(
         "tess", "--mission", "-m", help="mission (tess, k2, kepler); sets the h5 BJD offset"
     ),
+    skip_known_recovery_check: bool = typer.Option(
+        False,
+        "--skip-known-recovery-check",
+        help="skip checking whether each known companion in params.csv is independently "
+        "recoverable before it gets masked out",
+    ),
+    recovery_period_frac: float = typer.Option(
+        0.05,
+        "--recovery-period-frac",
+        help="half-width of the known-companion recovery check's period-search bracket, "
+        "as a fraction of that companion's own period",
+    ),
     quiet: bool = typer.Option(False, "--quiet", "-q"),
 ):
     """Detrend with the best-fit baseline, mask known planets, and blind-search
@@ -419,7 +432,7 @@ def transit_search(
 
     _transit_search(
         results_dir,
-        sde_threshold=sde_threshold,
+        sde_min=sde_min,
         period_min=period_min,
         period_max=period_max,
         mask_width_factor=mask_width_factor,
@@ -427,6 +440,8 @@ def transit_search(
         file_extension=file_extension,
         max_candidates=max_candidates,
         mission=mission,
+        check_known_recovery=not skip_known_recovery_check,
+        recovery_period_frac=recovery_period_frac,
         quiet=quiet,
     )
 

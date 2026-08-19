@@ -149,7 +149,7 @@ def test_transit_search_forwards_arguments(monkeypatch, tmp_path):
         [
             "transit-search",
             str(results_dir),
-            "--sde-threshold",
+            "--sde-min",
             "6.0",
             "--period-min",
             "0.5",
@@ -161,17 +161,22 @@ def test_transit_search_forwards_arguments(monkeypatch, tmp_path):
             "5",
             "--mission",
             "k2",
+            "--skip-known-recovery-check",
+            "--recovery-period-frac",
+            "0.1",
         ],
     )
 
     assert result.exit_code == 0, result.output
     assert received["results_dir"] == str(results_dir)
-    assert received["sde_threshold"] == 6.0
+    assert received["sde_min"] == 6.0
     assert received["period_min"] == 0.5
     assert received["period_max"] == 15.0
     assert received["mask_width_factor"] == 2.0
     assert received["max_candidates"] == 5
     assert received["mission"] == "k2"
+    assert received["check_known_recovery"] is False
+    assert received["recovery_period_frac"] == 0.1
     assert received["quiet"] is False
 
 
@@ -189,7 +194,7 @@ def test_transit_search_defaults(monkeypatch, tmp_path):
     result = CliRunner().invoke(app, ["transit-search", str(results_dir)])
 
     assert result.exit_code == 0, result.output
-    assert received["sde_threshold"] == 5.0
+    assert received["sde_min"] == 8.0
     assert received["period_min"] is None
     assert received["period_max"] is None
     assert received["mask_width_factor"] == 1.5
@@ -197,6 +202,8 @@ def test_transit_search_defaults(monkeypatch, tmp_path):
     assert received["file_extension"] == ".pdf"
     assert received["max_candidates"] == 20
     assert received["mission"] == "tess"
+    assert received["check_known_recovery"] is True
+    assert received["recovery_period_frac"] == 0.05
 
 
 def test_show_params_labels_fit_status_column(tmp_path):

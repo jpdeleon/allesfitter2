@@ -11,11 +11,13 @@ import numpy as np
 import pytest
 
 from allesfitter.detection.blind_search import (
+    _apply_known_masks,
     _detrend_full_lightcurve,
     _harmonic_periods,
     _known_companion_windows,
     _resolve_sampler,
     _tls_stellar_kwargs,
+    _write_known_recovery_csv,
     _write_summary_csv,
 )
 
@@ -239,6 +241,80 @@ def test_write_summary_csv_handles_no_candidates(tmp_path):
     path = tmp_path / "candidates_summary.csv"
 
     _write_summary_csv(str(path), [])
+
+    with open(path, newline="") as f:
+        rows = list(csv.DictReader(f))
+    assert rows == []
+
+
+class TestApplyKnownMasks:
+    def test_removes_in_transit_rows_from_every_array(self):
+        time = np.array([0.0, 1.0, 2.0, 3.0, 4.0])
+        flux = np.array([1.0, 0.9, 1.0, 0.9, 1.0])
+        flux_err = np.array([0.01, 0.02, 0.03, 0.04, 0.05])
+        # period=2, epoch=1, duration=0.5 -> masks t=1 and t=3 (both in-transit).
+        windows = [{"period": 2.0, "epoch": 1.0, "duration": 0.5}]
+
+        out_time, out_flux, out_err = _apply_known_masks(time, [flux, flux_err], windows)
+
+        np.testing.assert_allclose(out_time, [0.0, 2.0, 4.0])
+        np.testing.assert_allclose(out_flux, [1.0, 1.0, 1.0])
+        np.testing.assert_allclose(out_err, [0.01, 0.03, 0.05])
+
+    def test_no_windows_leaves_arrays_unchanged(self):
+        time = np.array([0.0, 1.0, 2.0])
+        flux = np.array([1.0, 0.95, 1.0])
+
+        out_time, out_flux = _apply_known_masks(time, [flux], [])
+
+        np.testing.assert_allclose(out_time, time)
+        np.testing.assert_allclose(out_flux, flux)
+
+    def test_multiple_windows_combine(self):
+        time = np.array([0.0, 1.0, 2.0, 3.0, 4.0, 5.0])
+        flux = np.arange(6, dtype=float)
+        windows = [
+            {"period": 100.0, "epoch": 1.0, "duration": 0.5},  # masks only t=1
+            {"period": 100.0, "epoch": 4.0, "duration": 0.5},  # masks only t=4
+        ]
+
+        out_time, out_flux = _apply_known_masks(time, [flux], windows)
+
+        np.testing.assert_allclose(out_time, [0.0, 2.0, 3.0, 5.0])
+        np.testing.assert_allclose(out_flux, [0.0, 2.0, 3.0, 5.0])
+
+
+def test_write_known_recovery_csv_writes_header_and_rows(tmp_path):
+    path = tmp_path / "known_planets_recovery.csv"
+    rows = [
+        {
+            "companion": "b",
+            "known_period": 3.5,
+            "known_epoch": 2457000.0,
+            "recovered_period": 3.5001,
+            "recovered_epoch": 2457000.01,
+            "SDE": 25.0,
+            "snr": 40.0,
+            "epoch_match": True,
+            "bracket_ignored": False,
+            "recovered": True,
+            "figure": "known_b_recovery.pdf",
+        }
+    ]
+
+    _write_known_recovery_csv(str(path), rows)
+
+    with open(path, newline="") as f:
+        read_rows = list(csv.DictReader(f))
+    assert len(read_rows) == 1
+    assert read_rows[0]["companion"] == "b"
+    assert read_rows[0]["recovered"] == "True"
+
+
+def test_write_known_recovery_csv_handles_no_rows(tmp_path):
+    path = tmp_path / "known_planets_recovery.csv"
+
+    _write_known_recovery_csv(str(path), [])
 
     with open(path, newline="") as f:
         rows = list(csv.DictReader(f))
