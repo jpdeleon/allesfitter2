@@ -105,6 +105,15 @@ def prepare(
     depth_err: float | None = typer.Option(
         None, "--depth-err", help="transit-depth uncertainty (ppm)"
     ),
+    h5: str | None = typer.Option(
+        None,
+        "--h5",
+        help="quicklook TLS results .h5 file for a planet the catalog doesn't have "
+        "yet: fills in a raw -tic target's blank ephemeris, or (with -toi) is "
+        "appended as an extra companion alongside that target's known catalog "
+        "planets; --period/--epoch/--duration/--depth still take priority when "
+        "also given",
+    ),
 ):
     """Download TESS/Kepler/K2 data and prepare config files."""
     if not any([toi, ctoi, tic, name]):
@@ -169,6 +178,8 @@ def prepare(
     ):
         if value is not None:
             argv += [flag, str(value)]
+    if h5 is not None:
+        argv += ["--h5", h5]
     _run_script("prepare_allesfit.py", argv)
 
 
@@ -361,6 +372,63 @@ def ns_output(
     from allesfitter.nested_sampling_output import ns_output as _ns_output
 
     _ns_output(dir_path, overwrite=overwrite, file_extension=file_extension)
+
+
+@app.command("transit-search")
+def transit_search(
+    results_dir: str = typer.Argument(
+        ..., help="path to an mcmc_results or ns_results directory from a completed fit"
+    ),
+    sde_threshold: float = typer.Option(
+        5.0,
+        "--sde-threshold",
+        help="keep the iterative TLS search going while the found signal's SDE stays "
+        "at or above this value",
+    ),
+    period_min: float | None = typer.Option(
+        None, "--period-min", help="minimum period to search (days)"
+    ),
+    period_max: float | None = typer.Option(
+        None, "--period-max", help="maximum period to search (days)"
+    ),
+    mask_width_factor: float = typer.Option(
+        1.5,
+        "--mask-width-factor",
+        help="mask known companions out to this many times their transit duration",
+    ),
+    outdir: str | None = typer.Option(
+        None,
+        "--outdir",
+        "-o",
+        help="output directory (default: <target>/transit_search_results)",
+    ),
+    file_extension: str = typer.Option(
+        ".pdf", "--file-extension", "-e", help="figure format: pdf, png, jpg, svg, or webp"
+    ),
+    max_candidates: int = typer.Option(
+        20, "--max-candidates", help="safety cap on the number of candidates kept"
+    ),
+    mission: str = typer.Option(
+        "tess", "--mission", "-m", help="mission (tess, k2, kepler); sets the h5 BJD offset"
+    ),
+    quiet: bool = typer.Option(False, "--quiet", "-q"),
+):
+    """Detrend with the best-fit baseline, mask known planets, and blind-search
+    for un-modeled transits with TLS until SDE drops below threshold."""
+    from allesfitter.detection.blind_search import transit_search as _transit_search
+
+    _transit_search(
+        results_dir,
+        sde_threshold=sde_threshold,
+        period_min=period_min,
+        period_max=period_max,
+        mask_width_factor=mask_width_factor,
+        outdir=outdir,
+        file_extension=file_extension,
+        max_candidates=max_candidates,
+        mission=mission,
+        quiet=quiet,
+    )
 
 
 @app.command()

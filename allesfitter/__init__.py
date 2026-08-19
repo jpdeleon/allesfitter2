@@ -147,6 +147,7 @@ _LAZY_NAMES: dict[str, tuple[str, str | None]] = {
         "allesfitter.priors.estimate_noise",
         "estimate_noise_out_of_transit",
     ),
+    "transit_search": ("allesfitter.detection.blind_search", "transit_search"),
     "get_run_log_path": ("allesfitter.run_logger", "get_log_path"),
     "log_event": ("allesfitter.run_logger", "log_event"),
     "log_run": ("allesfitter.run_logger", "log_run"),

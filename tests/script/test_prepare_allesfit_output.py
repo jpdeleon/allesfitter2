@@ -179,6 +179,217 @@ def test_tic_transit_arguments_are_all_validated_before_prompting():
         )
 
 
+def test_merge_h5_transit_parameters_fills_only_missing_cli_fields():
+    # --period was given explicitly on the command line; the h5 file also
+    # carries a period, but the CLI value must win.
+    cli_values = {
+        "period": 3.5,
+        "period_err": None,
+        "epoch": None,
+        "epoch_err": None,
+        "duration": None,
+        "duration_err": None,
+        "depth": None,
+        "depth_err": None,
+    }
+    h5_values = {
+        "period": 9.9,
+        "period_err": 0.01,
+        "epoch": 2459000.25,
+        "epoch_err": None,
+        "duration": 2.4,
+        "duration_err": None,
+        "depth": 1500.0,
+        "depth_err": 100.0,
+    }
+
+    merged = prep._merge_h5_transit_parameters(cli_values, h5_values)
+
+    assert merged["period"] == 3.5  # CLI value preserved, not overwritten
+    assert merged["period_err"] == 0.01
+    assert merged["epoch"] == 2459000.25
+    assert merged["epoch_err"] is None  # neither source supplied it
+    assert merged["duration"] == 2.4
+    assert merged["depth"] == 1500.0
+    assert merged["depth_err"] == 100.0
+
+
+def test_merge_h5_transit_parameters_leaves_cli_only_fields_untouched():
+    cli_values = {"period": 3.5, "period_err": 0.02, "epoch": None}
+    h5_values = {"period": 9.9, "period_err": 9.9, "epoch": None}
+
+    merged = prep._merge_h5_transit_parameters(cli_values, h5_values)
+
+    assert merged["period"] == 3.5
+    assert merged["period_err"] == 0.02
+    assert merged["epoch"] is None
+
+
+def _toi_row_df(n=1):
+    import pandas as pd
+
+    rows = [
+        {
+            "TOI": 1233.0 + 0.01 * (i + 1),
+            "Period (days)": 3.7954 + i,
+            "Period (days) err": 0.0002,
+            "Epoch (BJD)": 2458325.7228,
+            "Epoch (BJD) err": 0.001,
+            "Duration (hours)": 2.1,
+            "Duration (hours) err": 0.1,
+            "Depth (ppm)": 300.0,
+            "Depth (ppm) err": 20.0,
+        }
+        for i in range(n)
+    ]
+    return pd.DataFrame(rows)
+
+
+def test_append_h5_companion_adds_a_new_row_without_touching_known_planets():
+    target_df = _toi_row_df(n=2)  # a two-planet TOI system, e.g. 1233.01/.02
+    cli_values = dict.fromkeys([key for key, *_rest in prep._TIC_TRANSIT_FIELDS])
+    h5_values = {
+        "period": 9.1234,
+        "period_err": 0.0001,
+        "epoch": 2459928.9603,
+        "epoch_err": 0.01,
+        "duration": 2.5,
+        "duration_err": 0.05,
+        "depth": 500.0,
+        "depth_err": 10.0,
+    }
+
+    out = prep._append_h5_companion(target_df, cli_values, h5_values)
+
+    assert len(out) == 3
+    # the two known planets are untouched, in their original order
+    assert out.loc[0, "Period (days)"] == pytest.approx(3.7954)
+    assert out.loc[1, "Period (days)"] == pytest.approx(4.7954)
+    # the h5-derived candidate is appended last
+    assert out.loc[2, "Period (days)"] == pytest.approx(9.1234)
+    assert out.loc[2, "Period (days) err"] == pytest.approx(0.0001)
+    assert out.loc[2, "Epoch (BJD)"] == pytest.approx(2459928.9603)
+    assert out.loc[2, "Duration (hours)"] == pytest.approx(2.5)
+    assert out.loc[2, "Depth (ppm)"] == pytest.approx(500.0)
+    assert out.loc[2, "Depth (ppm) err"] == pytest.approx(10.0)
+
+
+def test_append_h5_companion_explicit_cli_flag_wins_over_h5():
+    target_df = _toi_row_df(n=1)
+    cli_values = dict.fromkeys([key for key, *_rest in prep._TIC_TRANSIT_FIELDS])
+    cli_values["period"] = 99.0  # explicit --period on the command line
+    h5_values = {
+        "period": 3.79541,
+        "period_err": 0.0001,
+        "epoch": 2459928.9603,
+        "epoch_err": 0.01,
+        "duration": 2.5,
+        "duration_err": 0.05,
+        "depth": 500.0,
+        "depth_err": 10.0,
+    }
+
+    out = prep._append_h5_companion(target_df, cli_values, h5_values)
+
+    assert out.loc[1, "Period (days)"] == pytest.approx(99.0)
+
+
+def test_append_h5_companion_prompts_for_fields_neither_source_supplies():
+    target_df = _toi_row_df(n=1)
+    cli_values = dict.fromkeys([key for key, *_rest in prep._TIC_TRANSIT_FIELDS])
+    # TLS never reports epoch/duration uncertainty.
+    h5_values = {
+        "period": 3.79541,
+        "period_err": 0.0001,
+        "epoch": 2459928.9603,
+        "epoch_err": None,
+        "duration": 2.5,
+        "duration_err": None,
+        "depth": 500.0,
+        "depth_err": 10.0,
+    }
+    prompts = []
+
+    def prompt(label):
+        prompts.append(label)
+        return "0.02"
+
+    out = prep._append_h5_companion(target_df, cli_values, h5_values, prompt=prompt)
+
+    assert prompts == ["Epoch err (BJD): ", "Tdur err (h): "]
+    assert out.loc[1, "Epoch (BJD) err"] == pytest.approx(0.02)
+    assert out.loc[1, "Duration (hours) err"] == pytest.approx(0.02)
+
+
+def test_append_h5_companion_does_not_mutate_input_df():
+    target_df = _toi_row_df(n=1)
+    original = target_df.copy()
+    cli_values = dict.fromkeys([key for key, *_rest in prep._TIC_TRANSIT_FIELDS])
+    h5_values = {
+        "period": 3.79541,
+        "period_err": 0.0001,
+        "epoch": 2459928.9603,
+        "epoch_err": 0.01,
+        "duration": 2.5,
+        "duration_err": 0.05,
+        "depth": 500.0,
+        "depth_err": 10.0,
+    }
+
+    import pandas as pd
+
+    prep._append_h5_companion(target_df, cli_values, h5_values)
+
+    pd.testing.assert_frame_equal(target_df, original)
+
+
+def _h5_lc(sector=37, pipeline="tess-spoc"):
+    return {
+        "time": np.array([3560.0, 3560.1, 3560.2]),
+        "flux": np.array([1.0, 0.99, 1.0]),
+        "flux_err": np.array([0.001, 0.001, 0.001]),
+        "pipeline": pipeline,
+        "sector": sector,
+        "exptime": 600.0,
+        "cadence": "short",
+    }
+
+
+def test_h5_lightcurve_matches_segment_requires_same_sector_and_pipeline():
+    lc = _h5_lc(sector=37, pipeline="tess-spoc")
+    assert prep._h5_lightcurve_matches_segment(lc, "37", "tess-spoc") is True
+    assert prep._h5_lightcurve_matches_segment(lc, "37", "TESS-SPOC") is True  # case-insensitive
+    assert prep._h5_lightcurve_matches_segment(lc, "64", "tess-spoc") is False  # wrong sector
+    assert prep._h5_lightcurve_matches_segment(lc, "37", "spoc") is False  # wrong pipeline
+
+
+def test_h5_lightcurve_matches_segment_none_lightcurve_never_matches():
+    assert prep._h5_lightcurve_matches_segment(None, "37", "spoc") is False
+
+
+def test_h5_lightcurve_matches_segment_trusts_sector_when_pipeline_unrecorded():
+    # Older quicklook runs saved h5 files without a "pipeline" field.
+    lc = _h5_lc(sector=37, pipeline=None)
+    logged = []
+    assert (
+        prep._h5_lightcurve_matches_segment(
+            lc, "37", "spoc", logger=SimpleNamespace(warning=logged.append)
+        )
+        is True
+    )
+    assert logged  # warns that pipeline provenance is unverified
+
+
+def test_lightcurve_from_h5_builds_a_lightkurve_object_in_btjd():
+    lc = prep._lightcurve_from_h5(_h5_lc())
+
+    assert len(lc) == 3
+    # BTJD (offset-free), matching the raw h5 "time" convention — the caller
+    # adds bjd_offset the same way it does for a freshly downloaded lc.
+    np.testing.assert_allclose(lc.time.value, [3560.0, 3560.1, 3560.2])
+    np.testing.assert_allclose(lc.flux.value, [1.0, 0.99, 1.0])
+
+
 # ---------------------------------------------------------------------------
 # 2) default physics-informed prior bounds (substituted into params.csv)
 # ---------------------------------------------------------------------------

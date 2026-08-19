@@ -37,6 +37,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from astropy.coordinates import SkyCoord
+from astropy.time import Time
 from loguru import logger
 from scipy.stats import anderson
 
@@ -52,6 +53,7 @@ from allesfitter.orbits import (
     circular_transit_duration,
 )
 from allesfitter.tars import patch_lightkurve
+from allesfitter.tls_h5 import read_h5_lightcurve, read_h5_transit_params
 from allesfitter.utils.scripting import (
     a_from_rhoprs,
     as_from_rhop,
@@ -369,6 +371,45 @@ def _safe_stitch(collection, logger=None):
         return None
     # Identity corrector — already normalised above.
     return _lk.LightCurveCollection(good).stitch(corrector_func=lambda x: x)
+
+
+def _h5_lightcurve_matches_segment(h5_lightcurve, segment, pipeline, logger=None) -> bool:
+    """Whether ``h5_lightcurve`` (from :func:`read_h5_lightcurve`) is the
+    exact sector *and* pipeline this run is about to download — the only
+    case where reusing it instead of hitting MAST is safe. A sector match
+    with a pipeline mismatch (e.g. the h5 is QLP but this run wants SPOC)
+    would silently mislabel one pipeline's flux as another's, so that's
+    treated as no match, not a fallback to "trust the sector alone" —
+    except when the h5 predates quicklook recording its own pipeline
+    (``None``), where sector agreement is all there is to go on.
+    """
+    if h5_lightcurve is None or h5_lightcurve["sector"] is None:
+        return False
+    if not _segments_match(h5_lightcurve["sector"], segment):
+        return False
+    h5_pipeline = h5_lightcurve["pipeline"]
+    if h5_pipeline is None:
+        if logger is not None:
+            logger.warning(
+                "h5 light curve has no recorded pipeline; trusting the sector "
+                f"match alone (assuming it is {pipeline})."
+            )
+        return True
+    return h5_pipeline == pipeline.lower()
+
+
+def _lightcurve_from_h5(h5_lightcurve):
+    """Build a ``lightkurve.LightCurve`` from a quicklook h5's raw arrays.
+
+    ``.remove_outliers()``, ``.to_pandas()``, ``.scatter()``, etc. all work
+    on the result exactly as on a freshly downloaded one, since it's the
+    same class — only the origin of the time/flux/flux_err arrays differs.
+    Already normalized (quicklook calls ``.normalize()`` before saving), but
+    ``.normalize()`` on already-normalized flux is a no-op, so callers can
+    still apply it uniformly with a freshly downloaded lightcurve.
+    """
+    time = Time(h5_lightcurve["time"], format="btjd", scale="tdb")
+    return lk.LightCurve(time=time, flux=h5_lightcurve["flux"], flux_err=h5_lightcurve["flux_err"])
 
 
 def _dataset_aware_gp_bounds(time, flux, tdur_days):
@@ -818,6 +859,36 @@ def _resolve_tic_transit_parameters(values=None, prompt=None):
     return resolved, columns
 
 
+def _merge_h5_transit_parameters(cli_values, h5_values):
+    """Fill in ``cli_values`` fields left at ``None`` from ``h5_values``.
+
+    Explicit ``--period/--epoch/--duration/--depth`` (and ``*_err``) flags
+    always win; the h5 file only supplies what the command line didn't.
+    """
+    merged = dict(cli_values)
+    for key, *_rest in _TIC_TRANSIT_FIELDS:
+        if merged.get(key) is None and h5_values.get(key) is not None:
+            merged[key] = h5_values[key]
+    return merged
+
+
+def _append_h5_companion(target_df, cli_values, h5_values, prompt=None):
+    """Append a new companion row built from ``--h5`` to a ``-toi`` target's
+    already-known-planet dataframe.
+
+    The target's cataloged planets are left untouched; this adds one more
+    row (period/epoch/duration/depth columns only — the planet-letter
+    assignment downstream only reads those) for a candidate the catalog
+    doesn't have yet. Uses the same CLI-wins-over-h5 merge, then the same
+    prompt-for-anything-still-missing fallback (e.g. epoch/duration errors,
+    which TLS doesn't report), as a raw ``-tic`` target.
+    """
+    merged = _merge_h5_transit_parameters(cli_values, h5_values)
+    resolved, columns = _resolve_tic_transit_parameters(merged, prompt=prompt)
+    new_row = pd.DataFrame([resolved], columns=columns)
+    return pd.concat([target_df, new_row], ignore_index=True)
+
+
 def parse_target_name(
     toiid=None,
     ticid=None,
@@ -903,7 +974,7 @@ def get_tess_sectors(
         # if target is available in TOI,CTOI,or NexSci
         coord = SkyCoord(*df[["RA", "Dec"]].values[0], unit=("hourangle", "deg"))
         ra, dec = coord.ra.deg, coord.dec.deg
-        ticid = df["TIC ID"].unique()[0]
+        ticid = int(df["TIC ID"].unique()[0])
     elif name:
         # for other targets
         data_json = get_tfop_info(target_name)
@@ -1130,6 +1201,23 @@ def main():
         ("--depth-err", "transit-depth uncertainty (ppm)"),
     ):
         ap.add_argument(option, help=help_text, type=float, default=None)
+    ap.add_argument(
+        "--h5",
+        help=(
+            "path to a quicklook TLS results .h5 file (e.g. "
+            "TIC<id>_s<sector>_..._tls.h5 or its _tls_p2.h5/_tls_p3.h5 "
+            "companions) to seed period/epoch/duration/depth for a planet "
+            "the catalog doesn't have yet. With -tic, fills in a raw "
+            "target's blank ephemeris. With -toi, the target's known "
+            "catalog planets are prepared as usual and this candidate is "
+            "appended as one more companion. --period/--epoch/--duration/"
+            "--depth (and their *_err flags) still take priority when also "
+            "given; anything none of them supplies falls back to an "
+            "interactive prompt (TLS reports no epoch/duration error)."
+        ),
+        type=str,
+        default=None,
+    )
     ap.add_argument(
         "-i",
         "--interactive",
@@ -1634,6 +1722,28 @@ def main():
         update_db = args.update_db
 
         tic_parameters = {key: getattr(args, key) for key, *_rest in _TIC_TRANSIT_FIELDS}
+        h5_parameters = None
+        h5_lightcurve = None
+        if args.h5 is not None:
+            if not (ticid or toiid):
+                logger.error("--h5 is only used together with -tic or -toi.")
+                sys.exit(1)
+            h5_parameters = read_h5_transit_params(args.h5, mission=mission)
+            if ticid:
+                tic_parameters = _merge_h5_transit_parameters(tic_parameters, h5_parameters)
+            # The light curve is only present in a *primary* quicklook h5
+            # (its iterative-search companions, e.g. *_tls_p2.h5, only carry
+            # the TLS results dict) — reused below only for the segment
+            # (sector/pipeline) it actually holds; every other segment this
+            # run downloads normally.
+            if mission == "tess":
+                h5_lightcurve = read_h5_lightcurve(args.h5)
+                if h5_lightcurve is None:
+                    logger.info(
+                        f"{args.h5} has no raw light curve (only its "
+                        "iterative-search companions lack this) — downloading "
+                        "normally."
+                    )
         target_name, target_df, source = parse_target_name(
             toiid,
             ticid,
@@ -1642,6 +1752,8 @@ def main():
             update_db,
             tic_parameters=tic_parameters,
         )
+        if h5_parameters is not None and toiid:
+            target_df = _append_h5_companion(target_df, tic_parameters, h5_parameters)
         if ticid:
             name = target_name.replace("-", "")
         if mission == "tess":
@@ -2101,6 +2213,7 @@ fig = allesfitter.show_initial_guess(dir_path)
         # single -p, this loop runs once for fns[0], exactly as before.
         for fn, pipeline, exptime in zip(fns[:n_download], pipeline_list, exptimes):
             lc_type = "sap_flux" if pipeline == "qlp" else args.lc_type + "_flux"
+            used_h5_lc = False
 
             # search all available data for reference
             all_lcs = lk.search_lightcurve(query_name, mission=mission)
@@ -2209,41 +2322,56 @@ fig = allesfitter.show_initial_guess(dir_path)
                             expected_n=len(sector),
                         )
                     assert len(sector) == len(filtered_result)
-                    exptime = unique_exptimes[0] if exptime is None else exptime
-                    lc = _safe_stitch(
-                        filtered_result.download_all(
-                            quality_bitmask=quality_bitmask, flux_column=lc_type
-                        ),
-                        logger=logger,
-                    )
-                    if lc is None:
-                        logger.error("No usable segments downloaded.")
-                        sys.exit()
-                    logger.info(
-                        "The lightcurves were not flattened/de-trended to avoid removing transits."
-                    )
-                    _w = _segment_word(mission)
-                    _seg = (
-                        getattr(lc, "sector", None)
-                        or getattr(lc, "campaign", None)
-                        or getattr(lc, "quarter", None)
-                    )
-                    msg = f"{_w}={_seg} in header not in requested {_w}={sector}"
-                    # Skip the header check when multiple segments were stitched —
-                    # the collapsed attribute can't represent more than one.
-                    if _seg is not None and len(sector) == 1:
-                        assert any(_segments_match(_seg, s) for s in sector), logger.error(msg)
-                    if pipeline == "spoc":
-                        _lc1_for_meta = filtered_result.download_all(
-                            quality_bitmask=quality_bitmask, flux_column="pdcsap_flux"
+                    if len(sector) == 1 and _h5_lightcurve_matches_segment(
+                        h5_lightcurve, sector[0], pipeline, logger=logger
+                    ):
+                        logger.info(
+                            f"Reusing the light curve embedded in {args.h5} for "
+                            f"{_w}={sector[0]} instead of re-downloading."
                         )
-                        lc1 = _safe_stitch(_lc1_for_meta, logger=logger)
-                        lc2 = _safe_stitch(
+                        lc = _lightcurve_from_h5(h5_lightcurve).normalize()
+                        exptime = (
+                            h5_lightcurve["exptime"]
+                            if h5_lightcurve["exptime"] is not None
+                            else exptime
+                        )
+                        used_h5_lc = True
+                    else:
+                        exptime = unique_exptimes[0] if exptime is None else exptime
+                        lc = _safe_stitch(
                             filtered_result.download_all(
-                                quality_bitmask=quality_bitmask, flux_column="sap_flux"
+                                quality_bitmask=quality_bitmask, flux_column=lc_type
                             ),
                             logger=logger,
                         )
+                        if lc is None:
+                            logger.error("No usable segments downloaded.")
+                            sys.exit()
+                        logger.info(
+                            "The lightcurves were not flattened/de-trended to avoid removing transits."
+                        )
+                        _w = _segment_word(mission)
+                        _seg = (
+                            getattr(lc, "sector", None)
+                            or getattr(lc, "campaign", None)
+                            or getattr(lc, "quarter", None)
+                        )
+                        msg = f"{_w}={_seg} in header not in requested {_w}={sector}"
+                        # Skip the header check when multiple segments were stitched —
+                        # the collapsed attribute can't represent more than one.
+                        if _seg is not None and len(sector) == 1:
+                            assert any(_segments_match(_seg, s) for s in sector), logger.error(msg)
+                        if pipeline == "spoc":
+                            _lc1_for_meta = filtered_result.download_all(
+                                quality_bitmask=quality_bitmask, flux_column="pdcsap_flux"
+                            )
+                            lc1 = _safe_stitch(_lc1_for_meta, logger=logger)
+                            lc2 = _safe_stitch(
+                                filtered_result.download_all(
+                                    quality_bitmask=quality_bitmask, flux_column="sap_flux"
+                                ),
+                                logger=logger,
+                            )
                 else:
                     if sector_flag == "first":
                         idx = 0
@@ -2252,31 +2380,46 @@ fig = allesfitter.show_initial_guess(dir_path)
                         idx = -1
                         sector = sectors[idx]
 
-                    filtered_result = result[idx]
-                    lc = filtered_result.download(
-                        quality_bitmask=quality_bitmask, flux_column=lc_type
-                    ).normalize()
-                    unique_exptimes = filtered_result.table.to_pandas().exptime.unique()
-                    # logger.info(f"Exp times: {unique_exptimes}")
-                    exptime = unique_exptimes[0] if exptime is None else exptime
-                    _seg = (
-                        getattr(lc, "sector", None)
-                        or getattr(lc, "campaign", None)
-                        or getattr(lc, "quarter", None)
-                    )
-                    if _seg is not None:
-                        assert _segments_match(_seg, sector)
-                    logger.info(
-                        f"Using {pipeline.upper()} pipeline in {_segment_word(mission)} {sector}."
-                    )
-                    if pipeline == "spoc":
-                        lc1 = filtered_result.download(
-                            quality_bitmask=quality_bitmask, flux_column="pdcsap_flux"
+                    if _h5_lightcurve_matches_segment(
+                        h5_lightcurve, sector, pipeline, logger=logger
+                    ):
+                        logger.info(
+                            f"Reusing the light curve embedded in {args.h5} for "
+                            f"{_segment_word(mission)}={sector} instead of re-downloading."
+                        )
+                        lc = _lightcurve_from_h5(h5_lightcurve).normalize()
+                        exptime = (
+                            h5_lightcurve["exptime"]
+                            if h5_lightcurve["exptime"] is not None
+                            else exptime
+                        )
+                        used_h5_lc = True
+                    else:
+                        filtered_result = result[idx]
+                        lc = filtered_result.download(
+                            quality_bitmask=quality_bitmask, flux_column=lc_type
                         ).normalize()
-                        _lc1_for_meta = lc1  # single LightCurve carries its own .meta
-                        lc2 = filtered_result.download(
-                            quality_bitmask=quality_bitmask, flux_column="sap_flux"
-                        ).normalize()
+                        unique_exptimes = filtered_result.table.to_pandas().exptime.unique()
+                        # logger.info(f"Exp times: {unique_exptimes}")
+                        exptime = unique_exptimes[0] if exptime is None else exptime
+                        _seg = (
+                            getattr(lc, "sector", None)
+                            or getattr(lc, "campaign", None)
+                            or getattr(lc, "quarter", None)
+                        )
+                        if _seg is not None:
+                            assert _segments_match(_seg, sector)
+                        logger.info(
+                            f"Using {pipeline.upper()} pipeline in {_segment_word(mission)} {sector}."
+                        )
+                        if pipeline == "spoc":
+                            lc1 = filtered_result.download(
+                                quality_bitmask=quality_bitmask, flux_column="pdcsap_flux"
+                            ).normalize()
+                            _lc1_for_meta = lc1  # single LightCurve carries its own .meta
+                            lc2 = filtered_result.download(
+                                quality_bitmask=quality_bitmask, flux_column="sap_flux"
+                            ).normalize()
                 if sigma:
                     nbefore = len(lc)
                     lc = lc.remove_outliers(sigma=sigma)
@@ -2284,7 +2427,7 @@ fig = allesfitter.show_initial_guess(dir_path)
                     if nbefore > nafter:
                         diff = nbefore - nafter
                         logger.info(f"Removed {diff} outliers using sigma={sigma}.")
-                    if pipeline == "spoc":
+                    if pipeline == "spoc" and not used_h5_lc:
                         lc1 = lc1.remove_outliers(sigma=sigma)
                         lc2 = lc2.remove_outliers(sigma=sigma)
                 if sector_flag == "all_sector":
@@ -2294,7 +2437,7 @@ fig = allesfitter.show_initial_guess(dir_path)
                         secs = "s".join(map(str, sector))
                     else:
                         secs = str(sector)
-                if pipeline == "spoc" and len(lc1) == len(lc2):
+                if pipeline == "spoc" and not used_h5_lc and len(lc1) == len(lc2):
                     fig, axs = plt.subplots(2, 1, figsize=(8, 6), sharex=True)
                     _ = lc1.scatter(ax=axs[0], zorder=2, label="PDCSAP", c="C0")
                     _ = lc2.scatter(ax=axs[0], zorder=1, label="SAP", c="C1")
@@ -2335,6 +2478,12 @@ fig = allesfitter.show_initial_guess(dir_path)
                     except Exception as _e:
                         logger.warning(f"Could not write spoc_contamination.txt: {_e}")
                 else:
+                    if pipeline == "spoc" and used_h5_lc:
+                        logger.info(
+                            "Skipping SPOC PDCSAP/SAP contamination comparison and "
+                            "dilution row: the h5-sourced light curve has no FITS "
+                            "header (CROWDSAP) to derive it from."
+                        )
                     ax = lc.scatter(label=pipeline)
                     ax.set_title(
                         f"{_segment_word(mission).capitalize()}={secs}\nexptime={int(exptime)}s"

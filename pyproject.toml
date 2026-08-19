@@ -39,6 +39,7 @@ dependencies = [
     "ellc",
     "limbdark @ git+https://github.com/jpdeleon/limbdark2.git",
     "h5py>=3.14.0",
+    "transitleastsquares>=1.32",
 ]
 
 [project.optional-dependencies]

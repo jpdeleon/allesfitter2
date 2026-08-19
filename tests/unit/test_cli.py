@@ -63,6 +63,32 @@ def test_prepare_forwards_tic_transit_arguments_before_running_script(monkeypatc
     ]
 
 
+def test_prepare_forwards_h5_argument_before_running_script(monkeypatch):
+    received = {}
+    monkeypatch.setattr(
+        cli_module,
+        "_run_script",
+        lambda script_name, argv: received.update(script_name=script_name, argv=argv),
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "prepare",
+            "-tic",
+            "123",
+            "-s",
+            "1",
+            "--h5",
+            "/path/to/TIC123_s1_tls.h5",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert received["script_name"] == "prepare_allesfit.py"
+    assert received["argv"][-2:] == ["--h5", "/path/to/TIC123_s1_tls.h5"]
+
+
 def test_optimize_defaults_to_differential_evolution_with_half_cpu_workers(monkeypatch, tmp_path):
     received = {}
     optimize_submodule = importlib.import_module("allesfitter.optimize")
@@ -105,6 +131,72 @@ def test_optimize_forwards_workers_and_maxfevals_overrides(monkeypatch, tmp_path
     assert result.exit_code == 0, result.output
     assert received["workers"] == 4
     assert received["maxfevals"] == 200
+
+
+def test_transit_search_forwards_arguments(monkeypatch, tmp_path):
+    received = {}
+    blind_search_submodule = importlib.import_module("allesfitter.detection.blind_search")
+    monkeypatch.setattr(
+        blind_search_submodule,
+        "transit_search",
+        lambda results_dir, **kwargs: received.update(results_dir=results_dir, **kwargs),
+    )
+
+    results_dir = tmp_path / "ns_results"
+    results_dir.mkdir()
+    result = CliRunner().invoke(
+        app,
+        [
+            "transit-search",
+            str(results_dir),
+            "--sde-threshold",
+            "6.0",
+            "--period-min",
+            "0.5",
+            "--period-max",
+            "15",
+            "--mask-width-factor",
+            "2.0",
+            "--max-candidates",
+            "5",
+            "--mission",
+            "k2",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert received["results_dir"] == str(results_dir)
+    assert received["sde_threshold"] == 6.0
+    assert received["period_min"] == 0.5
+    assert received["period_max"] == 15.0
+    assert received["mask_width_factor"] == 2.0
+    assert received["max_candidates"] == 5
+    assert received["mission"] == "k2"
+    assert received["quiet"] is False
+
+
+def test_transit_search_defaults(monkeypatch, tmp_path):
+    received = {}
+    blind_search_submodule = importlib.import_module("allesfitter.detection.blind_search")
+    monkeypatch.setattr(
+        blind_search_submodule,
+        "transit_search",
+        lambda results_dir, **kwargs: received.update(results_dir=results_dir, **kwargs),
+    )
+
+    results_dir = tmp_path / "mcmc_results"
+    results_dir.mkdir()
+    result = CliRunner().invoke(app, ["transit-search", str(results_dir)])
+
+    assert result.exit_code == 0, result.output
+    assert received["sde_threshold"] == 5.0
+    assert received["period_min"] is None
+    assert received["period_max"] is None
+    assert received["mask_width_factor"] == 1.5
+    assert received["outdir"] is None
+    assert received["file_extension"] == ".pdf"
+    assert received["max_candidates"] == 20
+    assert received["mission"] == "tess"
 
 
 def test_show_params_labels_fit_status_column(tmp_path):

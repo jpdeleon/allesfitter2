@@ -39,6 +39,7 @@ full walkthrough in [notes.md](notes.md).
 | **Raw-flux clipping** | Drop out-of-window points from the fit, keep them flagged on plots | `flux_min_raw` / `flux_max_raw` | [link](notes.md#raw-flux-outlier-clipping) |
 | **Data preparation** | Auto-download + multi-pipeline light curves (TESS/K2/Kepler) and full config generation | `prepare_allesfit` CLI | [CLI](#command-line-options) |
 | **Robust post-processing** | OOM-safe diagnostic plots for high-dim fits; centralized JSONL run log | `ns_output` / `mcmc_output`, `log_run` | [plots](notes.md#oom-safe-diagnostic-plots-for-high-dim-fits) · [run log](notes.md#tracking-long-running-fits-with-the-centralized-run-log) |
+| **Blind transit search** | Detrend with the best fit, mask known planets, iteratively search the residual with TLS until SDE drops below threshold; per-candidate figure + quicklook-style `.h5` (readable by `--h5`) | `transit-search` CLI | [CLI](#blind-transit-search-transit-search) |
 
 **Inputs.** Two CSVs are a contract: `settings.csv` declares *what* is modelled
 (companions, instruments, baseline/error model per instrument, achromatic vs
@@ -177,7 +178,59 @@ command.
 | `show-settings <dir>` | Display `settings.csv` as grouped Rich tables |
 | `show-params <dir>` | Display fitted and fixed parameters from `params.csv` |
 | `show-results <dir>` | Display available MCMC/NS posterior and derived-result tables |
+| `transit-search <results-dir>` | Blind TLS search for un-modeled transits, after detrending with the best fit and masking known planets |
 | `gui` | Run the target, job, configuration, and results workbench |
+
+### Blind transit search (`transit-search`)
+
+After a fit has completed, `transit-search` looks for additional
+un-modeled transiting signals in the residual light curve:
+
+1. Loads the posterior-median parameters from the given `mcmc_results` or
+   `ns_results` directory — the best-fit baseline (GP or otherwise) and
+   every known companion's ephemeris.
+2. Reconstructs each instrument's full raw light curve (before any
+   `fast_fit` windowing) and subtracts the best-fit baseline model from it.
+3. Masks out every known companion's transits (period/epoch from the
+   posterior, duration from the transit-chord equation).
+4. Runs `transitleastsquares` on what's left, masking each new detection
+   and repeating, until the found signal's SDE drops below
+   `--sde-threshold` (default `5.0`).
+
+```bash
+uv run allesfitter transit-search HD39091/ns_results --sde-threshold 6
+```
+
+For each candidate above threshold, it writes to `--outdir` (default
+`<target>/transit_search_results/`):
+
+- `candidate_<N>.pdf` — raw light curve, flattened (detrended) light curve
+  with the candidate's TLS model overlaid, the TLS periodogram (harmonics
+  and known-planet periods marked), and phase-folded data + model.
+- `candidate_<N>_tls.h5` — a quicklook-format TLS results file, readable by
+  `prepare -tic/-toi ... --h5 candidate_<N>_tls.h5` to seed a new
+  `params.csv` companion row for a confirmed candidate (see
+  [`--h5` ephemeris seeding](#raw-tic-transit-parameters--tic-and---h5-ephemeris-seeding)).
+- `candidates_summary.csv` — period/epoch/duration/depth/SDE/SNR for every
+  candidate found.
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--sde-threshold` | Keep searching while the found signal's SDE stays at or above this value | `5.0` |
+| `--period-min`, `--period-max` | Period search range (days) | TLS's own default |
+| `--mask-width-factor` | Mask known companions out to this many times their transit duration | `1.5` |
+| `-o, --outdir <DIR>` | Output directory | `<target>/transit_search_results` |
+| `-e, --file-extension` | Figure format (`pdf`, `png`, `jpg`, `svg`, `webp`) | `.pdf` |
+| `--max-candidates` | Safety cap on the number of candidates kept | `20` |
+| `-m, --mission <NAME>` | `tess`, `k2`, or `kepler`; sets the h5 files' BJD offset | `tess` |
+
+Candidates should always be vetted by eye before trusting them — the
+best-fit baseline is only well constrained near the known transits it was
+conditioned on (especially with `fast_fit` enabled), so a long-period
+candidate close to the search's upper period bound can be leftover,
+un-flattened stellar variability rather than a real transit; the raw and
+flattened light-curve panels in each candidate's figure make that easy to
+check directly.
 
 ### Browser workbench over SSH
 
@@ -225,6 +278,61 @@ Exactly one of `-s`, `-c`, or `-q` must be given, matched to the mission supplie
 | `-q, --quarter <Q>` | Kepler | Quarter number(s) | `-q 4` |
 
 Each accepts explicit numbers/labels (`-s 1 3 5`), `-1` for the most recent (default), `0` for the first, or `all` for every available window.
+
+### Raw TIC transit parameters (`-tic`) and `--h5` ephemeris seeding
+
+A `-tic <ID>` target has no catalog entry, so its ephemeris comes from the
+command line (or an interactive prompt) instead of TOI/CTOI/NExSci lookups.
+
+| Option | Description | Units |
+|--------|-------------|-------|
+| `--period`, `--period-err` | Orbital period (+ uncertainty) | days |
+| `--epoch`, `--epoch-err` | Transit epoch (+ uncertainty) | BJD |
+| `--duration`, `--duration-err` | Transit duration (+ uncertainty) | hours |
+| `--depth`, `--depth-err` | Transit depth (+ uncertainty) | ppm |
+| `--h5 <PATH>` | A [quicklook](https://github.com/jpdeleon/quicklook) TLS results `.h5` file — the primary `..._tls.h5` or an iterative-search companion `..._tls_p2.h5` — used to seed period/epoch/duration/depth (and period/depth uncertainties, where TLS reports them) | — |
+
+Any field the command line doesn't supply directly, and `--h5` doesn't
+supply either, falls back to an interactive prompt — so an explicit flag
+always overrides the matching `--h5` value, and `--h5` fills in the rest.
+TLS carries no epoch or duration uncertainty, so `--epoch-err` and
+`--duration-err` still need an explicit value or a prompt answer even when
+`--h5` is given. Example, for a candidate not yet in the TOI catalog:
+
+```bash
+uv run allesfitter prepare -tic 436478932 -s 83 \
+  --h5 ~/ql/TIC436478932_s83_pdcsap_sc_tls_p2.h5 \
+  --epoch-err 0.01 --duration-err 0.2
+```
+
+`--h5` also works with `-toi <ID>`, for a companion quicklook's iterative
+TLS search found that isn't in the TOI catalog yet. The target's known
+catalog planet(s) are prepared as usual (one `params.csv` companion row
+each, `b`, `c`, ... in catalog order), and the `--h5` candidate is appended
+as one more companion after them — the catalog rows are never modified.
+`--period`/`--epoch`/etc. still take priority over `--h5` for the appended
+row, same as raw `-tic`; anything neither supplies falls back to a prompt.
+
+```bash
+uv run allesfitter prepare -toi 1234 -s 83 \
+  --h5 ~/ql/TIC.../TIC..._s83_pdcsap_sc_tls_p2.h5
+```
+
+#### Light curve reuse
+
+`--h5` also lets `prepare` reuse the light curve already inside the h5 file
+instead of re-downloading it — but only for the exact `--sector`/`--pipeline`
+that h5 was built from (compared against the `sector`/`pipeline` quicklook
+recorded alongside the light curve). Any other sector/pipeline this run
+touches is downloaded normally, so mixing a reused segment with freshly
+downloaded ones (e.g. `-s 37 90` where only 37 is in the h5) works fine.
+This only applies to `-m tess` and only when the h5 file actually carries a
+light curve — an iterative-search companion (`..._tls_p2.h5`,
+`..._tls_p3.h5`, ...) only stores the TLS results, not the light curve, so
+`--h5 ..._tls_p2.h5` always downloads normally; point `--h5` at the primary
+`..._tls.h5` instead to reuse its light curve. SPOC's PDCSAP/SAP dilution
+comparison is skipped for a reused light curve (no FITS header to read
+`CROWDSAP` from).
 
 ### Data processing options
 
