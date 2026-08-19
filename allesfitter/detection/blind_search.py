@@ -171,6 +171,80 @@ def _tls_stellar_kwargs(base, params_median: dict) -> dict:
     return kwargs
 
 
+#: Impact parameter above which TLS's default transit_template (which
+#: assumes a moderate, roughly-central impact parameter — b ~ 0.32, from
+#: its DEFAULT_INC/DEFAULT_A constants) measurably underestimates T14, per
+#: empirical testing against injected transits (see git history for this
+#: constant's introduction): ratio true/fit duration ~0.6-0.8 for b >~ 0.9,
+#: recovering to ~0.85-1.1 once transit_template="grazing" is used instead.
+_GRAZING_IMPACT_PARAMETER_THRESHOLD = 0.7
+
+
+def _impact_parameter(rsuma: float, cosi: float, rr: float) -> float:
+    """Circular-orbit impact parameter ``b = cos(i) / (R_star/a)`` — same
+    formula as :func:`allesfitter.orbits.circular_transit_duration`'s
+    internal computation. Returns NaN for missing/non-physical inputs."""
+    try:
+        rsuma = float(rsuma)
+        cosi = float(cosi)
+        rr = float(rr)
+    except (TypeError, ValueError):
+        return float("nan")
+    if not (np.isfinite(rsuma) and np.isfinite(cosi) and np.isfinite(rr)) or rr < 0:
+        return float("nan")
+    rstar_over_a = rsuma / (1.0 + rr)
+    if rstar_over_a <= 0:
+        return float("nan")
+    return cosi / rstar_over_a
+
+
+def _companion_impact_parameter(params_median: dict, companion: str) -> float:
+    return _impact_parameter(
+        params_median.get(f"{companion}_rsuma"),
+        params_median.get(f"{companion}_cosi"),
+        params_median.get(f"{companion}_rr"),
+    )
+
+
+def _resolve_transit_template(
+    transit_template: str,
+    params_median: dict,
+    companions: list[str],
+    for_companion: str | None = None,
+) -> tuple[str, float]:
+    """Translate ``--transit-template`` into the literal TLS preset string
+    (``"default"`` or ``"grazing"`` — the only two values that change TLS's
+    assumed transit shape; ``"box"`` also exists but tests as
+    indistinguishable from ``"default"`` in this TLS version).
+
+    An explicit ``"default"``/``"grazing"`` (or any other literal string —
+    passed through so TLS's own validation reports a bad value) is returned
+    unchanged. ``"auto"`` instead picks based on impact parameter computed
+    from the posterior: the companion's own for the per-companion recovery
+    check (``for_companion``), or the most grazing of all known companions
+    for the (geometry-unknown) blind search — a system with one near-edge-on
+    orbit plausibly has others close to the same plane. Falls back to
+    ``"default"`` when no companion has a resolvable impact parameter.
+
+    Returns ``(resolved_template, impact_parameter)`` — ``impact_parameter``
+    is NaN when not resolved (including for non-``"auto"`` input), purely
+    for logging.
+    """
+    if transit_template != "auto":
+        return transit_template, float("nan")
+
+    if for_companion is not None:
+        b = _companion_impact_parameter(params_median, for_companion)
+    else:
+        candidates = [_companion_impact_parameter(params_median, c) for c in companions]
+        candidates = [b for b in candidates if np.isfinite(b)]
+        b = max(candidates, key=abs) if candidates else float("nan")
+
+    if not np.isfinite(b):
+        return "default", b
+    return ("grazing" if abs(b) >= _GRAZING_IMPACT_PARAMETER_THRESHOLD else "default"), b
+
+
 def _apply_known_masks(
     time: np.ndarray, arrays: list[np.ndarray], windows: list[dict]
 ) -> tuple[np.ndarray, ...]:
@@ -536,6 +610,7 @@ def transit_search(
     period_min: float | None = None,
     period_max: float | None = None,
     n_transits_min: int = 3,
+    transit_template: str = "auto",
     mask_width_factor: float = 1.5,
     outdir: str | None = None,
     file_extension: str = ".pdf",
@@ -571,6 +646,19 @@ def transit_search(
         candidate after it's found), this shrinks the search itself — fewer
         wasted trial periods, and large-gap false positives that would only
         have 1-2 transits can't even be proposed in the first place.
+    transit_template : str
+        TLS's assumed transit shape: ``"default"`` (moderate impact
+        parameter, b~0.32) or ``"grazing"`` (b=0.99). TLS fits duration by
+        picking the best-matching discrete template for the trial period,
+        not a free fit — with a low-b (near-central) template applied to a
+        genuinely high-b (grazing, V-shaped) transit, the fitted duration
+        comes out ~20-40% short regardless of SNR (confirmed by injection
+        tests). ``"auto"`` (default) picks per companion from its own
+        posterior impact parameter for the recovery check, or from the most
+        grazing known companion for the (geometry-unknown) blind search;
+        falls back to ``"default"`` when no companion has a resolvable
+        impact parameter. Pass ``"default"``/``"grazing"`` directly to
+        override for every companion/candidate uniformly.
     mask_width_factor : float
         Known-companion transits are masked out to this many times their
         total (T14) duration on either side of mid-transit.
@@ -643,6 +731,18 @@ def transit_search(
     if check_known_recovery and known_windows:
         for i, window in enumerate(known_windows):
             other_windows = known_windows[:i] + known_windows[i + 1 :]
+            resolved_template, template_b = _resolve_transit_template(
+                transit_template, params_median, companions, for_companion=window["companion"]
+            )
+            companion_tls_kwargs = dict(tls_kwargs)
+            companion_tls_kwargs["transit_template"] = resolved_template
+            if not quiet and transit_template == "auto":
+                print(
+                    f"[transit-search] known companion {window['companion']}: "
+                    f"auto-selected transit_template={resolved_template}"
+                    + (f" (b={template_b:.2f})" if np.isfinite(template_b) else "")
+                )
+
             results, row, time_iso, flux_raw_iso, flux_iso = _check_known_companion_recovery(
                 time,
                 flux_raw,
@@ -650,7 +750,7 @@ def transit_search(
                 flux_err,
                 window,
                 other_windows,
-                tls_kwargs,
+                companion_tls_kwargs,
                 recovery_period_frac,
                 sde_min,
                 quiet,
@@ -705,6 +805,15 @@ def transit_search(
     if period_max is not None:
         tls_kwargs["period_max"] = period_max
     tls_kwargs["n_transits_min"] = n_transits_min
+    resolved_template, template_b = _resolve_transit_template(
+        transit_template, params_median, companions
+    )
+    tls_kwargs["transit_template"] = resolved_template
+    if not quiet and transit_template == "auto":
+        print(
+            f"[transit-search] blind search: auto-selected transit_template={resolved_template}"
+            + (f" (max known-companion b={template_b:.2f})" if np.isfinite(template_b) else "")
+        )
 
     results_all = tls_search(
         time_search,

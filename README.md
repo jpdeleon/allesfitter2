@@ -217,6 +217,19 @@ un-modeled transiting signals in the residual light curve:
    just under-sampling it. Rejected candidates are logged with their reason
    but not written to disk.
 
+Every TLS scan above (the recovery check and the blind search) also picks
+`--transit-template` (default `auto`): TLS fits duration by choosing the
+best-matching *discrete* template for the trial period, not a free fit, and
+its `default` template assumes a moderate impact parameter (b≈0.32). Applied
+to a genuinely high-impact-parameter (grazing, V-shaped) transit, the fitted
+duration comes out 20-40% short — confirmed by injection testing, and
+independent of SNR, so it isn't something a deeper light curve fixes.
+`auto` resolves per companion from its own posterior impact parameter for
+the recovery check, or from the most grazing known companion for the
+(geometry-unknown) blind search, and switches to TLS's `grazing` template
+(b=0.99) above `b≈0.7`; pass `default`/`grazing` directly to force one
+template for everything.
+
 ```bash
 uv run allesfitter transit-search HD39091/ns_results --sde-min 6
 ```
@@ -250,6 +263,7 @@ For each blind-search candidate above threshold, it writes:
 | `--sde-min` | Keep searching while the found signal's SDE stays at or above this value; also gates whether a known companion counts as `recovered` | `8.0` |
 | `--period-min`, `--period-max` | Blind-search period range (days); doesn't affect the known-companion recovery check | TLS's own default |
 | `--n-transits-min` | Exclude periods needing more transits than the data's time span can support from the period grid itself — shrinks the search and keeps large-gap false positives from being proposed at all | `3` |
+| `--transit-template` | TLS's assumed transit shape: `default`, `grazing`, or `auto` (picks per companion/candidate from posterior impact parameter) | `auto` |
 | `--mask-width-factor` | Mask known companions out to this many times their transit duration | `1.5` |
 | `--skip-known-recovery-check` | Skip step 3 entirely and go straight to the blind search | off |
 | `--recovery-period-frac` | Half-width of the recovery check's period bracket, as a fraction of each companion's own period | `0.05` |

@@ -400,6 +400,15 @@ def transit_search(
         "n_transits_min) — shrinks the search and keeps large-gap false positives "
         "from being proposed at all",
     ),
+    transit_template: str = typer.Option(
+        "auto",
+        "--transit-template",
+        help="TLS's assumed transit shape: 'default' (moderate impact parameter), "
+        "'grazing' (b=0.99, needed for correctly-sized durations on V-shaped/"
+        "high-impact-parameter transits — TLS's default template underestimates "
+        "duration 20-40% for those regardless of SNR), or 'auto' (default here) to "
+        "pick per companion/candidate from posterior impact parameter",
+    ),
     mask_width_factor: float = typer.Option(
         1.5,
         "--mask-width-factor",
@@ -464,6 +473,7 @@ def transit_search(
         period_min=period_min,
         period_max=period_max,
         n_transits_min=n_transits_min,
+        transit_template=transit_template,
         mask_width_factor=mask_width_factor,
         outdir=outdir,
         file_extension=file_extension,

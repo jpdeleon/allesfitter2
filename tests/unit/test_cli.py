@@ -157,6 +157,8 @@ def test_transit_search_forwards_arguments(monkeypatch, tmp_path):
             "15",
             "--n-transits-min",
             "4",
+            "--transit-template",
+            "grazing",
             "--mask-width-factor",
             "2.0",
             "--max-candidates",
@@ -181,6 +183,7 @@ def test_transit_search_forwards_arguments(monkeypatch, tmp_path):
     assert received["period_min"] == 0.5
     assert received["period_max"] == 15.0
     assert received["n_transits_min"] == 4
+    assert received["transit_template"] == "grazing"
     assert received["mask_width_factor"] == 2.0
     assert received["max_candidates"] == 5
     assert received["mission"] == "k2"
@@ -210,6 +213,7 @@ def test_transit_search_defaults(monkeypatch, tmp_path):
     assert received["period_min"] is None
     assert received["period_max"] is None
     assert received["n_transits_min"] == 3
+    assert received["transit_template"] == "auto"
     assert received["mask_width_factor"] == 1.5
     assert received["outdir"] is None
     assert received["file_extension"] == ".pdf"

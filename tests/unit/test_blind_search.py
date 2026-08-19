@@ -12,11 +12,14 @@ import pytest
 
 from allesfitter.detection.blind_search import (
     _apply_known_masks,
+    _companion_impact_parameter,
     _detrend_full_lightcurve,
     _harmonic_periods,
+    _impact_parameter,
     _known_companion_windows,
     _passes_transit_consistency_checks,
     _resolve_sampler,
+    _resolve_transit_template,
     _tls_stellar_kwargs,
     _write_known_recovery_csv,
     _write_summary_csv,
@@ -408,3 +411,92 @@ class TestPassesTransitConsistencyChecks:
         )
 
         assert ok is True
+
+
+class TestImpactParameter:
+    def test_computes_known_grazing_geometry(self):
+        # rsuma=0.15, cosi=0.14, rr=0.05 -> b=0.14*1.05/0.15=0.98 (matches
+        # the ellc-injection test used to derive the grazing threshold).
+        b = _impact_parameter(rsuma=0.15, cosi=0.14, rr=0.05)
+
+        assert b == pytest.approx(0.98, abs=1e-6)
+
+    def test_computes_known_low_impact_geometry(self):
+        b = _impact_parameter(rsuma=0.15, cosi=0.02, rr=0.1)
+
+        assert b == pytest.approx(0.02 * 1.1 / 0.15, abs=1e-9)
+
+    def test_returns_nan_for_missing_input(self):
+        assert np.isnan(_impact_parameter(rsuma=None, cosi=0.1, rr=0.05))
+
+    def test_returns_nan_for_non_numeric_input(self):
+        assert np.isnan(_impact_parameter(rsuma="oops", cosi=0.1, rr=0.05))
+
+    def test_returns_nan_for_zero_rsuma(self):
+        assert np.isnan(_impact_parameter(rsuma=0.0, cosi=0.1, rr=0.05))
+
+    def test_returns_nan_for_negative_rr(self):
+        assert np.isnan(_impact_parameter(rsuma=0.15, cosi=0.1, rr=-0.5))
+
+
+class TestCompanionImpactParameter:
+    def test_reads_companion_prefixed_keys(self):
+        params_median = {"b_rsuma": 0.15, "b_cosi": 0.14, "b_rr": 0.05}
+
+        b = _companion_impact_parameter(params_median, "b")
+
+        assert b == pytest.approx(0.98, abs=1e-6)
+
+    def test_missing_companion_keys_return_nan(self):
+        assert np.isnan(_companion_impact_parameter({}, "c"))
+
+
+class TestResolveTransitTemplate:
+    def test_explicit_choice_passes_through_unchanged(self):
+        template, b = _resolve_transit_template("grazing", {}, ["b"])
+
+        assert template == "grazing"
+        assert np.isnan(b)
+
+    def test_auto_selects_grazing_for_high_impact_companion(self):
+        params_median = {"b_rsuma": 0.15, "b_cosi": 0.14, "b_rr": 0.05}  # b=0.98
+
+        template, b = _resolve_transit_template("auto", params_median, ["b"], for_companion="b")
+
+        assert template == "grazing"
+        assert b == pytest.approx(0.98, abs=1e-6)
+
+    def test_auto_selects_default_for_low_impact_companion(self):
+        params_median = {"b_rsuma": 0.15, "b_cosi": 0.02, "b_rr": 0.05}  # b~0.14
+
+        template, b = _resolve_transit_template("auto", params_median, ["b"], for_companion="b")
+
+        assert template == "default"
+        assert b == pytest.approx(0.02 * 1.05 / 0.15, abs=1e-9)
+
+    def test_auto_falls_back_to_default_when_unresolvable(self):
+        template, b = _resolve_transit_template("auto", {}, ["b"], for_companion="b")
+
+        assert template == "default"
+        assert np.isnan(b)
+
+    def test_auto_system_level_picks_most_grazing_companion(self):
+        params_median = {
+            "b_rsuma": 0.15,
+            "b_cosi": 0.02,
+            "b_rr": 0.05,  # low impact, b~0.14
+            "c_rsuma": 0.15,
+            "c_cosi": 0.14,
+            "c_rr": 0.05,  # high impact, b~0.98
+        }
+
+        template, b = _resolve_transit_template("auto", params_median, ["b", "c"])
+
+        assert template == "grazing"
+        assert b == pytest.approx(0.98, abs=1e-6)
+
+    def test_auto_system_level_falls_back_to_default_with_no_companions(self):
+        template, b = _resolve_transit_template("auto", {}, [])
+
+        assert template == "default"
+        assert np.isnan(b)
