@@ -44,6 +44,7 @@ from ..computer import calculate_baseline
 from ..exoworlds_rdx.lightcurves.lightcurve_tools import rebin_err
 from ..general_output import get_params_from_samples
 from ..lightcurves import translate_limb_darkening_from_q_to_u as q_to_u
+from ..plot_utils import broken_xaxis_subplots
 from ..results import target_output_directory
 from ..tls_h5 import write_h5_tls_result
 from ..validation.prior_checks import transit_duration_days
@@ -284,6 +285,34 @@ def _check_known_companion_recovery(
     return results, row, time_iso, flux_raw_iso, flux_iso
 
 
+def _plot_broken_series(fig, position, time, plot_fn, gap_threshold_days, ylabel, title):
+    """Fill a (possibly multi-column) GridSpec ``position`` with a
+    broken-x-axis time-series panel: :func:`allesfitter.plot_utils.
+    broken_xaxis_subplots` splits it into one sub-Axes per contiguous
+    segment of ``time`` (same convention ``general_output.afplot`` /
+    ``show_initial_guess`` use for TESS-sector-sized gaps), ``plot_fn(ax)``
+    draws the full series into each (matplotlib clips to that segment's
+    xlim), and the shared ylabel/title/legend are kept on the first
+    sub-Axes only, with the xlabel centered on the middle one.
+
+    Returns the list of sub-Axes (length 1 when there's no large gap, or
+    when ``gap_threshold_days`` is ``None``, which disables breaking).
+    """
+    if gap_threshold_days is None:
+        sub_axes = [fig.add_subplot(position)]
+    else:
+        sub_axes = broken_xaxis_subplots(fig, position, time, gap_threshold_days=gap_threshold_days)
+    for ax in sub_axes:
+        xlim = ax.get_xlim()
+        plot_fn(ax)
+        ax.set_xlim(xlim)
+    sub_axes[0].set_ylabel(ylabel)
+    sub_axes[0].set_title(title)
+    sub_axes[0].legend(loc="upper right", fontsize=8)
+    sub_axes[len(sub_axes) // 2].set_xlabel("Time (BJD)")
+    return sub_axes
+
+
 def _harmonic_periods(period: float, n_harmonics: int = 4) -> list[float]:
     """Integer-ratio harmonics of ``period`` (``P/2, P/3, ..., 2P, 3P, ...``)."""
     harmonics = set()
@@ -300,46 +329,68 @@ def _plot_candidate(
     flux_raw: np.ndarray,
     time_flat: np.ndarray,
     flux_flat: np.ndarray,
+    gap_threshold_days: float = 5.0,
 ) -> plt.Figure:
     """One figure per candidate, stacked top to bottom: the full raw light
     curve with the best-fit baseline model overlaid, the full flattened
     (detrended) light curve with this candidate's TLS model overlaid, the
     TLS periodogram (harmonics + known-planet reference lines), and
-    phase-folded data + TLS model."""
+    phase-folded data + TLS model.
+
+    The raw and flattened panels break their x-axis at any gap in
+    ``time_raw``/``time_flat`` wider than ``gap_threshold_days`` (e.g.
+    between TESS sectors), the same convention ``show-initial-guess`` uses.
+    """
     fig = plt.figure(figsize=(12, 14), tight_layout=True)
     gs = fig.add_gridspec(4, 2, height_ratios=[1, 1, 1, 1.2])
 
-    ax_raw = fig.add_subplot(gs[0, :])
-    ax_raw.plot(time_raw, flux_raw, ".", color="silver", ms=2, rasterized=True, label="Raw data")
     # flux_raw - flux_flat is exactly the (noiseless, smooth) best-fit
     # baseline calculate_baseline predicted; +1 puts it back on the raw
     # flux's ~1 level instead of the ~0 level it sits at as a subtracted term.
     baseline_on_time_raw = flux_raw - flux_flat + 1.0
-    ax_raw.plot(
-        time_raw, baseline_on_time_raw, "-", color="C1", lw=1, zorder=2, label="Best-fit baseline"
-    )
-    ax_raw.set(xlabel="Time (BJD)", ylabel="Raw flux", title="Raw light curve")
-    ax_raw.legend(loc="upper right", fontsize=8)
 
-    ax_flat = fig.add_subplot(gs[1, :], sharex=ax_raw)
-    ax_flat.plot(
-        time_flat,
-        flux_flat,
-        ".",
-        color="silver",
-        ms=2,
-        rasterized=True,
-        zorder=1,
-        label="Flattened data",
+    def _draw_raw(ax):
+        ax.plot(time_raw, flux_raw, ".", color="silver", ms=2, rasterized=True, label="Raw data")
+        ax.plot(
+            time_raw,
+            baseline_on_time_raw,
+            "-",
+            color="C1",
+            lw=1,
+            zorder=2,
+            label="Best-fit baseline",
+        )
+
+    _plot_broken_series(
+        fig, gs[0, :], time_raw, _draw_raw, gap_threshold_days, "Raw flux", "Raw light curve"
     )
+
     model_on_time_flat = np.interp(
         time_flat, results["model_lightcurve_time"], results["model_lightcurve_model"]
     )
-    ax_flat.plot(time_flat, model_on_time_flat, "r-", lw=1, zorder=2, label="TLS model")
-    ax_flat.set(
-        xlabel="Time (BJD)", ylabel="Flattened flux", title="Flattened (detrended) light curve"
+
+    def _draw_flat(ax):
+        ax.plot(
+            time_flat,
+            flux_flat,
+            ".",
+            color="silver",
+            ms=2,
+            rasterized=True,
+            zorder=1,
+            label="Flattened data",
+        )
+        ax.plot(time_flat, model_on_time_flat, "r-", lw=1, zorder=2, label="TLS model")
+
+    _plot_broken_series(
+        fig,
+        gs[1, :],
+        time_flat,
+        _draw_flat,
+        gap_threshold_days,
+        "Flattened flux",
+        "Flattened (detrended) light curve",
     )
-    ax_flat.legend(loc="upper right", fontsize=8)
 
     ax0 = fig.add_subplot(gs[2, :])
     ax0.plot(results["periods"], results["power"], "k-", lw=0.8, rasterized=True)
@@ -490,6 +541,9 @@ def transit_search(
     full_lightcurve = {"time": time.copy(), "flux": flux.copy(), "flux_err": flux_err.copy()}
 
     tls_kwargs = _tls_stellar_kwargs(base, params_median)
+    # Same convention as general_output.afplot / show-initial-guess: skip
+    # typical TESS intra-sector gaps, break only at inter-sector scale.
+    gap_threshold_days = base.settings.get("xaxis_break_gap_days", 5.0)
 
     if outdir is None:
         outdir = os.path.join(str(target_output_directory(datadir)), "transit_search_results")
@@ -513,7 +567,13 @@ def transit_search(
             )
 
             fig = _plot_candidate(
-                results, other_windows, time_iso, flux_raw_iso, time_iso, flux_iso
+                results,
+                other_windows,
+                time_iso,
+                flux_raw_iso,
+                time_iso,
+                flux_iso,
+                gap_threshold_days,
             )
             fig_path = os.path.join(outdir, f"known_{window['companion']}_recovery{file_extension}")
             fig.savefig(fig_path, bbox_inches="tight")
@@ -571,7 +631,9 @@ def transit_search(
 
     summary = []
     for i, results in enumerate(results_all, start=1):
-        fig = _plot_candidate(results, known_windows, time, flux_raw, time, flux)
+        fig = _plot_candidate(
+            results, known_windows, time, flux_raw, time, flux, gap_threshold_days
+        )
         fig_path = os.path.join(outdir, f"candidate_{i}{file_extension}")
         fig.savefig(fig_path, bbox_inches="tight")
         plt.close(fig)
