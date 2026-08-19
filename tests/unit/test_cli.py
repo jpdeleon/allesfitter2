@@ -155,6 +155,8 @@ def test_transit_search_forwards_arguments(monkeypatch, tmp_path):
             "0.5",
             "--period-max",
             "15",
+            "--n-transits-min",
+            "4",
             "--mask-width-factor",
             "2.0",
             "--max-candidates",
@@ -164,6 +166,12 @@ def test_transit_search_forwards_arguments(monkeypatch, tmp_path):
             "--skip-known-recovery-check",
             "--recovery-period-frac",
             "0.1",
+            "--min-distinct-transits",
+            "4",
+            "--min-points-per-transit",
+            "10",
+            "--consistency-sigma",
+            "4.0",
         ],
     )
 
@@ -172,11 +180,15 @@ def test_transit_search_forwards_arguments(monkeypatch, tmp_path):
     assert received["sde_min"] == 6.0
     assert received["period_min"] == 0.5
     assert received["period_max"] == 15.0
+    assert received["n_transits_min"] == 4
     assert received["mask_width_factor"] == 2.0
     assert received["max_candidates"] == 5
     assert received["mission"] == "k2"
     assert received["check_known_recovery"] is False
     assert received["recovery_period_frac"] == 0.1
+    assert received["min_distinct_transits"] == 4
+    assert received["min_points_per_transit"] == 10
+    assert received["consistency_sigma"] == 4.0
     assert received["quiet"] is False
 
 
@@ -197,6 +209,7 @@ def test_transit_search_defaults(monkeypatch, tmp_path):
     assert received["sde_min"] == 8.0
     assert received["period_min"] is None
     assert received["period_max"] is None
+    assert received["n_transits_min"] == 3
     assert received["mask_width_factor"] == 1.5
     assert received["outdir"] is None
     assert received["file_extension"] == ".pdf"
@@ -204,6 +217,9 @@ def test_transit_search_defaults(monkeypatch, tmp_path):
     assert received["mission"] == "tess"
     assert received["check_known_recovery"] is True
     assert received["recovery_period_frac"] == 0.05
+    assert received["min_distinct_transits"] == 3
+    assert received["min_points_per_transit"] == 5
+    assert received["consistency_sigma"] == 3.0
 
 
 def test_show_params_labels_fit_status_column(tmp_path):

@@ -199,8 +199,23 @@ un-modeled transiting signals in the residual light curve:
 4. Masks out every known companion's transits (period/epoch from the
    posterior, duration from the transit-chord equation).
 5. Runs `transitleastsquares` on what's left, masking each new detection
-   and repeating, until the found signal's SDE drops below
-   `--sde-min` (default `8.0`).
+   and repeating, until the found signal's SDE drops below `--sde-min`
+   (default `8.0`). `--n-transits-min` (default `3`, passed straight
+   through to TLS's own period grid) excludes periods needing more transits
+   than the data's time span can support from the search itself — large
+   TESS inter-sector gaps otherwise make periods near the full baseline
+   search-able even though only 1-2 sparse epochs could ever support them.
+6. Rejects candidates whose periodicity is an artifact of large gaps
+   between TESS sectors/campaigns, using TLS's own per-transit statistics
+   rather than an inferred period-multiple/harmonic heuristic: too few of
+   the period's predicted transits have *any* data (`--min-distinct-transits`,
+   default `3`) — the classic false positive where a long period only
+   "works" because 1-2 sparse epochs happen to align — or a well-covered
+   epoch (`--min-points-per-transit`, default `5`) precise enough to have
+   caught the transit shows no dip at all (`--consistency-sigma`, default
+   `3.0`), which directly rules the period out from real data rather than
+   just under-sampling it. Rejected candidates are logged with their reason
+   but not written to disk.
 
 ```bash
 uv run allesfitter transit-search HD39091/ns_results --sde-min 6
@@ -234,9 +249,13 @@ For each blind-search candidate above threshold, it writes:
 |--------|-------------|---------|
 | `--sde-min` | Keep searching while the found signal's SDE stays at or above this value; also gates whether a known companion counts as `recovered` | `8.0` |
 | `--period-min`, `--period-max` | Blind-search period range (days); doesn't affect the known-companion recovery check | TLS's own default |
+| `--n-transits-min` | Exclude periods needing more transits than the data's time span can support from the period grid itself — shrinks the search and keeps large-gap false positives from being proposed at all | `3` |
 | `--mask-width-factor` | Mask known companions out to this many times their transit duration | `1.5` |
 | `--skip-known-recovery-check` | Skip step 3 entirely and go straight to the blind search | off |
 | `--recovery-period-frac` | Half-width of the recovery check's period bracket, as a fraction of each companion's own period | `0.05` |
+| `--min-distinct-transits` | Reject a candidate if fewer than this many predicted transits have any data at all | `3` |
+| `--min-points-per-transit` | Minimum in-transit points for an epoch to count as well-covered by the consistency check | `5` |
+| `--consistency-sigma` | Reject a candidate if any well-covered epoch shows no dip at this significance | `3.0` |
 | `-o, --outdir <DIR>` | Output directory | `<target>/transit_search_results` |
 | `-e, --file-extension` | Figure format (`pdf`, `png`, `jpg`, `svg`, `webp`) | `.pdf` |
 | `--max-candidates` | Safety cap on the number of candidates kept | `20` |

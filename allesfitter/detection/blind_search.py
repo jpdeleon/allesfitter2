@@ -313,6 +313,65 @@ def _plot_broken_series(fig, position, time, plot_fn, gap_threshold_days, ylabel
     return sub_axes
 
 
+def _passes_transit_consistency_checks(
+    results: dict,
+    min_distinct_transits: int,
+    min_points_per_transit: int,
+    consistency_sigma: float,
+) -> tuple[bool, str]:
+    """Reject a candidate whose periodicity is an artifact of large data
+    gaps (TESS inter-sector/campaign gaps), using TLS's own per-transit
+    statistics rather than an inferred period-multiple/harmonic heuristic.
+
+    Two checks, in increasing order of strength:
+
+    1. ``distinct_transit_count``: too few of the period's predicted transit
+       epochs have *any* data at all (the rest fall entirely in a gap) — the
+       period is under-constrained, not falsified, but a long period that
+       only "works" because 1-2 sparse epochs happen to line up is exactly
+       the classic gap-driven false positive.
+    2. Per-transit consistency: among epochs with *enough* data that their
+       precision (``transit_depths_uncertainties``) could have detected a
+       transit at the candidate's own average depth, at least one shows no
+       dip at all — this is a direct falsification from real data, not an
+       inference, and is a stronger test than (1) alone.
+
+    Returns ``(passes, reason)`` — ``reason`` is a human-readable rejection
+    cause, empty when ``passes`` is True.
+    """
+    distinct = results.get("distinct_transit_count")
+    if distinct is not None and np.isfinite(distinct) and distinct < min_distinct_transits:
+        return (
+            False,
+            f"only {int(distinct)} distinct transit(s) covered by data "
+            f"(need >= {min_distinct_transits})",
+        )
+
+    depths = np.asarray(results.get("transit_depths", []), dtype=float)
+    depth_errs = np.asarray(results.get("transit_depths_uncertainties", []), dtype=float)
+    counts = np.asarray(results.get("per_transit_count", []), dtype=float)
+    mean_depth_frac = 1.0 - float(results["depth"])  # fractional dimming, > 0 for a real dip
+
+    for i in range(len(depths)):
+        if i >= len(counts) or counts[i] < min_points_per_transit:
+            continue  # too little data at this epoch to judge it either way
+        err_i = depth_errs[i] if i < len(depth_errs) else np.nan
+        if not np.isfinite(err_i) or err_i <= 0:
+            continue
+        if mean_depth_frac / err_i < consistency_sigma:
+            continue  # this epoch's precision couldn't have caught the transit anyway
+        depth_i = 1.0 - depths[i]  # measured fractional dimming at this epoch
+        if depth_i < consistency_sigma * err_i:
+            return (
+                False,
+                f"transit epoch {i} has {int(counts[i])} points, precise enough to detect "
+                f"the {mean_depth_frac * 1e6:.0f} ppm depth at >= {consistency_sigma:g}sigma, "
+                "but shows no dip",
+            )
+
+    return True, ""
+
+
 def _harmonic_periods(period: float, n_harmonics: int = 4) -> list[float]:
     """Integer-ratio harmonics of ``period`` (``P/2, P/3, ..., 2P, 3P, ...``)."""
     harmonics = set()
@@ -476,6 +535,7 @@ def transit_search(
     sde_min: float = 8.0,
     period_min: float | None = None,
     period_max: float | None = None,
+    n_transits_min: int = 3,
     mask_width_factor: float = 1.5,
     outdir: str | None = None,
     file_extension: str = ".pdf",
@@ -483,6 +543,9 @@ def transit_search(
     mission: str = "tess",
     check_known_recovery: bool = True,
     recovery_period_frac: float = 0.05,
+    min_distinct_transits: int = 3,
+    min_points_per_transit: int = 5,
+    consistency_sigma: float = 3.0,
     quiet: bool = False,
 ) -> dict:
     """Blind TLS search for un-modeled transits in a fitted target.
@@ -500,6 +563,14 @@ def transit_search(
         Period search range in days for the blind search; left to TLS's own
         defaults when omitted. Does not affect the known-companion recovery
         check, which always searches its own narrow, per-companion bracket.
+    n_transits_min : int
+        Passed straight through to TLS's own period_grid(): periods needing
+        more than this many transits than the data's time span can support
+        are never included in the blind search's period grid at all. Unlike
+        min_distinct_transits/consistency_sigma below (which reject a
+        candidate after it's found), this shrinks the search itself — fewer
+        wasted trial periods, and large-gap false positives that would only
+        have 1-2 transits can't even be proposed in the first place.
     mask_width_factor : float
         Known-companion transits are masked out to this many times their
         total (T14) duration on either side of mid-transit.
@@ -520,6 +591,25 @@ def transit_search(
     recovery_period_frac : float
         Half-width of the recovery check's period-search bracket, as a
         fraction of each known companion's own period (default 0.05 = ±5%).
+    min_distinct_transits : int
+        Reject a blind-search candidate if fewer than this many of its
+        predicted transit epochs have any data at all (the rest fall
+        entirely in gaps between TESS sectors/campaigns) — the classic
+        false-positive mode with large gaps, where a long period only
+        "works" because 1-2 sparse epochs happen to line up.
+    min_points_per_transit : int
+        A predicted transit epoch counts as "well-covered" for the
+        per-transit consistency check below only once it has at least this
+        many in-transit data points.
+    consistency_sigma : float
+        Per-transit consistency check: among well-covered epochs whose
+        precision (``transit_depths_uncertainties``) is good enough to have
+        detected the candidate's own average depth at ``consistency_sigma``,
+        reject the candidate if any shows no dip at all (depth consistent
+        with zero at less than ``consistency_sigma``) — i.e. a real,
+        well-sampled non-detection actively rules the period out, which is a
+        stronger and more direct test than ``min_distinct_transits`` (which
+        only asks "was there *any* data", not "did the data agree").
 
     Returns
     -------
@@ -614,6 +704,7 @@ def transit_search(
         tls_kwargs["period_min"] = period_min
     if period_max is not None:
         tls_kwargs["period_max"] = period_max
+    tls_kwargs["n_transits_min"] = n_transits_min
 
     results_all = tls_search(
         time_search,
@@ -627,7 +718,20 @@ def transit_search(
         quiet=quiet,
         **tls_kwargs,
     )
-    results_all = results_all[:max_candidates]
+
+    kept_results_all = []
+    for results in results_all:
+        ok, reason = _passes_transit_consistency_checks(
+            results, min_distinct_transits, min_points_per_transit, consistency_sigma
+        )
+        if ok:
+            kept_results_all.append(results)
+        elif not quiet:
+            print(
+                f"[transit-search] rejected P={results['period']:.5f} d "
+                f"(SDE={results['SDE']:.2f}): {reason}"
+            )
+    results_all = kept_results_all[:max_candidates]
 
     summary = []
     for i, results in enumerate(results_all, start=1):

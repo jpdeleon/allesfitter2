@@ -15,6 +15,7 @@ from allesfitter.detection.blind_search import (
     _detrend_full_lightcurve,
     _harmonic_periods,
     _known_companion_windows,
+    _passes_transit_consistency_checks,
     _resolve_sampler,
     _tls_stellar_kwargs,
     _write_known_recovery_csv,
@@ -319,3 +320,91 @@ def test_write_known_recovery_csv_handles_no_rows(tmp_path):
     with open(path, newline="") as f:
         rows = list(csv.DictReader(f))
     assert rows == []
+
+
+def _fake_tls_results(**overrides):
+    # A "clean" 5-transit candidate: every epoch well-covered (20 points),
+    # precise (small uncertainty), and consistently showing the ~1% dip.
+    results = dict(
+        depth=0.99,  # mean_depth_frac = 0.01
+        distinct_transit_count=5,
+        per_transit_count=np.array([20, 20, 20, 20, 20]),
+        transit_depths=np.array([0.99, 0.99, 0.99, 0.99, 0.99]),
+        transit_depths_uncertainties=np.array([0.0005] * 5),
+    )
+    results.update(overrides)
+    return results
+
+
+class TestPassesTransitConsistencyChecks:
+    def test_passes_a_clean_well_supported_candidate(self):
+        ok, reason = _passes_transit_consistency_checks(
+            _fake_tls_results(),
+            min_distinct_transits=3,
+            min_points_per_transit=5,
+            consistency_sigma=3.0,
+        )
+        assert ok is True
+        assert reason == ""
+
+    def test_rejects_too_few_distinct_transits(self):
+        results = _fake_tls_results(distinct_transit_count=2)
+
+        ok, reason = _passes_transit_consistency_checks(
+            results, min_distinct_transits=3, min_points_per_transit=5, consistency_sigma=3.0
+        )
+
+        assert ok is False
+        assert "distinct transit" in reason
+
+    def test_rejects_well_covered_epoch_with_no_dip(self):
+        # Epoch 2 has plenty of points, tiny uncertainty, but flux ~1.0
+        # (no dip) even though the candidate's average depth is ~1%.
+        results = _fake_tls_results(
+            transit_depths=np.array([0.99, 0.99, 1.0, 0.99, 0.99]),
+        )
+
+        ok, reason = _passes_transit_consistency_checks(
+            results, min_distinct_transits=3, min_points_per_transit=5, consistency_sigma=3.0
+        )
+
+        assert ok is False
+        assert "shows no dip" in reason
+
+    def test_ignores_poorly_covered_epoch_showing_no_dip(self):
+        # Same "no dip" epoch as above, but it only has 2 points -> below
+        # min_points_per_transit=5, so it can't be used to rule anything out.
+        results = _fake_tls_results(
+            per_transit_count=np.array([20, 20, 2, 20, 20]),
+            transit_depths=np.array([0.99, 0.99, 1.0, 0.99, 0.99]),
+        )
+
+        ok, reason = _passes_transit_consistency_checks(
+            results, min_distinct_transits=3, min_points_per_transit=5, consistency_sigma=3.0
+        )
+
+        assert ok is True
+
+    def test_ignores_imprecise_epoch_showing_no_dip(self):
+        # Well-covered by point count, but its uncertainty is too large to
+        # have caught a 1% dip at 3 sigma -> can't be used to rule out.
+        results = _fake_tls_results(
+            transit_depths=np.array([0.99, 0.99, 1.0, 0.99, 0.99]),
+            transit_depths_uncertainties=np.array([0.0005, 0.0005, 0.01, 0.0005, 0.0005]),
+        )
+
+        ok, reason = _passes_transit_consistency_checks(
+            results, min_distinct_transits=3, min_points_per_transit=5, consistency_sigma=3.0
+        )
+
+        assert ok is True
+
+    def test_missing_distinct_transit_count_key_is_skipped_not_crashed(self):
+        results = _fake_tls_results()
+        del results["distinct_transit_count"]
+
+        ok, reason = _passes_transit_consistency_checks(
+            results, min_distinct_transits=3, min_points_per_transit=5, consistency_sigma=3.0
+        )
+
+        assert ok is True

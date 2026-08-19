@@ -392,6 +392,14 @@ def transit_search(
     period_max: float | None = typer.Option(
         None, "--period-max", help="maximum period to search (days)"
     ),
+    n_transits_min: int = typer.Option(
+        3,
+        "--n-transits-min",
+        help="exclude periods needing more than this many transits than the data's time "
+        "span can support from the blind-search period grid itself (TLS's own "
+        "n_transits_min) — shrinks the search and keeps large-gap false positives "
+        "from being proposed at all",
+    ),
     mask_width_factor: float = typer.Option(
         1.5,
         "--mask-width-factor",
@@ -424,6 +432,26 @@ def transit_search(
         help="half-width of the known-companion recovery check's period-search bracket, "
         "as a fraction of that companion's own period",
     ),
+    min_distinct_transits: int = typer.Option(
+        3,
+        "--min-distinct-transits",
+        help="reject a candidate if fewer than this many of its predicted transit epochs "
+        "have any data at all (the rest fall entirely in gaps between sectors) — the "
+        "classic false positive from large TESS inter-sector gaps",
+    ),
+    min_points_per_transit: int = typer.Option(
+        5,
+        "--min-points-per-transit",
+        help="a transit epoch counts as well-covered for the per-transit consistency "
+        "check only once it has at least this many in-transit data points",
+    ),
+    consistency_sigma: float = typer.Option(
+        3.0,
+        "--consistency-sigma",
+        help="reject a candidate if any well-covered transit epoch shows no dip at all, "
+        "at this significance — a real non-detection rules the period out directly, "
+        "which is stronger than just requiring enough distinct transits",
+    ),
     quiet: bool = typer.Option(False, "--quiet", "-q"),
 ):
     """Detrend with the best-fit baseline, mask known planets, and blind-search
@@ -435,6 +463,7 @@ def transit_search(
         sde_min=sde_min,
         period_min=period_min,
         period_max=period_max,
+        n_transits_min=n_transits_min,
         mask_width_factor=mask_width_factor,
         outdir=outdir,
         file_extension=file_extension,
@@ -442,6 +471,9 @@ def transit_search(
         mission=mission,
         check_known_recovery=not skip_known_recovery_check,
         recovery_period_frac=recovery_period_frac,
+        min_distinct_transits=min_distinct_transits,
+        min_points_per_transit=min_points_per_transit,
+        consistency_sigma=consistency_sigma,
         quiet=quiet,
     )
 
