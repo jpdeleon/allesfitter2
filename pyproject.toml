@@ -61,6 +61,10 @@ ultranest = [
 cmaes = [
     "cma>=3.0",  # required by optimize(method='cmaes'); tests skip silently without it
 ]
+gpu = [
+    "gputls",  # GPU-accelerated TLS; transit-search auto-detects and falls back to CPU TLS otherwise
+    "cupy-cuda12x[ctk]",
+]
 
 [project.urls]
 Homepage = "https://github.com/MNGuenther/allesfitter"
@@ -160,6 +164,9 @@ files = ["allesfitter"]
 
 [tool.uv]
 no-binary-package = ["ellc"]
+
+[tool.uv.sources]
+gputls = { git = "https://github.com/jpdeleon/GTLS.git" }
 
 [dependency-groups]
 dev = [

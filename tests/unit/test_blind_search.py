@@ -14,10 +14,14 @@ from allesfitter.detection.blind_search import (
     _apply_known_masks,
     _companion_impact_parameter,
     _detrend_full_lightcurve,
+    _duration_is_trustworthy,
     _harmonic_periods,
     _impact_parameter,
     _known_companion_windows,
+    _passes_min_depth,
     _passes_transit_consistency_checks,
+    _refine_duration_if_untrustworthy,
+    _refit_duration_from_folded_data,
     _resolve_sampler,
     _resolve_transit_template,
     _tls_stellar_kwargs,
@@ -413,6 +417,31 @@ class TestPassesTransitConsistencyChecks:
         assert ok is True
 
 
+class TestPassesMinDepth:
+    def test_passes_a_deep_candidate(self):
+        ok, reason = _passes_min_depth(_fake_tls_results(), min_depth_ppt=1.0)
+
+        assert ok is True
+        assert reason == ""
+
+    def test_rejects_a_shallower_than_threshold_candidate(self):
+        # depth=0.9995 -> 0.5 ppt, below the 1.0 ppt default floor.
+        results = _fake_tls_results(depth=0.9995)
+
+        ok, reason = _passes_min_depth(results, min_depth_ppt=1.0)
+
+        assert ok is False
+        assert "ppt" in reason
+
+    def test_boundary_depth_passes(self):
+        # depth=0.999 -> exactly 1.0 ppt: the floor itself should pass.
+        results = _fake_tls_results(depth=0.999)
+
+        ok, reason = _passes_min_depth(results, min_depth_ppt=1.0)
+
+        assert ok is True
+
+
 class TestImpactParameter:
     def test_computes_known_grazing_geometry(self):
         # rsuma=0.15, cosi=0.14, rr=0.05 -> b=0.14*1.05/0.15=0.98 (matches
@@ -500,3 +529,174 @@ class TestResolveTransitTemplate:
 
         assert template == "default"
         assert np.isnan(b)
+
+
+def _synthetic_folded_data(
+    period=4.0, true_duration_days=0.5, depth=0.02, n_points=5000, noise=0.0008, seed=0
+):
+    """Uniformly-sampled folded phase/flux with a known box dip, for testing
+    the fold-based duration re-fit independent of any real TLS run."""
+    rng = np.random.default_rng(seed)
+    folded_phase = rng.uniform(0, 1, n_points)
+    half_phase = (true_duration_days / period) / 2.0
+    in_transit = np.abs(folded_phase - 0.5) < half_phase
+    folded_y = np.ones(n_points)
+    folded_y[in_transit] -= depth
+    folded_y = folded_y + rng.normal(0, noise, n_points)
+    return folded_phase, folded_y
+
+
+class TestDurationIsTrustworthy:
+    def test_true_when_enough_points_support_the_window(self):
+        folded_phase, folded_y = _synthetic_folded_data()
+        results = {
+            "correct_duration": 0.5,
+            "period": 4.0,
+            "folded_phase": folded_phase,
+        }
+
+        assert _duration_is_trustworthy(results, min_points_in_window=20) is True
+
+    def test_false_when_window_has_too_few_points(self):
+        # Only 2 points anywhere near phase 0.5, everything else far away.
+        folded_phase = np.concatenate([np.array([0.499, 0.501]), np.linspace(0.0, 0.4, 500)])
+        results = {"correct_duration": 0.1, "period": 4.0, "folded_phase": folded_phase}
+
+        assert _duration_is_trustworthy(results, min_points_in_window=20) is False
+
+    def test_false_when_duration_missing_or_invalid(self):
+        folded_phase, _ = _synthetic_folded_data()
+        assert _duration_is_trustworthy({"period": 4.0, "folded_phase": folded_phase}, 20) is False
+        assert (
+            _duration_is_trustworthy(
+                {"correct_duration": -1.0, "period": 4.0, "folded_phase": folded_phase}, 20
+            )
+            is False
+        )
+
+
+class TestRefitDurationFromFoldedData:
+    def test_recovers_known_duration_from_a_clean_dip(self):
+        folded_phase, folded_y = _synthetic_folded_data(
+            period=4.0, true_duration_days=0.5, depth=0.02, n_points=6000, noise=0.0006
+        )
+
+        refit_days = _refit_duration_from_folded_data(folded_phase, folded_y, period=4.0)
+
+        assert refit_days is not None
+        assert refit_days == pytest.approx(0.5, rel=0.15)
+
+    def test_returns_none_when_no_dip_is_present(self):
+        rng = np.random.default_rng(1)
+        folded_phase = rng.uniform(0, 1, 2000)
+        folded_y = np.ones(2000) + rng.normal(0, 0.0005, 2000)
+
+        assert _refit_duration_from_folded_data(folded_phase, folded_y, period=4.0) is None
+
+    def test_returns_none_with_too_little_baseline_data(self):
+        folded_phase = np.array([0.5, 0.501, 0.499])
+        folded_y = np.array([0.98, 0.98, 0.98])
+
+        assert _refit_duration_from_folded_data(folded_phase, folded_y, period=4.0) is None
+
+    def test_returns_none_for_empty_input(self):
+        assert _refit_duration_from_folded_data(np.array([]), np.array([]), period=4.0) is None
+
+
+class TestRefineDurationIfUntrustworthy:
+    def test_leaves_trustworthy_duration_untouched(self):
+        folded_phase, folded_y = _synthetic_folded_data(
+            period=4.0, true_duration_days=0.5, n_points=6000
+        )
+        results = {
+            "correct_duration": 0.5,
+            "duration": 0.5,
+            "period": 4.0,
+            "folded_phase": folded_phase,
+            "folded_y": folded_y,
+        }
+
+        out = _refine_duration_if_untrustworthy(results)
+
+        assert out["correct_duration"] == 0.5
+        assert out["duration_refit_from_fold"] is False
+
+    def test_replaces_untrustworthy_duration_with_fold_refit(self):
+        # TLS's own (bad) duration is a tiny window with almost no support,
+        # even though the folded data has a clear, well-supported 0.5 d dip.
+        folded_phase, folded_y = _synthetic_folded_data(
+            period=4.0, true_duration_days=0.5, depth=0.02, n_points=6000, noise=0.0006
+        )
+        results = {
+            "correct_duration": 0.002,  # ~3 min -> far too few points in window
+            "duration": 0.002,
+            "period": 4.0,
+            "folded_phase": folded_phase,
+            "folded_y": folded_y,
+        }
+
+        out = _refine_duration_if_untrustworthy(results)
+
+        assert out["duration_refit_from_fold"] is True
+        assert out["correct_duration"] == pytest.approx(0.5, rel=0.15)
+
+    def test_replaces_a_narrow_but_technically_trustworthy_duration_when_refit_is_much_wider(
+        self,
+    ):
+        # Reproduces the real TOI-179 b case: TLS's claimed duration has
+        # *some* nearby points (passes the naive point-count trust check)
+        # because individual transit epochs are densely sampled internally,
+        # but it's still much narrower than the true, well-supported dip.
+        folded_phase, folded_y = _synthetic_folded_data(
+            period=4.0, true_duration_days=0.5, depth=0.02, n_points=6000, noise=0.0006
+        )
+        narrow_but_populated = 0.15  # < true 0.5 d, but still inside the dense dip region
+        results = {
+            "correct_duration": narrow_but_populated,
+            "duration": narrow_but_populated,
+            "period": 4.0,
+            "folded_phase": folded_phase,
+            "folded_y": folded_y,
+        }
+        assert _duration_is_trustworthy(results, 20) is True  # confirms the setup is realistic
+
+        out = _refine_duration_if_untrustworthy(results)
+
+        assert out["duration_refit_from_fold"] is True
+        assert out["correct_duration"] == pytest.approx(0.5, rel=0.15)
+
+    def test_keeps_trustworthy_duration_close_to_the_refit(self):
+        # Claimed duration already matches the fold-refit closely -> not
+        # "substantially wider", so the original (trustworthy) value stays.
+        folded_phase, folded_y = _synthetic_folded_data(
+            period=4.0, true_duration_days=0.5, depth=0.02, n_points=6000, noise=0.0006
+        )
+        results = {
+            "correct_duration": 0.45,
+            "duration": 0.45,
+            "period": 4.0,
+            "folded_phase": folded_phase,
+            "folded_y": folded_y,
+        }
+
+        out = _refine_duration_if_untrustworthy(results)
+
+        assert out["duration_refit_from_fold"] is False
+        assert out["correct_duration"] == 0.45
+
+    def test_keeps_original_when_untrustworthy_and_refit_also_fails(self):
+        rng = np.random.default_rng(2)
+        folded_phase = rng.uniform(0, 1, 2000)
+        folded_y = np.ones(2000) + rng.normal(0, 0.0005, 2000)  # no dip anywhere
+        results = {
+            "correct_duration": 0.002,
+            "duration": 0.002,
+            "period": 4.0,
+            "folded_phase": folded_phase,
+            "folded_y": folded_y,
+        }
+
+        out = _refine_duration_if_untrustworthy(results)
+
+        assert out["duration_refit_from_fold"] is False
+        assert out["correct_duration"] == 0.002

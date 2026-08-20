@@ -28,16 +28,13 @@
 
 from __future__ import annotations
 
-import contextlib
 import csv
 import os
-import warnings
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 from transitleastsquares import transit_mask
-from transitleastsquares import transitleastsquares as _tls_engine
 
 from .. import config
 from ..computer import calculate_baseline
@@ -48,7 +45,8 @@ from ..plot_utils import broken_xaxis_subplots
 from ..results import target_output_directory
 from ..tls_h5 import write_h5_tls_result
 from ..validation.prior_checks import transit_duration_days
-from .transit_search import _to_dic, mask, tls_search
+from .gpu_tls import run_tls as _run_tls_engine
+from .transit_search import mask, tls_search
 
 #: Maps a results directory's basename to the sampler that produced it.
 _SAMPLER_BY_DIRNAME = {"mcmc_results": "mcmc", "ns_results": "ns"}
@@ -267,18 +265,7 @@ def _run_tls_once(
     kwargs = dict(tls_kwargs)
     kwargs.setdefault("show_progress_bar", not quiet)
 
-    if quiet:
-        with open(os.devnull, "w") as devnull:
-            with contextlib.redirect_stdout(devnull):
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")
-                    model = _tls_engine(time, flux, flux_err)
-                    results = model.power(**kwargs)
-    else:
-        model = _tls_engine(time, flux, flux_err)
-        results = model.power(**kwargs)
-
-    results = _to_dic(results)
+    results = _run_tls_engine(time, flux, flux_err, kwargs, quiet=quiet)
     in_transit = np.where(results["model_folded_model"] < 1.0)[0]
     if len(in_transit) >= 2:
         results["correct_duration"] = results["period"] * (
@@ -287,6 +274,172 @@ def _run_tls_once(
         )
     else:
         results["correct_duration"] = results["duration"]
+    return results
+
+
+#: Minimum number of raw folded data points required within the currently
+#: reported duration window (around phase 0.5) for that duration to be
+#: trusted at face value — see _duration_is_trustworthy.
+_MIN_POINTS_FOR_TRUSTED_DURATION = 20
+
+#: Half-width, in phase, of the window searched for a fold-based duration
+#: re-fit — and of the region excluded when estimating the out-of-transit
+#: baseline for it. 0.1 (20% of the period) comfortably covers real
+#: transit durations, which are almost always a small fraction of period.
+_DURATION_REFIT_SEARCH_HALF_PHASE = 0.1
+
+#: Significance (in units of the out-of-transit scatter) a bin has to drop
+#: below baseline to count as in-transit for the fold-based duration re-fit.
+_DURATION_REFIT_SIGMA = 3.0
+
+
+def _duration_is_trustworthy(results: dict, min_points_in_window: int) -> bool:
+    """Whether TLS's own duration has enough phase-folded evidence behind
+    it to trust at face value.
+
+    Counts raw data points in ``results['folded_phase']`` (the *full*
+    dataset folded on the reported period/T0, not the sparse per-trial-
+    period statistics TLS's own duration selection is vulnerable to under
+    a gappy baseline — see git history for how this was diagnosed) that
+    fall within the currently reported duration window around phase 0.5.
+    Fewer than ``min_points_in_window`` is too thin an evidence base.
+    """
+    duration = results.get("correct_duration", results.get("duration"))
+    period = results.get("period")
+    folded_phase = results.get("folded_phase")
+    if (
+        duration is None
+        or period is None
+        or folded_phase is None
+        or not np.isfinite(duration)
+        or not np.isfinite(period)
+        or period <= 0
+        or duration <= 0
+    ):
+        return False
+    half_phase = (duration / period) / 2.0
+    folded_phase = np.asarray(folded_phase, dtype=float)
+    n_in_window = int(np.sum(np.abs(folded_phase - 0.5) < half_phase))
+    return n_in_window >= min_points_in_window
+
+
+def _refit_duration_from_folded_data(
+    folded_phase: np.ndarray,
+    folded_y: np.ndarray,
+    period: float,
+    exclusion_half_phase: float = _DURATION_REFIT_SEARCH_HALF_PHASE,
+    sigma: float = _DURATION_REFIT_SIGMA,
+    n_bins: int = 200,
+) -> float | None:
+    """Re-measure transit duration directly from the phase-folded, fully
+    aggregated light curve, independent of TLS's own per-trial-period
+    duration selection.
+
+    Bins the folded curve within ``exclusion_half_phase`` of phase 0.5,
+    estimates the out-of-transit baseline (median + robust MAD scatter)
+    from points *outside* that window, and grows a contiguous run of bins
+    outward from phase 0.5 while each stays below
+    ``baseline - sigma * scatter``. The seed bin is allowed to be a couple
+    of bins off dead-center in case the exact center bin happens to have
+    no data. Returns the resulting duration in days, or ``None`` if there
+    isn't enough baseline data or no dip is found near phase 0.5 — never
+    fabricates a number without evidence.
+    """
+    folded_phase = np.asarray(folded_phase, dtype=float)
+    folded_y = np.asarray(folded_y, dtype=float)
+    finite = np.isfinite(folded_phase) & np.isfinite(folded_y)
+    folded_phase, folded_y = folded_phase[finite], folded_y[finite]
+    if folded_phase.size == 0:
+        return None
+
+    out_of_window = np.abs(folded_phase - 0.5) > exclusion_half_phase
+    if out_of_window.sum() < _MIN_POINTS_FOR_TRUSTED_DURATION:
+        return None
+    baseline = float(np.median(folded_y[out_of_window]))
+    scatter = 1.4826 * float(np.median(np.abs(folded_y[out_of_window] - baseline)))
+    if not np.isfinite(scatter) or scatter <= 0:
+        scatter = float(np.std(folded_y[out_of_window]))
+    if not np.isfinite(scatter) or scatter <= 0:
+        return None
+
+    lo, hi = 0.5 - exclusion_half_phase, 0.5 + exclusion_half_phase
+    edges = np.linspace(lo, hi, n_bins + 1)
+    bin_idx = np.digitize(folded_phase, edges) - 1
+    in_window = (bin_idx >= 0) & (bin_idx < n_bins)
+
+    bin_flux = np.full(n_bins, np.nan)
+    bin_count = np.zeros(n_bins, dtype=int)
+    for i in range(n_bins):
+        m = in_window & (bin_idx == i)
+        bin_count[i] = int(m.sum())
+        if bin_count[i] > 0:
+            bin_flux[i] = float(folded_y[m].mean())
+
+    threshold = baseline - sigma * scatter
+    below = np.where(bin_count > 0, bin_flux < threshold, False)
+
+    center_bin = n_bins // 2
+    seed = None
+    for offset in (0, 1, -1, 2, -2):
+        candidate = center_bin + offset
+        if 0 <= candidate < n_bins and below[candidate]:
+            seed = candidate
+            break
+    if seed is None:
+        return None
+
+    left = right = seed
+    while left > 0 and below[left - 1]:
+        left -= 1
+    while right < n_bins - 1 and below[right + 1]:
+        right += 1
+
+    duration_phase = edges[right + 1] - edges[left]
+    return duration_phase * period
+
+
+#: A fold-refit duration this many times wider than TLS's own claimed
+#: duration is preferred over it even when the claimed window itself has
+#: enough nearby points to nominally pass _duration_is_trustworthy — a
+#: narrow window can still have decent point density purely because
+#: individual transit epochs are often densely sampled internally,
+#: regardless of whether the claimed *width* is right. TLS's known failure
+#: mode here is underestimation (never seen it go the other way), so a
+#: well-supported wider re-measurement is trusted over a narrower one.
+_DURATION_REFIT_WIDEN_FACTOR = 1.3
+
+
+def _refine_duration_if_untrustworthy(
+    results: dict, min_points_in_window: int = _MIN_POINTS_FOR_TRUSTED_DURATION
+) -> dict:
+    """Replace ``results['correct_duration']`` with a fold-based re-fit
+    when TLS's own value either doesn't have enough phase-folded evidence
+    behind it (:func:`_duration_is_trustworthy`) or is substantially
+    narrower than what the fold-based re-fit independently finds; otherwise
+    leave it untouched. Adds ``results['duration_refit_from_fold']`` (bool)
+    either way, so callers/output can flag when this happened. Mutates and
+    returns ``results``.
+    """
+    current = results.get("correct_duration", results.get("duration"))
+    refit_days = _refit_duration_from_folded_data(
+        results.get("folded_phase"), results.get("folded_y"), results.get("period")
+    )
+    has_refit = refit_days is not None and np.isfinite(refit_days) and refit_days > 0
+
+    trustworthy = _duration_is_trustworthy(results, min_points_in_window)
+    substantially_wider = (
+        has_refit
+        and current is not None
+        and np.isfinite(current)
+        and current > 0
+        and refit_days > _DURATION_REFIT_WIDEN_FACTOR * current
+    )
+
+    if has_refit and (not trustworthy or substantially_wider):
+        results["correct_duration"] = refit_days
+        results["duration_refit_from_fold"] = True
+    else:
+        results["duration_refit_from_fold"] = False
     return results
 
 
@@ -329,6 +482,7 @@ def _check_known_companion_recovery(
     kwargs["period_max"] = period_max
 
     results = _run_tls_once(time_iso, flux_iso, err_iso, kwargs, quiet=quiet)
+    results = _refine_duration_if_untrustworthy(results)
 
     recovered_period = float(results["period"])
     recovered_epoch = float(results["T0"])
@@ -350,6 +504,8 @@ def _check_known_companion_recovery(
         "known_epoch": window["epoch"],
         "recovered_period": recovered_period,
         "recovered_epoch": recovered_epoch,
+        "duration_hours": float(results.get("correct_duration", results["duration"])) * 24.0,
+        "duration_refit_from_fold": bool(results.get("duration_refit_from_fold", False)),
         "SDE": float(results["SDE"]),
         "snr": float(results["snr"]),
         "epoch_match": epoch_match,
@@ -443,6 +599,20 @@ def _passes_transit_consistency_checks(
                 "but shows no dip",
             )
 
+    return True, ""
+
+
+def _passes_min_depth(results: dict, min_depth_ppt: float) -> tuple[bool, str]:
+    """Reject a candidate whose transit depth is too shallow to trust.
+
+    SDE/SNR alone can pass on noise for long periods with few transits (a
+    27 d, 0.46 ppt "candidate" from a handful of marginal dips is a much
+    weaker claim than the same statistics on a deep, unambiguous dip) — this
+    is a direct, physically-motivated floor independent of those.
+    """
+    depth_ppt = (1.0 - float(results["depth"])) * 1e3
+    if depth_ppt < min_depth_ppt:
+        return False, f"depth {depth_ppt:.3f} ppt < min_depth_ppt={min_depth_ppt:g}"
     return True, ""
 
 
@@ -621,6 +791,7 @@ def transit_search(
     min_distinct_transits: int = 3,
     min_points_per_transit: int = 5,
     consistency_sigma: float = 3.0,
+    min_depth_ppt: float = 1.0,
     quiet: bool = False,
 ) -> dict:
     """Blind TLS search for un-modeled transits in a fitted target.
@@ -698,6 +869,11 @@ def transit_search(
         well-sampled non-detection actively rules the period out, which is a
         stronger and more direct test than ``min_distinct_transits`` (which
         only asks "was there *any* data", not "did the data agree").
+    min_depth_ppt : float
+        Reject a blind-search candidate whose transit depth is below this
+        many parts per thousand (1 ppt = 1000 ppm). SDE/SNR alone can clear
+        the bar on noise for long periods with only a couple of marginal
+        transits; this is a direct floor on the physical depth itself.
 
     Returns
     -------
@@ -779,9 +955,16 @@ def transit_search(
                     )
                 else:
                     status = "RECOVERED" if row["recovered"] else "NOT recovered"
+                duration_note = (
+                    " (duration re-fit from folded data: TLS's own estimate had too little "
+                    "phase-folded support to trust)"
+                    if row["duration_refit_from_fold"]
+                    else ""
+                )
                 print(
                     f"[transit-search] known companion {row['companion']}: "
                     f"P={row['known_period']:.5f} d -> recovered P={row['recovered_period']:.5f} d, "
+                    f"duration={row['duration_hours']:.2f} h{duration_note}, "
                     f"SDE={row['SDE']:.2f}, SNR={row['snr']:.2f} => {status} -> {fig_path}"
                 )
 
@@ -830,11 +1013,13 @@ def transit_search(
 
     kept_results_all = []
     for results in results_all:
-        ok, reason = _passes_transit_consistency_checks(
-            results, min_distinct_transits, min_points_per_transit, consistency_sigma
-        )
+        ok, reason = _passes_min_depth(results, min_depth_ppt)
         if ok:
-            kept_results_all.append(results)
+            ok, reason = _passes_transit_consistency_checks(
+                results, min_distinct_transits, min_points_per_transit, consistency_sigma
+            )
+        if ok:
+            kept_results_all.append(_refine_duration_if_untrustworthy(results))
         elif not quiet:
             print(
                 f"[transit-search] rejected P={results['period']:.5f} d "
@@ -861,6 +1046,7 @@ def transit_search(
                 "epoch": float(results["T0"]),
                 "duration_hours": float(results.get("correct_duration", results["duration"]))
                 * 24.0,
+                "duration_refit_from_fold": bool(results.get("duration_refit_from_fold", False)),
                 "depth_ppm": (1.0 - float(results["depth"])) * 1e6,
                 "SDE": float(results["SDE"]),
                 "snr": float(results["snr"]),
@@ -869,10 +1055,15 @@ def transit_search(
             }
         )
         if not quiet:
+            duration_note = (
+                " (duration re-fit from folded data)"
+                if summary[-1]["duration_refit_from_fold"]
+                else ""
+            )
             print(
                 f"[transit-search] candidate {i}: P={results['period']:.5f} d  "
-                f"T0={results['T0']:.5f}  SDE={results['SDE']:.2f}  SNR={results['snr']:.2f}  "
-                f"-> {fig_path}, {h5_path}"
+                f"T0={results['T0']:.5f}  SDE={results['SDE']:.2f}  SNR={results['snr']:.2f}"
+                f"{duration_note}  -> {fig_path}, {h5_path}"
             )
 
     _write_summary_csv(os.path.join(outdir, "candidates_summary.csv"), summary)
@@ -893,6 +1084,8 @@ def _write_known_recovery_csv(path: str, known_recovery: list[dict]) -> None:
         "known_epoch",
         "recovered_period",
         "recovered_epoch",
+        "duration_hours",
+        "duration_refit_from_fold",
         "SDE",
         "snr",
         "epoch_match",
@@ -913,6 +1106,7 @@ def _write_summary_csv(path: str, summary: list[dict]) -> None:
         "period",
         "epoch",
         "duration_hours",
+        "duration_refit_from_fold",
         "depth_ppm",
         "SDE",
         "snr",

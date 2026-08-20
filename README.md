@@ -206,6 +206,13 @@ un-modeled transiting signals in the residual light curve:
    than the data's time span can support from the search itself — large
    TESS inter-sector gaps otherwise make periods near the full baseline
    search-able even though only 1-2 sparse epochs could ever support them.
+   Every TLS call in `transit-search` (the recovery check and the blind
+   search) goes through the same GPU-aware engine as
+   [quicklook](https://github.com/jpdeleon/quicklook): with the `gpu` extra
+   installed (`uv sync --extra gpu`, requires CUDA 12 and
+   [GTLS](https://github.com/jpdeleon/GTLS)), it runs on GPU whenever a CUDA
+   device is visible, and transparently falls back to CPU
+   `transitleastsquares` otherwise — including if GTLS itself fails.
 6. Rejects candidates whose periodicity is an artifact of large gaps
    between TESS sectors/campaigns, using TLS's own per-transit statistics
    rather than an inferred period-multiple/harmonic heuristic: too few of
@@ -215,8 +222,11 @@ un-modeled transiting signals in the residual light curve:
    epoch (`--min-points-per-transit`, default `5`) precise enough to have
    caught the transit shows no dip at all (`--consistency-sigma`, default
    `3.0`), which directly rules the period out from real data rather than
-   just under-sampling it. Rejected candidates are logged with their reason
-   but not written to disk.
+   just under-sampling it. Also rejects candidates below `--min-depth-ppt`
+   (default `1.0`, i.e. 1000 ppm): SDE/SNR alone can clear threshold on
+   noise for a long period with only a couple of marginal transits, so this
+   is a direct floor on the physical depth itself. Rejected candidates are
+   logged with their reason but not written to disk.
 
 Every TLS scan above (the recovery check and the blind search) also picks
 `--transit-template` (default `auto`): TLS fits duration by choosing the
@@ -288,6 +298,7 @@ For each blind-search candidate above threshold, it writes:
 | `--min-distinct-transits` | Reject a candidate if fewer than this many predicted transits have any data at all | `3` |
 | `--min-points-per-transit` | Minimum in-transit points for an epoch to count as well-covered by the consistency check | `5` |
 | `--consistency-sigma` | Reject a candidate if any well-covered epoch shows no dip at this significance | `3.0` |
+| `--min-depth-ppt` | Reject a candidate whose transit depth is below this many parts per thousand | `1.0` |
 | `-o, --outdir <DIR>` | Output directory | `<target>/transit_search_results` |
 | `-e, --file-extension` | Figure format (`pdf`, `png`, `jpg`, `svg`, `webp`) | `.pdf` |
 | `--max-candidates` | Safety cap on the number of candidates kept | `20` |

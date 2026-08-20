@@ -130,6 +130,12 @@ def test_transit_search_recovers_unmodeled_injected_transit(
         sde_min=5.0,
         period_min=1.0,
         period_max=8.0,
+        # n_transits_min's default of 3 needs time_span/3 >= period to even
+        # construct that period in TLS's own grid (see transitleastsquares.
+        # grid.period_grid — period_max alone doesn't override this): this
+        # fixture's 14-day baseline only fits 2 full cycles of the 5.5 d
+        # injected signal within period_max=8, so relax it here to match.
+        n_transits_min=2,
         quiet=True,
     )
 

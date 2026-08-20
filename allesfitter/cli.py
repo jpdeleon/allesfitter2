@@ -456,6 +456,13 @@ def transit_search(
         "at this significance — a real non-detection rules the period out directly, "
         "which is stronger than just requiring enough distinct transits",
     ),
+    min_depth_ppt: float = typer.Option(
+        1.0,
+        "--min-depth-ppt",
+        help="reject a candidate whose transit depth is below this many parts per "
+        "thousand (1 ppt = 1000 ppm) — SDE/SNR alone can clear threshold on noise "
+        "for long periods with only a couple of marginal transits",
+    ),
     quiet: bool = typer.Option(False, "--quiet", "-q"),
 ):
     """Detrend with the best-fit baseline, mask known planets, and blind-search
@@ -479,6 +486,7 @@ def transit_search(
         min_distinct_transits=min_distinct_transits,
         min_points_per_transit=min_points_per_transit,
         consistency_sigma=consistency_sigma,
+        min_depth_ppt=min_depth_ppt,
         quiet=quiet,
     )
 

@@ -15,7 +15,6 @@ Web: www.mnguenther.com
 
 #::: modules
 # import time as timer
-import contextlib
 import os
 import sys
 import warnings
@@ -36,7 +35,6 @@ except ImportError:
 
 try:
     from transitleastsquares import catalog_info, transit_mask
-    from transitleastsquares import transitleastsquares as tls
 except ImportError:
     pass
 
@@ -53,6 +51,7 @@ from ..inout import write_csv, write_json
 from ..lightcurves import tessclean
 from ..plotting import brokenplot, fullplot, monthplot, tessplot
 from ..time_series import clean
+from .gpu_tls import run_tls as _run_tls_engine
 
 sns.set(
     context="paper",
@@ -324,16 +323,6 @@ def write_tls_results(fname, results):
 
 
 ###############################################################################
-#::: function to convert the results into a dictionary
-###############################################################################
-def _to_dic(results):
-    dic = {}
-    for key in results:
-        dic[key] = results[key]
-    return dic
-
-
-###############################################################################
 #::: TLS search on an input lightcurve
 ###############################################################################
 def tls_search(time, flux, flux_err, plot=True, plot_type="brokenplot", **kwargs):
@@ -441,18 +430,7 @@ def tls_search(time, flux, flux_err, plot=True, plot_type="brokenplot", **kwargs
 
     #::: function to run it once
     def _run1(time, flux, flux_err):
-        if kwargs["quiet"]:
-            with open(os.devnull, "w") as devnull:
-                with contextlib.redirect_stdout(devnull):
-                    with warnings.catch_warnings():
-                        warnings.simplefilter("ignore")
-                        model = tls(time, flux, flux_err)
-                        results = model.power(**tls_kwargs_original)
-        else:
-            model = tls(time, flux, flux_err)
-            results = model.power(**tls_kwargs_original)
-
-        results = _to_dic(results)
+        results = _run_tls_engine(time, flux, flux_err, tls_kwargs_original, quiet=kwargs["quiet"])
         results["detection"] = (
             (results["snr"] >= kwargs["SNR_threshold"])
             and (results["SDE"] >= kwargs["SDE_threshold"])
