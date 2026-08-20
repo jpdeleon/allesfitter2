@@ -179,6 +179,7 @@ command.
 | `show-params <dir>` | Display fitted and fixed parameters from `params.csv` |
 | `show-results <dir>` | Display available MCMC/NS posterior and derived-result tables |
 | `transit-search <results-dir>` | Blind TLS search for un-modeled transits, after detrending with the best fit and masking known planets |
+| `update-params <results-dir>` | Regenerate `params2.csv` from a completed fit's posterior, as a warm-start prior for a follow-up fit |
 | `gui` | Run the target, job, configuration, and results workbench |
 
 ### Blind transit search (`transit-search`)
@@ -230,6 +231,22 @@ the recovery check, or from the most grazing known companion for the
 (b=0.99) above `b≈0.7`; pass `default`/`grazing` directly to force one
 template for everything.
 
+There's a second, unrelated way TLS's duration can come out wrong: on a
+long, gappy baseline (years of data from a handful of scattered TESS
+sectors) with a short period, TLS's own duration is picked from whichever
+single trial (period, duration) grid cell had the lowest *raw* residual
+across the *entire* period search — not necessarily the same trial period
+as the reported (SDE-selected) period/T0 — and under enough sparsity that
+can be close to a noise fit to 1-2 points, wildly wrong even though
+period/T0/SDE themselves are fine. Every duration is checked against the
+*fully phase-folded* light curve (`folded_phase`/`folded_y` — every cycle's
+data folded onto the trusted period/T0, not the sparse per-cycle stats TLS's
+own pick is vulnerable to): if too few folded points fall within the
+claimed window, or an independent re-measurement from the folded data finds
+a well-supported width substantially wider than the claim, that
+re-measurement replaces it. `duration_refit_from_fold` in the CSVs below
+flags whenever this happened.
+
 ```bash
 uv run allesfitter transit-search HD39091/ns_results --sde-min 6
 ```
@@ -241,9 +258,10 @@ For every known companion, it writes to `--outdir` (default
   (below), but periodogram zoomed to that companion's own narrow
   period bracket.
 - `known_planets_recovery.csv` — one row per known companion: known vs.
-  recovered period/epoch, SDE, SNR, whether the recovered epoch lines up
-  with the known one (`epoch_match`), and whether it counts as `recovered`
-  (`epoch_match` and SDE ≥ `--sde-min`).
+  recovered period/epoch, duration (`duration_hours`, `duration_refit_from_fold`),
+  SDE, SNR, whether the recovered epoch lines up with the known one
+  (`epoch_match`), and whether it counts as `recovered` (`epoch_match` and
+  SDE ≥ `--sde-min`).
 
 For each blind-search candidate above threshold, it writes:
 
@@ -255,8 +273,8 @@ For each blind-search candidate above threshold, it writes:
   `prepare -tic/-toi ... --h5 candidate_<N>_tls.h5` to seed a new
   `params.csv` companion row for a confirmed candidate (see
   [`--h5` ephemeris seeding](#raw-tic-transit-parameters--tic-and---h5-ephemeris-seeding)).
-- `candidates_summary.csv` — period/epoch/duration/depth/SDE/SNR for every
-  candidate found.
+- `candidates_summary.csv` — period/epoch/duration (`duration_hours`,
+  `duration_refit_from_fold`)/depth/SDE/SNR for every candidate found.
 
 | Option | Description | Default |
 |--------|-------------|---------|
@@ -282,6 +300,33 @@ candidate close to the search's upper period bound can be leftover,
 un-flattened stellar variability rather than a real transit; the raw and
 flattened light-curve panels in each candidate's figure make that easy to
 check directly.
+
+### Regenerating priors from a completed fit (`update-params`)
+
+```bash
+uv run allesfitter update-params <mcmc_results-or-ns_results-dir> [--ttv] [--debug]
+```
+
+Writes `params2.csv` alongside a completed fit's `params.csv`, built from
+that fit's posterior — useful as a warm-start prior for a follow-up fit
+(e.g. after adding another sector's data, or a chained MCMC→NS run):
+
+- Every fitted parameter gets a data-driven prior: an Anderson-Darling
+  normality test against its posterior samples picks `normal <median>
+  <sigma>` (sigma from the quadrature sum of the 16th/84th percentile
+  errors) when the samples look Gaussian, otherwise a `uniform <1st
+  percentile> <99th percentile>` bound.
+- Every fixed parameter is carried over unchanged from `params.csv`.
+- `--ttv` appends one `<companion>_ttv_transit_<n>` row per transit epoch
+  that actually has data coverage, using the posterior-median epoch/period
+  (the same source `update-params` previously wrote when invoked as
+  `prepare_allesfit.py -r <results-dir> --ttv`, now split out into its own
+  command since it's a distinct step from data download/preparation).
+- `--debug` logs each row's derivation (dist choice, bounds, TTV transit
+  count) as `params2.csv` is built.
+
+Review `params2.csv` and rename it to `params.csv` before the next fit —
+it's written alongside the original rather than overwriting it.
 
 ### Browser workbench over SSH
 
@@ -414,7 +459,6 @@ When `-f` has ≥2 distinct instruments and `-bp` is omitted, the script warns t
 | `-f, --filename <NAME>` | Output filename prefix; accepts multiple instruments | `tess` |
 | `-dir <PATH>` | Base directory | current |
 | `-o, --overwrite` | Overwrite existing files | False |
-| `-r, --results_dir <PATH>` | Update from previous results (e.g. for TTV fits) | None |
 | `--lc-only` | Only download the light curve, skip config generation | False |
 | `--ttv` | Emit per-transit TTV rows in `params.csv` | False |
 

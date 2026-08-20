@@ -226,6 +226,43 @@ def test_transit_search_defaults(monkeypatch, tmp_path):
     assert received["consistency_sigma"] == 3.0
 
 
+def test_update_params_forwards_arguments(monkeypatch, tmp_path):
+    received = {}
+    update_params_submodule = importlib.import_module("allesfitter.update_params")
+    monkeypatch.setattr(
+        update_params_submodule,
+        "update_params",
+        lambda dir_path, **kwargs: received.update(dir_path=dir_path, **kwargs),
+    )
+
+    fit_dir = tmp_path / "ns_results"
+    fit_dir.mkdir()
+    result = CliRunner().invoke(app, ["update-params", str(fit_dir), "--ttv", "--debug"])
+
+    assert result.exit_code == 0, result.output
+    assert received["dir_path"] == str(fit_dir)
+    assert received["ttv"] is True
+    assert received["debug"] is True
+
+
+def test_update_params_defaults(monkeypatch, tmp_path):
+    received = {}
+    update_params_submodule = importlib.import_module("allesfitter.update_params")
+    monkeypatch.setattr(
+        update_params_submodule,
+        "update_params",
+        lambda dir_path, **kwargs: received.update(dir_path=dir_path, **kwargs),
+    )
+
+    fit_dir = tmp_path / "mcmc_results"
+    fit_dir.mkdir()
+    result = CliRunner().invoke(app, ["update-params", str(fit_dir)])
+
+    assert result.exit_code == 0, result.output
+    assert received["ttv"] is False
+    assert received["debug"] is False
+
+
 def test_show_params_labels_fit_status_column(tmp_path):
     (tmp_path / "params.csv").write_text(
         "#name,value,fit,bounds,label,unit,coupled_with\n"

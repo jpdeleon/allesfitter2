@@ -76,9 +76,6 @@ def prepare(
     update_db: bool = typer.Option(
         False, "-u", "--update_db", help="update TOI or NExSci database"
     ),
-    results_dir: str | None = typer.Option(
-        None, "-r", "--results_dir", help="path to previous results"
-    ),
     overwrite: bool = typer.Option(False, "-o", "--overwrite", help="overwrite files"),
     debug: bool = typer.Option(False, "--debug"),
     lc_only: bool = typer.Option(False, "--lc-only", help="only download and save lightcurve"),
@@ -154,8 +151,6 @@ def prepare(
         argv += ["-i"]
     if update_db:
         argv += ["-u"]
-    if results_dir is not None:
-        argv += ["-r", results_dir]
     if overwrite:
         argv += ["-o"]
     if debug:
@@ -486,6 +481,29 @@ def transit_search(
         consistency_sigma=consistency_sigma,
         quiet=quiet,
     )
+
+
+@app.command("update-params")
+def update_params_cmd(
+    dir_path: str = typer.Argument(
+        ...,
+        help="directory with a completed MCMC/NS fit (params.csv/settings.csv plus "
+        "mcmc_results/ or ns_results/)",
+    ),
+    ttv: bool = typer.Option(
+        False,
+        "--ttv",
+        help="append per-transit TTV parameter rows using observed-transit midpoints",
+    ),
+    debug: bool = typer.Option(
+        False, "--debug", help="log each row's derivation as params2.csv is built"
+    ),
+):
+    """Write params2.csv from a completed fit's posterior, as a drop-in
+    warm-start prior for a follow-up fit."""
+    from allesfitter.update_params import update_params as _update_params
+
+    _update_params(dir_path, ttv=ttv, debug=debug)
 
 
 @app.command()

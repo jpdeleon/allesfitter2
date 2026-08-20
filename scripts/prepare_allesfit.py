@@ -39,7 +39,6 @@ import pandas as pd
 from astropy.coordinates import SkyCoord
 from astropy.time import Time
 from loguru import logger
-from scipy.stats import anderson
 
 # from ldtk import LDPSetCreator, BoxcarFilter
 from tess_stars2px import tess_stars2px_function_entry
@@ -1257,12 +1256,6 @@ def main():
         default=False,
     )
     ap.add_argument(
-        "-r",
-        "--results_dir",
-        help="path to the results dir of a previous run to be used in params.csv",
-        default=None,
-    )
-    ap.add_argument(
         "-o",
         "--overwrite",
         help="overwrite files (default=False)",
@@ -1279,11 +1272,13 @@ def main():
     ap.add_argument(
         "--ttv",
         help=(
-            "emit per-transit TTV parameters in params.csv (or params2.csv "
-            "when --results_dir is given). The number of rows per planet "
-            "equals the count of transits with actual data coverage, "
-            "computed via get_tmid_observed_transits. The index N in "
-            "{pl}_ttv_transit_N is the N-th chronologically observed transit."
+            "emit per-transit TTV parameters in params.csv. The number of "
+            "rows per planet equals the count of transits with actual data "
+            "coverage, computed via get_tmid_observed_transits. The index N "
+            "in {pl}_ttv_transit_N is the N-th chronologically observed "
+            "transit. To regenerate params.csv (with TTV rows) from a "
+            "completed fit's posterior instead, use "
+            "'uv run allesfitter update-params <dir> --ttv'."
         ),
         action="store_true",
         default=False,
@@ -1312,7 +1307,6 @@ def main():
 
     basedir = args.dir
     outdir = Path(basedir)
-    results_dir = args.results_dir
     debug = args.debug
 
     if args.lc_only:
@@ -1444,756 +1438,589 @@ def main():
         logger.info("Lightcurve(s) saved. Exiting (--lc-only mode).")
         return
 
-    if results_dir:
-        alles = allesclass(outdir.joinpath(results_dir))
-        logger.info("Updating params.csv")
+    toiid = args.toi
+    ticid = args.tic
+    ctoiid = args.ctoi
+    name = args.name
+    mission = args.mission.lower()
+    quality_bitmask = args.quality
+    sigma = args.sigma
+    interactive = args.interactive
+    ttv = args.ttv
+    fns = args.filename if isinstance(args.filename, list) else [args.filename]
+    fn = fns[0]  # first instrument (used where a single filename is needed)
 
-        # =====Update params.csv=====
-        # Iterate BASEMENT.allkeys (every row in the prior params.csv), not
-        # just BASEMENT.fitkeys. Previously, fixed parameters (e.g. an LDC
-        # pair pinned at a fitted value, dilution, fixed eccentricity terms)
-        # were silently dropped from params2.csv — leading to None values at
-        # ns_fit time and a cryptic numpy ufunc TypeError when q_to_u tried
-        # to sqrt(None). Now fitted keys get the posterior-derived prior row
-        # and fixed keys get a faithful `name,value,0,,label,unit,` copy.
-        text = """#name,value,fit,bounds,label,unit,coupled_with\n"""
-        try:
-            ll = alles.posterior_params_ll.copy()  # 16th percentile
-            median = alles.posterior_params_median.copy()  # 50th percentile
-            ul = alles.posterior_params_ul.copy()  # 84th percentile
-            _fitkeys_set = set(alles.BASEMENT.fitkeys)
-            for i, name in enumerate(alles.BASEMENT.allkeys):
-                label = alles.BASEMENT.labels[i]
-                unit = alles.BASEMENT.units[i]
-                if name in _fitkeys_set:
-                    # Fitted parameter: derive prior from posterior shape.
-                    norm_test = anderson(alles.posterior_params[name], dist="norm")
-                    # crit vals at 15/10/5/2.5/1%; statistic < crit[0] (15%)
-                    # → fail to reject normality.
-                    dist = (
-                        "normal"
-                        if norm_test.statistic < norm_test.critical_values[0]
-                        else "uniform"
-                    )
-                    if dist == "normal":
-                        l_err, mid, u_err = ll[name], median[name], ul[name]
-                        sig = np.sqrt(l_err**2 + u_err**2)
-                        text += f"{name},{mid:6f},1,normal {mid:6f} {sig:6f},{label},{unit},\n"
-                        if debug:
-                            logger.info(f"{name}: {mid:.6f} +{u_err:.6f} -{l_err:.6f} (normal)")
-                    elif dist == "uniform":
-                        l_limit, mid, u_limit = np.nanpercentile(
-                            alles.posterior_params[name], q=[1, 50, 99]
-                        )
-                        text += (
-                            f"{name},{mid:6f},1,uniform {l_limit:6f} {u_limit:6f},{label},{unit},\n"
-                        )
-                        if debug:
-                            logger.info(
-                                f"{name}: {l_limit:.6f} < {mid:.6f} < {u_limit:.6f} (uniform)"
-                            )
-                    else:
-                        msg = "distribution is not uniform or normal!"
-                        logger.error(msg)
-                        sys.exit()
-                else:
-                    # Fixed parameter: preserve from BASEMENT.params so the
-                    # generated params2.csv stays a complete drop-in for
-                    # params.csv. Skip None values (intentionally absent
-                    # entries — e.g. LD law set to None for an instrument).
-                    val = alles.BASEMENT.params.get(name)
-                    if val is None:
-                        if debug:
-                            logger.info(f"{name}: skipping (value is None)")
-                        continue
-                    text += f"{name},{val},0,,{label},{unit},\n"
-                    if debug:
-                        logger.info(f"{name}: {val} (fixed)")
-        except Exception as e:
-            logger.error(f"Error: {e}")
+    # -p/-e each accept multiple values. A single -p (the default) keeps
+    # the original behaviour: only fns[0] is downloaded, and any other
+    # --filename entries are expected to already exist on disk (e.g. from
+    # a prior --lc-only run) — see the achromatic warning below. Passing
+    # one -p per -f instead downloads every instrument in this one run,
+    # each from its own pipeline/exptime, e.g.
+    # -f spoc120 qlp600 -p spoc qlp -e 120 600.
+    pipeline_list = args.pipeline
+    if len(pipeline_list) > 1 and len(pipeline_list) != len(fns):
+        logger.error(
+            f"--pipeline has {len(pipeline_list)} entries but --filename has "
+            f"{len(fns)} entries; give one --pipeline per --filename to "
+            "download each instrument, or a single --pipeline value to "
+            "download just the first --filename."
+        )
+        sys.exit(1)
+    n_download = len(pipeline_list)
 
-        # Append per-transit TTV rows using the observed-transit midpoints.
-        # BASEMENT only caches `{c}_tmid_observed_transits` when
-        # settings['fit_ttvs']==True (basement.setup_ttv_fit). On a cache
-        # miss, recompute via get_tmid_observed_transits using the per-
-        # instrument time arrays and posterior-median epoch/period — same
-        # approach as afplot_per_transit in general_output.py.
-        if args.ttv:
-            _settings = alles.BASEMENT.settings
-            _data = alles.BASEMENT.data
-            _fast_fit_width = float(_settings.get("fast_fit_width", 0.3333333333333333))
-            _inst_list = list(_settings.get("inst_phot", []))
-            # Per-instrument span / count diagnostic — surfaces cases where
-            # one instrument's data is missing, empty, or falls outside the
-            # epoch+period grid the cache was built against.
-            for _inst in _inst_list:
-                _t_arr = _data.get(_inst, {}).get("time")
-                if _t_arr is None or len(_t_arr) == 0:
-                    logger.warning(f"TTV: inst '{_inst}' has no time data in BASEMENT.data")
-                else:
-                    _t_arr = np.asarray(_t_arr, dtype=float)
-                    logger.info(
-                        f"TTV: inst '{_inst}' N={len(_t_arr)} "
-                        f"time=[{_t_arr.min():.4f}, {_t_arr.max():.4f}] "
-                        f"span={_t_arr.max() - _t_arr.min():.3f} d"
-                    )
-            for _c in _settings.get("companions_phot", []):
-                _epoch = float(median.get(f"{_c}_epoch", alles.BASEMENT.params[f"{_c}_epoch"]))
-                _period = float(median.get(f"{_c}_period", alles.BASEMENT.params[f"{_c}_period"]))
-                _tmids = _data.get(f"{_c}_tmid_observed_transits")
-                _used_cache = _tmids is not None and len(_tmids) > 0
-                if not _used_cache:
-                    _times = []
-                    for _inst in _inst_list:
-                        _times += list(_data[_inst]["time"])
-                    _times = np.sort(np.asarray(_times, dtype=float))
-                    _tmids = get_tmid_observed_transits(
-                        _times,
-                        _epoch,
-                        _period,
-                        _fast_fit_width,
-                    )
-                    logger.info(
-                        f"TTV: {_c} cache miss; recomputed via "
-                        f"get_tmid_observed_transits "
-                        f"(width={_fast_fit_width:.4f} d)"
-                    )
-                else:
-                    logger.info(
-                        f"TTV: {_c} using BASEMENT cache "
-                        f"(populated by setup_ttv_fit; fit_ttvs={_settings.get('fit_ttvs')})"
-                    )
-                # Cross-check: independently recompute the transit count from
-                # the union of all inst_phot times. If this disagrees with
-                # the cache (which can happen if the cache was built from
-                # fast-fit-reduced data of only one instrument or with a
-                # stale epoch/period), prefer the fresh union count.
-                _times_union = []
-                for _inst in _inst_list:
-                    _times_union += list(_data[_inst]["time"])
-                _times_union = np.sort(np.asarray(_times_union, dtype=float))
-                _tmids_union = get_tmid_observed_transits(
-                    _times_union,
-                    _epoch,
-                    _period,
-                    _fast_fit_width,
-                )
-                if len(_tmids_union) != len(_tmids):
-                    logger.warning(
-                        f"TTV: {_c} cache_count={len(_tmids)} "
-                        f"vs fresh union_count={len(_tmids_union)} "
-                        f"(epoch={_epoch:.6f}, period={_period:.6f}, "
-                        f"width={_fast_fit_width:.4f}). "
-                        f"Using union count."
-                    )
-                    _tmids = _tmids_union
-                _n_obs = len(_tmids)
-                logger.info(f"TTV: {_c} has {_n_obs} transits with data")
-                if _n_obs == 0:
-                    continue
-                text += f"#TTV companion {_c},,,,,\n"
-                for _j in range(_n_obs):
-                    text += (
-                        f"{_c}_ttv_transit_{_j + 1},0,1,uniform -0.05 0.05,"
-                        f"TTV$_\\mathrm{{ttv;{_j + 1}}}$,d,\n"
-                    )
-        if debug:
-            logger.info(text)
-        fp = Path(results_dir, "params2.csv")
-        np.savetxt(fp, [text], fmt="%s")
-        logger.info(f"Saved: {fp}")
-        sys.exit()
+    exptimes = args.exptime
+    if exptimes is None:
+        exptimes = [None] * n_download
+    elif len(exptimes) == 1:
+        exptimes = exptimes * n_download
+    elif len(exptimes) != n_download:
+        logger.error(
+            f"--exptime has {len(exptimes)} entries but --pipeline has "
+            f"{n_download} entries; give one --exptime per --pipeline, "
+            "or a single value shared by all."
+        )
+        sys.exit(1)
+    # t_exp_{inst} in settings.csv is resolved per downloaded instrument
+    # below; instruments beyond n_download (declared via --filename but
+    # not downloaded here) fall back to this first exptime, matching the
+    # single-pipeline behaviour prior to multi-pipeline support.
+    t_exp_by_inst: dict[str, float] = {}
+    exptime = exptimes[0]
 
+    # ----------------------------------------------------------------- #
+    # Bandpass resolution for chromatic mode.
+    # bp_list  : one bandpass label per instrument, parallel to fns.
+    # rr_suffixes  : list of suffixes used to key per-band rr rows.
+    #                Empty list when achromatic (no `_<suffix>`).
+    # ldc_suffixes : list of suffixes used to key LDC rows.
+    #                When chromatic / bandpass-aware: unique bandpass set.
+    #                Otherwise: the per-inst names in fns.
+    # write_bandpass_line : whether settings.csv should carry a
+    #                       `bandpass,<...>` row.
+    # ----------------------------------------------------------------- #
+    if args.bandpass is None:
+        bp_list = None
+        rr_suffixes = []  # achromatic: single {pl}_rr row
+        ldc_suffixes = list(fns)  # per-instrument LDCs
+        write_bandpass_line = False
+        # Loud heads-up when the user gave several distinct instruments
+        # but didn't ask for chromatic — that combination usually means
+        # they wanted a per-band rr and forgot. Stay achromatic (backward
+        # compatible) but make sure they see what they're getting.
+        if len(set(fns)) >= 2:
+            _bp_hint = " ".join(fns)
+            logger.warning(
+                f"--bandpass not set, --filename has {len(set(fns))} distinct "
+                f"instruments ({fns}). The generated params.csv will be "
+                f"ACHROMATIC: a single {{pl}}_rr row shared by all "
+                f"instruments, and per-instrument LDCs."
+            )
+            logger.warning(
+                f"  - For chromatic (separate Rp/Rs per band): "
+                f"add `-bp {_bp_hint}` to your command."
+            )
+            logger.warning(
+                f"  - To group all instruments under one shared "
+                f"bandpass: add `-bp {fns[0]} {fns[0]}` (repeat one label)."
+            )
     else:
-        toiid = args.toi
-        ticid = args.tic
-        ctoiid = args.ctoi
-        name = args.name
-        mission = args.mission.lower()
-        quality_bitmask = args.quality
-        sigma = args.sigma
-        interactive = args.interactive
-        ttv = args.ttv
-        fns = args.filename if isinstance(args.filename, list) else [args.filename]
-        fn = fns[0]  # first instrument (used where a single filename is needed)
-
-        # -p/-e each accept multiple values. A single -p (the default) keeps
-        # the original behaviour: only fns[0] is downloaded, and any other
-        # --filename entries are expected to already exist on disk (e.g. from
-        # a prior --lc-only run) — see the achromatic warning below. Passing
-        # one -p per -f instead downloads every instrument in this one run,
-        # each from its own pipeline/exptime, e.g.
-        # -f spoc120 qlp600 -p spoc qlp -e 120 600.
-        pipeline_list = args.pipeline
-        if len(pipeline_list) > 1 and len(pipeline_list) != len(fns):
+        if len(args.bandpass) != len(fns):
             logger.error(
-                f"--pipeline has {len(pipeline_list)} entries but --filename has "
-                f"{len(fns)} entries; give one --pipeline per --filename to "
-                "download each instrument, or a single --pipeline value to "
-                "download just the first --filename."
+                f"--bandpass has {len(args.bandpass)} entries but --filename has "
+                f"{len(fns)} entries; each instrument needs an explicit bandpass "
+                f"label (repeat the same label to share). Got bandpass={args.bandpass}, "
+                f"filenames={fns}."
             )
             sys.exit(1)
-        n_download = len(pipeline_list)
-
-        exptimes = args.exptime
-        if exptimes is None:
-            exptimes = [None] * n_download
-        elif len(exptimes) == 1:
-            exptimes = exptimes * n_download
-        elif len(exptimes) != n_download:
-            logger.error(
-                f"--exptime has {len(exptimes)} entries but --pipeline has "
-                f"{n_download} entries; give one --exptime per --pipeline, "
-                "or a single value shared by all."
-            )
-            sys.exit(1)
-        # t_exp_{inst} in settings.csv is resolved per downloaded instrument
-        # below; instruments beyond n_download (declared via --filename but
-        # not downloaded here) fall back to this first exptime, matching the
-        # single-pipeline behaviour prior to multi-pipeline support.
-        t_exp_by_inst: dict[str, float] = {}
-        exptime = exptimes[0]
-
-        # ----------------------------------------------------------------- #
-        # Bandpass resolution for chromatic mode.
-        # bp_list  : one bandpass label per instrument, parallel to fns.
-        # rr_suffixes  : list of suffixes used to key per-band rr rows.
-        #                Empty list when achromatic (no `_<suffix>`).
-        # ldc_suffixes : list of suffixes used to key LDC rows.
-        #                When chromatic / bandpass-aware: unique bandpass set.
-        #                Otherwise: the per-inst names in fns.
-        # write_bandpass_line : whether settings.csv should carry a
-        #                       `bandpass,<...>` row.
-        # ----------------------------------------------------------------- #
-        if args.bandpass is None:
-            bp_list = None
-            rr_suffixes = []  # achromatic: single {pl}_rr row
-            ldc_suffixes = list(fns)  # per-instrument LDCs
-            write_bandpass_line = False
-            # Loud heads-up when the user gave several distinct instruments
-            # but didn't ask for chromatic — that combination usually means
-            # they wanted a per-band rr and forgot. Stay achromatic (backward
-            # compatible) but make sure they see what they're getting.
-            if len(set(fns)) >= 2:
-                _bp_hint = " ".join(fns)
-                logger.warning(
-                    f"--bandpass not set, --filename has {len(set(fns))} distinct "
-                    f"instruments ({fns}). The generated params.csv will be "
-                    f"ACHROMATIC: a single {{pl}}_rr row shared by all "
-                    f"instruments, and per-instrument LDCs."
-                )
-                logger.warning(
-                    f"  - For chromatic (separate Rp/Rs per band): "
-                    f"add `-bp {_bp_hint}` to your command."
-                )
-                logger.warning(
-                    f"  - To group all instruments under one shared "
-                    f"bandpass: add `-bp {fns[0]} {fns[0]}` (repeat one label)."
-                )
-        else:
-            if len(args.bandpass) != len(fns):
-                logger.error(
-                    f"--bandpass has {len(args.bandpass)} entries but --filename has "
-                    f"{len(fns)} entries; each instrument needs an explicit bandpass "
-                    f"label (repeat the same label to share). Got bandpass={args.bandpass}, "
-                    f"filenames={fns}."
-                )
-                sys.exit(1)
-            bp_list = list(args.bandpass)
-            # Preserve first-seen order so the emitted rows stay deterministic.
-            _seen = set()
-            unique_bp = [b for b in bp_list if not (b in _seen or _seen.add(b))]
-            rr_suffixes = list(unique_bp)  # one rr row per unique bandpass
-            ldc_suffixes = list(unique_bp)  # one LDC set per unique bandpass
-            write_bandpass_line = True
-            logger.info(
-                f"Chromatic config: inst_phot={fns}, bandpass={bp_list} "
-                f"({len(unique_bp)} unique → "
-                f"{'chromatic' if len(unique_bp) > 1 else 'shared single-band'})"
-            )
-
-        # Unify the "segment" concept across missions: `sector` is always a
-        # list-of-str id — TESS sector / K2 campaign / Kepler quarter.
-        # --campaign and --quarter act as scalar aliases when -s is not given.
-        def _as_segment_list(x):
-            if x is None:
-                return None
-            if isinstance(x, list):
-                return [str(v) for v in x]
-            return [str(x)]
-
-        if mission == "tess":
-            sector = args.sector
-        elif mission == "k2":
-            sector = (
-                args.sector
-                if args.sector is not None
-                else _as_segment_list(args.campaign if args.campaign is not None else -1)
-            )
-        elif mission == "kepler":
-            sector = (
-                args.sector
-                if args.sector is not None
-                else _as_segment_list(args.quarter if args.quarter is not None else -1)
-            )
-        else:
-            sector = args.sector
-
-        # Mission-appropriate BJD offset used when reconstructing full BJD.
-        bjd_offset = {"tess": 2457000, "k2": 2454833, "kepler": 2454833}[mission]
-
-        overwrite = args.overwrite
-        update_db = args.update_db
-
-        tic_parameters = {key: getattr(args, key) for key, *_rest in _TIC_TRANSIT_FIELDS}
-        h5_parameters = None
-        h5_lightcurve = None
-        if args.h5 is not None:
-            if not (ticid or toiid):
-                logger.error("--h5 is only used together with -tic or -toi.")
-                sys.exit(1)
-            h5_parameters = read_h5_transit_params(args.h5, mission=mission)
-            if ticid:
-                tic_parameters = _merge_h5_transit_parameters(tic_parameters, h5_parameters)
-            # The light curve is only present in a *primary* quicklook h5
-            # (its iterative-search companions, e.g. *_tls_p2.h5, only carry
-            # the TLS results dict) — reused below only for the segment
-            # (sector/pipeline) it actually holds; every other segment this
-            # run downloads normally.
-            if mission == "tess":
-                h5_lightcurve = read_h5_lightcurve(args.h5)
-                if h5_lightcurve is None:
-                    logger.info(
-                        f"{args.h5} has no raw light curve (only its "
-                        "iterative-search companions lack this) — downloading "
-                        "normally."
-                    )
-        target_name, target_df, source = parse_target_name(
-            toiid,
-            ticid,
-            ctoiid,
-            name,
-            update_db,
-            tic_parameters=tic_parameters,
+        bp_list = list(args.bandpass)
+        # Preserve first-seen order so the emitted rows stay deterministic.
+        _seen = set()
+        unique_bp = [b for b in bp_list if not (b in _seen or _seen.add(b))]
+        rr_suffixes = list(unique_bp)  # one rr row per unique bandpass
+        ldc_suffixes = list(unique_bp)  # one LDC set per unique bandpass
+        write_bandpass_line = True
+        logger.info(
+            f"Chromatic config: inst_phot={fns}, bandpass={bp_list} "
+            f"({len(unique_bp)} unique → "
+            f"{'chromatic' if len(unique_bp) > 1 else 'shared single-band'})"
         )
-        if h5_parameters is not None and toiid:
-            target_df = _append_h5_companion(target_df, tic_parameters, h5_parameters)
+
+    # Unify the "segment" concept across missions: `sector` is always a
+    # list-of-str id — TESS sector / K2 campaign / Kepler quarter.
+    # --campaign and --quarter act as scalar aliases when -s is not given.
+    def _as_segment_list(x):
+        if x is None:
+            return None
+        if isinstance(x, list):
+            return [str(v) for v in x]
+        return [str(x)]
+
+    if mission == "tess":
+        sector = args.sector
+    elif mission == "k2":
+        sector = (
+            args.sector
+            if args.sector is not None
+            else _as_segment_list(args.campaign if args.campaign is not None else -1)
+        )
+    elif mission == "kepler":
+        sector = (
+            args.sector
+            if args.sector is not None
+            else _as_segment_list(args.quarter if args.quarter is not None else -1)
+        )
+    else:
+        sector = args.sector
+
+    # Mission-appropriate BJD offset used when reconstructing full BJD.
+    bjd_offset = {"tess": 2457000, "k2": 2454833, "kepler": 2454833}[mission]
+
+    overwrite = args.overwrite
+    update_db = args.update_db
+
+    tic_parameters = {key: getattr(args, key) for key, *_rest in _TIC_TRANSIT_FIELDS}
+    h5_parameters = None
+    h5_lightcurve = None
+    if args.h5 is not None:
+        if not (ticid or toiid):
+            logger.error("--h5 is only used together with -tic or -toi.")
+            sys.exit(1)
+        h5_parameters = read_h5_transit_params(args.h5, mission=mission)
         if ticid:
-            name = target_name.replace("-", "")
+            tic_parameters = _merge_h5_transit_parameters(tic_parameters, h5_parameters)
+        # The light curve is only present in a *primary* quicklook h5
+        # (its iterative-search companions, e.g. *_tls_p2.h5, only carry
+        # the TLS results dict) — reused below only for the segment
+        # (sector/pipeline) it actually holds; every other segment this
+        # run downloads normally.
         if mission == "tess":
-            tic_id, outSec = get_tess_sectors(target_name, target_df, toiid, ctoiid, name)
-            sector_flag = check_if_sector_is_available(
-                target_name, given_sector=sector, all_sectors=outSec
-            )
-        else:
-            # K2/Kepler: skip TESS-point lookup. Mirror the check_if_sector_is_available
-            # flag logic without validating against a known segment list (lightkurve
-            # will surface missing campaigns/quarters when the search returns empty).
-            tic_id = None
-            outSec = np.array([])
-            if sector is None:
-                sector_flag = "default"
-            elif sector == ["all"]:
-                sector_flag = "all_sector"
-            elif sector == ["-1"]:
-                sector_flag = "last"
-            elif sector == ["0"]:
-                sector_flag = "first"
-            else:
-                sector_flag = "multi_sector"
-
-        fp = Path(basedir, target_name).joinpath(f"{target_name}.log")
-        logger.add(fp, format=log_format)
-        if debug:
-            logger.info(target_df)
-
-        try:
-            if toiid or ctoiid or ticid:
-                (
-                    Teff,
-                    Teff_err,
-                    logg,
-                    logg_err,
-                    feh,
-                    feh_err,
-                    radius,
-                    radius_err,
-                    mass,
-                    mass_err,
-                ) = catalog_info_TIC(int(tic_id))
-            elif name:
-                (
-                    Teff,
-                    Teff_err,
-                    logg,
-                    logg_err,
-                    feh,
-                    feh_err,
-                    radius,
-                    radius_err,
-                    mass,
-                    mass_err,
-                ) = catalog_info_name(target_df.iloc[0])
-            if debug:
+            h5_lightcurve = read_h5_lightcurve(args.h5)
+            if h5_lightcurve is None:
                 logger.info(
-                    Teff,
-                    Teff_err,
-                    logg,
-                    logg_err,
-                    feh,
-                    feh_err,
-                    radius,
-                    radius_err,
-                    mass,
-                    mass_err,
+                    f"{args.h5} has no raw light curve (only its "
+                    "iterative-search companions lack this) — downloading "
+                    "normally."
                 )
-        except Exception as e:
-            logger.error(f"Error: {e}")
-
-        ticid = tic_id if ticid is None else ticid
-        rhostar_prior = True
-        if str(radius) == "nan":
-            if interactive:
-                radius = float(input("Rstar [Rsun]:"))
-                rhostar_prior = False
-            else:
-                msg = "use --interactive to input missing value"
-                logger.error(msg)
-                sys.exit()
-        if str(mass) == "nan":
-            if interactive:
-                mass = float(input("Mstar [Msun]:"))
-                rhostar_prior = False
-            else:
-                msg = "use --interactive to input missing value"
-                raise ValueError(msg)
-        if str(radius_err) == "nan":
-            radius_err = 0.1
-            logger.info("Rstar err is nan; setting to 0.1")
-        if str(mass_err) == "nan":
-            mass_err = 0.1
-            logger.info("Mstar err is nan; setting to 0.1")
-        if debug:
-            # logger.info(f"Teff={Teff:.0f}+/-{Teff_err:.0f},
-            #     logg={logg:.2f}+/-{logg_err:.2f},
-            #     feh={feh:.2f}+/-{feh_err:.2f}")
-            logger.info(f"Rs={radius:.2f}+/-{radius_err:.2f}, Ms={mass:.2f}+/-{mass_err:.2f}")
-
-        # band = mission.lower()
-        if np.isnan(feh):
-            feh = float(input("[Fe/H]: ")) if interactive else 0  # solar metallicity
-        if np.isnan(feh_err):
-            feh_err = float(input("[Fe/H] err: ")) if interactive else 0.1
-        logger.info(f"Using [Fe/H]=({feh},{feh_err}) dex")
-        if np.isnan(logg):
-            if interactive:
-                logg = float(input("logg: "))
-            else:
-                msg = "use --interactive to input missing value"
-                logger.error(msg)
-                sys.exit()  # no assumption
-        if np.isnan(logg_err):
-            logg_err = float(input("logg err: ")) if interactive else 0.1
-        logger.info(f"Using logg=({logg:.2f},{logg_err:.2f}) cm/s^2")
-        if np.isnan(Teff):
-            if interactive:
-                Teff = float(input("Teff: "))
-            else:
-                msg = "use --interactive to input missing value"
-                logger.error(msg)
-                sys.exit()  # no assumption
-        if np.isnan(Teff_err):
-            Teff_err = float(input("Teff err: ")) if interactive else 500
-        logger.info(f"Using Teff=({Teff:.0f},{Teff_err:.0f}) K")
-
-        q1, q1_err, q2, q2_err = ld.claret(
-            band="T",
-            teff=Teff,
-            uteff=Teff_err,
-            logg=logg,
-            ulogg=logg_err,
-            feh=feh,
-            ufeh=feh_err,
-            law="quadratic",
+    target_name, target_df, source = parse_target_name(
+        toiid,
+        ticid,
+        ctoiid,
+        name,
+        update_db,
+        tic_parameters=tic_parameters,
+    )
+    if h5_parameters is not None and toiid:
+        target_df = _append_h5_companion(target_df, tic_parameters, h5_parameters)
+    if ticid:
+        name = target_name.replace("-", "")
+    if mission == "tess":
+        tic_id, outSec = get_tess_sectors(target_name, target_df, toiid, ctoiid, name)
+        sector_flag = check_if_sector_is_available(
+            target_name, given_sector=sector, all_sectors=outSec
         )
-        # ===== Write files =====#
-        outdir = Path(basedir, target_name)
-        # An existing directory is only a real conflict when it already holds
-        # the canonical outputs of a successful prepare_allesfit run. An empty
-        # dir (or one containing only stray artefacts from an aborted attempt)
-        # should not block re-running without --overwrite.
-        _CANONICAL_OUTPUTS = ("params.csv", "settings.csv", "run.py")
-        if outdir.exists():
-            existing = {p.name for p in outdir.iterdir()} if outdir.is_dir() else set()
-            collisions = existing & set(_CANONICAL_OUTPUTS)
-            if collisions and not overwrite:
-                raise FileExistsError(
-                    f"{outdir} already contains {sorted(collisions)}. "
-                    "Use --overwrite to overwrite files."
-                )
-        outdir.mkdir(parents=True, exist_ok=True)
+    else:
+        # K2/Kepler: skip TESS-point lookup. Mirror the check_if_sector_is_available
+        # flag logic without validating against a known segment list (lightkurve
+        # will surface missing campaigns/quarters when the search returns empty).
+        tic_id = None
+        outSec = np.array([])
+        if sector is None:
+            sector_flag = "default"
+        elif sector == ["all"]:
+            sector_flag = "all_sector"
+        elif sector == ["-1"]:
+            sector_flag = "last"
+        elif sector == ["0"]:
+            sector_flag = "first"
+        else:
+            sector_flag = "multi_sector"
 
-        # ===== Create params.csv =====#
-        text = """#name,value,fit,bounds,label,unit,coupled_with\n"""
-        # Track every catalog transit duration across all companions. After
-        # each lightcurve download, the longest sets the ln_ρ_GP lower bound
-        # so the GP cannot fit any companion's transit shape.
-        companion_tdur_hours = []
-        for i, row in target_df.iterrows():
-            pl = planets[i]
-            if debug:
-                logger.info(f"=====Planet {pl}=====")
+    fp = Path(basedir, target_name).joinpath(f"{target_name}.log")
+    logger.add(fp, format=log_format)
+    if debug:
+        logger.info(target_df)
 
-            # tic = row['TIC ID']
-            Porb = row["Period (days)"]
-            Porberr = row["Period (days) err"]
-            epoch = row["Epoch (BJD)"]
-            epocherr = row["Epoch (BJD) err"]
-            tdur = row["Duration (hours)"]
-            tdurerr = row["Duration (hours) err"]
-
-            if interactive and not np.all([Porb > 0, epoch > 0, tdur > 0]):
-                Porb = float(input("Porb: "))
-                Porberr = float(input("Porb err: "))
-                epoch = float(input("Epoch: "))
-                epocherr = float(input("Epoch err: "))
-            # tdur = float(input("Tdur: "))
-            # tdurerr = float(input("Tdur err: "))
-            else:
-                assert np.all([Porb > 0, epoch > 0, tdur > 0])
-            Porb_samples = np.random.normal(Porb, Porberr, size=Nsamples)
-
-            if debug:
-                logger.info(f"P={Porb:.4f}+/-{Porberr:.4f}, T0={epoch:.4f}+/-{epocherr:.4f}")
-
-            rprs = np.sqrt(row["Depth (ppm)"] / 1e6)
-            rprserr = np.sqrt(row["Depth (ppm) err"] / 1e6)
-
-            if str(rprs) == "nan" or str(rprserr) == "nan":
-                if interactive:
-                    logger.info(
-                        f"rprs={row['Depth (ppm)'] / 1e3:.3f}, rprserr={row['Depth (ppm) err'] / 1e3:.3f} ppt"
-                    )
-                    try:
-                        rprs = input(f"Planet {pl} Rp/Rs (ppt): ")
-                        rprs = float(rprs) / 1e3
-                        rprserr = input(f"Planet {pl} Rp/Rs err (ppt): ")
-                        rprserr = float(rprserr) / 1e3
-                    except Exception as e:
-                        msg = f"Error in inputs.\n{e}"
-                        logger.error(msg)
-                elif hasattr(row, "pl_rade"):
-                    try:
-                        rprs = row["pl_rade"] * u.Rearth.to(u.Rsun) / row["st_rad"]
-                        Rperr = np.sqrt(row["pl_radeerr1"] ** 2 + row["pl_radeerr2"] ** 2)
-                        rprserr = Rperr * u.Rearth.to(u.Rsun) / radius_err
-                    except Exception as e:
-                        msg = f"Error in parsing rp/rs\n{e}"
-                        logger.error(msg)
-                else:
-                    msg = "Rp/Rs is nan. Try --interactive for manual input"
-                    logger.error(msg)
-                    sys.exit()
-            assert rprs > 0
-
-            rprs_samples = np.random.normal(rprs, rprserr, size=Nsamples)
-            rprs_min, rprs, rprs_max = np.percentile(rprs_samples, q=quartiles_3sig)
-
-            radius_samples = np.random.normal(radius, radius_err, size=Nsamples)
-            mass_samples = np.random.normal(mass, mass_err, size=Nsamples)
-
-            # compute a/Rs from stellar density
-            rho_samples = rho_from_mr(mass_samples, radius_samples)
-            a_over_Rs_samples = as_from_rhop(rho_samples, Porb_samples)
-            if debug:
-                rhomin, rho, rhomax = np.percentile(rho_samples, q=quartiles_3sig)
-                as_min, a, as_max = np.percentile(a_over_Rs_samples, q=quartiles_3sig)
-                a_au_s = a_from_rhoprs(rho_samples, Porb_samples, radius_samples)
-                a_au_min, a_au, a_au_max = np.percentile(a_au_s, q=quartiles_3sig)
-
-            # FIXME: a_over_Rs_samples produces some NaNs e.g. for Kepler-51
-            rsuma_samples = 1 / a_over_Rs_samples * (1 + rprs_samples)
-            idx = (rsuma_samples > 0) & (rsuma_samples < 1)
-            rsuma_min, rsuma, rsuma_max = _percentile_3sig_safe(
-                rsuma_samples[idx],
-                fallback=(1e-3, 0.1, 0.25),
-                label="(R*+Rp)/a from rho_star",
-                planet=pl,
-                logger=logger,
+    try:
+        if toiid or ctoiid or ticid:
+            (
+                Teff,
+                Teff_err,
+                logg,
+                logg_err,
+                feh,
+                feh_err,
+                radius,
+                radius_err,
+                mass,
+                mass_err,
+            ) = catalog_info_TIC(int(tic_id))
+        elif name:
+            (
+                Teff,
+                Teff_err,
+                logg,
+                logg_err,
+                feh,
+                feh_err,
+                radius,
+                radius_err,
+                mass,
+                mass_err,
+            ) = catalog_info_name(target_df.iloc[0])
+        if debug:
+            logger.info(
+                Teff,
+                Teff_err,
+                logg,
+                logg_err,
+                feh,
+                feh_err,
+                radius,
+                radius_err,
+                mass,
+                mass_err,
             )
+    except Exception as e:
+        logger.error(f"Error: {e}")
 
-            # A transit duration needs an impact-parameter assumption. Use the
-            # median of the transit-conditioned non-grazing prior, b~U(0,1),
-            # for the representative initial tuple.  Even the rho-star
-            # fallback must couple b and inclination through b=(a/R*) cos(i).
-            b = 0.5
-            cosi = b * rsuma / (1.0 + rprs)
-            inc = np.arccos(cosi)
+    ticid = tic_id if ticid is None else ticid
+    rhostar_prior = True
+    if str(radius) == "nan":
+        if interactive:
+            radius = float(input("Rstar [Rsun]:"))
+            rhostar_prior = False
+        else:
+            msg = "use --interactive to input missing value"
+            logger.error(msg)
+            sys.exit()
+    if str(mass) == "nan":
+        if interactive:
+            mass = float(input("Mstar [Msun]:"))
+            rhostar_prior = False
+        else:
+            msg = "use --interactive to input missing value"
+            raise ValueError(msg)
+    if str(radius_err) == "nan":
+        radius_err = 0.1
+        logger.info("Rstar err is nan; setting to 0.1")
+    if str(mass_err) == "nan":
+        mass_err = 0.1
+        logger.info("Mstar err is nan; setting to 0.1")
+    if debug:
+        # logger.info(f"Teff={Teff:.0f}+/-{Teff_err:.0f},
+        #     logg={logg:.2f}+/-{logg_err:.2f},
+        #     feh={feh:.2f}+/-{feh_err:.2f}")
+        logger.info(f"Rs={radius:.2f}+/-{radius_err:.2f}, Ms={mass:.2f}+/-{mass_err:.2f}")
 
-            if str(tdur) != "nan":
-                # Compare the stellar-density geometry to the catalog T14,
-                # using the exact circular equation used by the fit model.
-                tdur_rhostar = circular_transit_duration(Porb, rsuma, cosi, rprs) * 24
+    # band = mission.lower()
+    if np.isnan(feh):
+        feh = float(input("[Fe/H]: ")) if interactive else 0  # solar metallicity
+    if np.isnan(feh_err):
+        feh_err = float(input("[Fe/H] err: ")) if interactive else 0.1
+    logger.info(f"Using [Fe/H]=({feh},{feh_err}) dex")
+    if np.isnan(logg):
+        if interactive:
+            logg = float(input("logg: "))
+        else:
+            msg = "use --interactive to input missing value"
+            logger.error(msg)
+            sys.exit()  # no assumption
+    if np.isnan(logg_err):
+        logg_err = float(input("logg err: ")) if interactive else 0.1
+    logger.info(f"Using logg=({logg:.2f},{logg_err:.2f}) cm/s^2")
+    if np.isnan(Teff):
+        if interactive:
+            Teff = float(input("Teff: "))
+        else:
+            msg = "use --interactive to input missing value"
+            logger.error(msg)
+            sys.exit()  # no assumption
+    if np.isnan(Teff_err):
+        Teff_err = float(input("Teff err: ")) if interactive else 500
+    logger.info(f"Using Teff=({Teff:.0f},{Teff_err:.0f}) K")
+
+    q1, q1_err, q2, q2_err = ld.claret(
+        band="T",
+        teff=Teff,
+        uteff=Teff_err,
+        logg=logg,
+        ulogg=logg_err,
+        feh=feh,
+        ufeh=feh_err,
+        law="quadratic",
+    )
+    # ===== Write files =====#
+    outdir = Path(basedir, target_name)
+    # An existing directory is only a real conflict when it already holds
+    # the canonical outputs of a successful prepare_allesfit run. An empty
+    # dir (or one containing only stray artefacts from an aborted attempt)
+    # should not block re-running without --overwrite.
+    _CANONICAL_OUTPUTS = ("params.csv", "settings.csv", "run.py")
+    if outdir.exists():
+        existing = {p.name for p in outdir.iterdir()} if outdir.is_dir() else set()
+        collisions = existing & set(_CANONICAL_OUTPUTS)
+        if collisions and not overwrite:
+            raise FileExistsError(
+                f"{outdir} already contains {sorted(collisions)}. "
+                "Use --overwrite to overwrite files."
+            )
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    # ===== Create params.csv =====#
+    text = """#name,value,fit,bounds,label,unit,coupled_with\n"""
+    # Track every catalog transit duration across all companions. After
+    # each lightcurve download, the longest sets the ln_ρ_GP lower bound
+    # so the GP cannot fit any companion's transit shape.
+    companion_tdur_hours = []
+    for i, row in target_df.iterrows():
+        pl = planets[i]
+        if debug:
+            logger.info(f"=====Planet {pl}=====")
+
+        # tic = row['TIC ID']
+        Porb = row["Period (days)"]
+        Porberr = row["Period (days) err"]
+        epoch = row["Epoch (BJD)"]
+        epocherr = row["Epoch (BJD) err"]
+        tdur = row["Duration (hours)"]
+        tdurerr = row["Duration (hours) err"]
+
+        if interactive and not np.all([Porb > 0, epoch > 0, tdur > 0]):
+            Porb = float(input("Porb: "))
+            Porberr = float(input("Porb err: "))
+            epoch = float(input("Epoch: "))
+            epocherr = float(input("Epoch err: "))
+        # tdur = float(input("Tdur: "))
+        # tdurerr = float(input("Tdur err: "))
+        else:
+            assert np.all([Porb > 0, epoch > 0, tdur > 0])
+        Porb_samples = np.random.normal(Porb, Porberr, size=Nsamples)
+
+        if debug:
+            logger.info(f"P={Porb:.4f}+/-{Porberr:.4f}, T0={epoch:.4f}+/-{epocherr:.4f}")
+
+        rprs = np.sqrt(row["Depth (ppm)"] / 1e6)
+        rprserr = np.sqrt(row["Depth (ppm) err"] / 1e6)
+
+        if str(rprs) == "nan" or str(rprserr) == "nan":
+            if interactive:
                 logger.info(
-                    f"tdur={tdur:.1f}h ({source}) {tdur_rhostar:.1f}h (derived from rhostar)"
+                    f"rprs={row['Depth (ppm)'] / 1e3:.3f}, rprserr={row['Depth (ppm) err'] / 1e3:.3f} ppt"
                 )
                 try:
-                    tdurerr = 1 if str(tdurerr) == "nan" else tdurerr
-                    geometry = _duration_informed_geometry(
-                        period_days=Porb,
-                        period_err_days=Porberr,
-                        tdur_hours=tdur,
-                        tdur_err_hours=tdurerr,
-                        radius_ratio=rprs,
-                        radius_ratio_err=rprserr,
-                    )
-                    rsuma = geometry["rsuma"]
-                    cosi = geometry["cosi"]
-                    b = geometry["impact_parameter"]
-                    inc = np.arccos(cosi)
-                    rsuma_min = geometry["rsuma_min"]
-                    rsuma_max = geometry["rsuma_max"]
-                    tdur_orbit = circular_transit_duration(Porb, rsuma, cosi, rprs) * 24
-                    logger.info(
-                        f"tdur={tdur:.1f}h ({source}) {tdur_orbit:.1f}h "
-                        "(duration-informed circular orbit; b=0.5)"
-                    )
-                    logger.info(
-                        "Using duration-informed (Rstar+Rp)/a and cos(i) "
-                        "under e=0 and b=0.5 initialization."
-                    )
+                    rprs = input(f"Planet {pl} Rp/Rs (ppt): ")
+                    rprs = float(rprs) / 1e3
+                    rprserr = input(f"Planet {pl} Rp/Rs err (ppt): ")
+                    rprserr = float(rprserr) / 1e3
                 except Exception as e:
-                    logger.warning(
-                        f"Could not derive circular geometry from catalog duration ({e}); "
-                        "using the stellar-density geometry."
-                    )
-
-            model_tdur_hours = circular_transit_duration(Porb, rsuma, cosi, rprs) * 24.0
-            if math.isfinite(model_tdur_hours) and model_tdur_hours > 0.0:
-                companion_tdur_hours.append(model_tdur_hours)
-
-            if debug:
-                logger.info(f"rsuma={rsuma:.4f}")
-                logger.info(f"rprs={rprs:.4f}")
-                logger.info(f"rho={rho:.4f}")
-                logger.info(f"a_s={a:.4f}")
-                logger.info(f"a_au={a_au:.4f}")
-                logger.info(f"inc={np.rad2deg(inc):.2f}")
-                logger.info(f"b={b:.2f}")
-            text += f"#companion {pl} astrophysical params,,,,,,\n"
-            # rr: single achromatic key, or one per unique bandpass when
-            # --bandpass was given. rsuma stays globally shared either way.
-            # Bounds computed by _default_prior_bounds (see docstring for
-            # the physical rationale).
-            _bounds = _default_prior_bounds(rprs_max, rsuma_min, rsuma_max)
-            _rr_upper = _bounds["rr_upper"]
-            _rsuma_lo = _bounds["rsuma_lo"]
-            _rsuma_hi = _bounds["rsuma_hi"]
-            _cosi_max = _bounds["cosi_max"]
-            if not rr_suffixes:
-                text += f"{pl}_rr,{rprs:.4f},1,uniform 0 {_rr_upper:.4f},$R_{pl} / R_\\star$,,\n"
+                    msg = f"Error in inputs.\n{e}"
+                    logger.error(msg)
+            elif hasattr(row, "pl_rade"):
+                try:
+                    rprs = row["pl_rade"] * u.Rearth.to(u.Rsun) / row["st_rad"]
+                    Rperr = np.sqrt(row["pl_radeerr1"] ** 2 + row["pl_radeerr2"] ** 2)
+                    rprserr = Rperr * u.Rearth.to(u.Rsun) / radius_err
+                except Exception as e:
+                    msg = f"Error in parsing rp/rs\n{e}"
+                    logger.error(msg)
             else:
-                for _bp in rr_suffixes:
-                    text += (
-                        f"{pl}_rr_{_bp},{rprs:.4f},1,uniform 0 {_rr_upper:.4f},"
-                        f"$R_{pl} / R_\\star (\\mathrm{{{_bp}}})$,,\n"
-                    )
-            text += f"{pl}_rsuma,{rsuma:.4f},1,uniform {_rsuma_lo:.4f} {_rsuma_hi:.4f},$(R_\\star + R_{pl}) / a_{pl}$,,\n"
-            # text += f"{pl}_rsuma,{rsuma:.4f},1,uniform 0 1,$(R_\star + R_{pl}) / a_{pl}$,,\n"
-            text += (
-                f"{pl}_cosi,{cosi:.4f},1,uniform 0 {_cosi_max:.4f},$\\cos" + "{i_" + pl + "}$,,\n"
-            )
-            text += (
-                f"{pl}_epoch,{epoch:.6f},1,normal {epoch:.6f} {epocherr:.6f},$T_"
-                + "{0;"
-                + pl
-                + "}$,BJD,\n"
-            )
-            text += f"{pl}_period,{Porb:.6f},1,normal {Porb:.6f} {Porberr:.6f},$P_{pl}$,d,\n"
-            text += f"{pl}_f_c,0,0,uniform -1 1,$\\sqrt{{e_{pl}}} \\cos{{\\omega_{pl}}}$,,\n"
-            text += f"{pl}_f_s,0,0,uniform -1 1,$\\sqrt{{e_{pl}}} \\sin{{\\omega_{pl}}}$,,\n"
-            for inst in fns:
-                text += f"#{pl}_sbratio_{inst},0,0,uniform 0 1,$J$,,\n"
-        text += "#dilution per instrument,,,,,,\n"
-        for inst in fns:
-            text += f"dil_{inst},0,0,uniform 0 1,$D_\\mathrm{{0; {inst}}}$,,\n"
-        # Limb-darkening coefficients are keyed by bandpass in chromatic mode
-        # and by instrument otherwise — `ldc_suffixes` already encodes this
-        # decision (unique bandpasses when --bandpass was given, fns otherwise).
-        if write_bandpass_line:
-            text += "#limb darkening coefficients per bandpass,,,,,,\n"
+                msg = "Rp/Rs is nan. Try --interactive for manual input"
+                logger.error(msg)
+                sys.exit()
+        assert rprs > 0
+
+        rprs_samples = np.random.normal(rprs, rprserr, size=Nsamples)
+        rprs_min, rprs, rprs_max = np.percentile(rprs_samples, q=quartiles_3sig)
+
+        radius_samples = np.random.normal(radius, radius_err, size=Nsamples)
+        mass_samples = np.random.normal(mass, mass_err, size=Nsamples)
+
+        # compute a/Rs from stellar density
+        rho_samples = rho_from_mr(mass_samples, radius_samples)
+        a_over_Rs_samples = as_from_rhop(rho_samples, Porb_samples)
+        if debug:
+            rhomin, rho, rhomax = np.percentile(rho_samples, q=quartiles_3sig)
+            as_min, a, as_max = np.percentile(a_over_Rs_samples, q=quartiles_3sig)
+            a_au_s = a_from_rhoprs(rho_samples, Porb_samples, radius_samples)
+            a_au_min, a_au, a_au_max = np.percentile(a_au_s, q=quartiles_3sig)
+
+        # FIXME: a_over_Rs_samples produces some NaNs e.g. for Kepler-51
+        rsuma_samples = 1 / a_over_Rs_samples * (1 + rprs_samples)
+        idx = (rsuma_samples > 0) & (rsuma_samples < 1)
+        rsuma_min, rsuma, rsuma_max = _percentile_3sig_safe(
+            rsuma_samples[idx],
+            fallback=(1e-3, 0.1, 0.25),
+            label="(R*+Rp)/a from rho_star",
+            planet=pl,
+            logger=logger,
+        )
+
+        # A transit duration needs an impact-parameter assumption. Use the
+        # median of the transit-conditioned non-grazing prior, b~U(0,1),
+        # for the representative initial tuple.  Even the rho-star
+        # fallback must couple b and inclination through b=(a/R*) cos(i).
+        b = 0.5
+        cosi = b * rsuma / (1.0 + rprs)
+        inc = np.arccos(cosi)
+
+        if str(tdur) != "nan":
+            # Compare the stellar-density geometry to the catalog T14,
+            # using the exact circular equation used by the fit model.
+            tdur_rhostar = circular_transit_duration(Porb, rsuma, cosi, rprs) * 24
+            logger.info(f"tdur={tdur:.1f}h ({source}) {tdur_rhostar:.1f}h (derived from rhostar)")
+            try:
+                tdurerr = 1 if str(tdurerr) == "nan" else tdurerr
+                geometry = _duration_informed_geometry(
+                    period_days=Porb,
+                    period_err_days=Porberr,
+                    tdur_hours=tdur,
+                    tdur_err_hours=tdurerr,
+                    radius_ratio=rprs,
+                    radius_ratio_err=rprserr,
+                )
+                rsuma = geometry["rsuma"]
+                cosi = geometry["cosi"]
+                b = geometry["impact_parameter"]
+                inc = np.arccos(cosi)
+                rsuma_min = geometry["rsuma_min"]
+                rsuma_max = geometry["rsuma_max"]
+                tdur_orbit = circular_transit_duration(Porb, rsuma, cosi, rprs) * 24
+                logger.info(
+                    f"tdur={tdur:.1f}h ({source}) {tdur_orbit:.1f}h "
+                    "(duration-informed circular orbit; b=0.5)"
+                )
+                logger.info(
+                    "Using duration-informed (Rstar+Rp)/a and cos(i) "
+                    "under e=0 and b=0.5 initialization."
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Could not derive circular geometry from catalog duration ({e}); "
+                    "using the stellar-density geometry."
+                )
+
+        model_tdur_hours = circular_transit_duration(Porb, rsuma, cosi, rprs) * 24.0
+        if math.isfinite(model_tdur_hours) and model_tdur_hours > 0.0:
+            companion_tdur_hours.append(model_tdur_hours)
+
+        if debug:
+            logger.info(f"rsuma={rsuma:.4f}")
+            logger.info(f"rprs={rprs:.4f}")
+            logger.info(f"rho={rho:.4f}")
+            logger.info(f"a_s={a:.4f}")
+            logger.info(f"a_au={a_au:.4f}")
+            logger.info(f"inc={np.rad2deg(inc):.2f}")
+            logger.info(f"b={b:.2f}")
+        text += f"#companion {pl} astrophysical params,,,,,,\n"
+        # rr: single achromatic key, or one per unique bandpass when
+        # --bandpass was given. rsuma stays globally shared either way.
+        # Bounds computed by _default_prior_bounds (see docstring for
+        # the physical rationale).
+        _bounds = _default_prior_bounds(rprs_max, rsuma_min, rsuma_max)
+        _rr_upper = _bounds["rr_upper"]
+        _rsuma_lo = _bounds["rsuma_lo"]
+        _rsuma_hi = _bounds["rsuma_hi"]
+        _cosi_max = _bounds["cosi_max"]
+        if not rr_suffixes:
+            text += f"{pl}_rr,{rprs:.4f},1,uniform 0 {_rr_upper:.4f},$R_{pl} / R_\\star$,,\n"
         else:
-            text += "#limb darkening coefficients per instrument,,,,,,\n"
-        for suffix in ldc_suffixes:
-            text += (
-                f"#host_ldc_q1_{suffix},{q1:.2f},1,normal {q1:.2f} {q1_err:.2f},"
-                + f"$q_{{1; \\mathrm{{{suffix}}}}}$"
-                + ",,\n"
-            )
-            text += (
-                f"#host_ldc_q2_{suffix},{q2:.2f},1,normal {q2:.2f} {q2_err:.2f},"
-                + f"$q_{{2; \\mathrm{{{suffix}}}}}$"
-                + ",,\n"
-            )
-            text += f"host_ldc_q1_{suffix},0.5,1,uniform 0 1,$q_{{1; \\mathrm{{{suffix}}}}}$,,\n"
-            text += f"host_ldc_q2_{suffix},0.5,1,uniform 0 1,$q_{{2; \\mathrm{{{suffix}}}}}$,,\n"
-
-        # ln(err) upper bound = -3 → exp(-3) ≈ 5% relative scatter, already
-        # generous; the previous -1 (exp(-1) ≈ 37%) covered a regime where
-        # no transit signal is recoverable, so samples there were wasted.
-        text += "#errors per instrument,,,,,,\n"
+            for _bp in rr_suffixes:
+                text += (
+                    f"{pl}_rr_{_bp},{rprs:.4f},1,uniform 0 {_rr_upper:.4f},"
+                    f"$R_{pl} / R_\\star (\\mathrm{{{_bp}}})$,,\n"
+                )
+        text += f"{pl}_rsuma,{rsuma:.4f},1,uniform {_rsuma_lo:.4f} {_rsuma_hi:.4f},$(R_\\star + R_{pl}) / a_{pl}$,,\n"
+        # text += f"{pl}_rsuma,{rsuma:.4f},1,uniform 0 1,$(R_\star + R_{pl}) / a_{pl}$,,\n"
+        text += f"{pl}_cosi,{cosi:.4f},1,uniform 0 {_cosi_max:.4f},$\\cos" + "{i_" + pl + "}$,,\n"
+        text += (
+            f"{pl}_epoch,{epoch:.6f},1,normal {epoch:.6f} {epocherr:.6f},$T_"
+            + "{0;"
+            + pl
+            + "}$,BJD,\n"
+        )
+        text += f"{pl}_period,{Porb:.6f},1,normal {Porb:.6f} {Porberr:.6f},$P_{pl}$,d,\n"
+        text += f"{pl}_f_c,0,0,uniform -1 1,$\\sqrt{{e_{pl}}} \\cos{{\\omega_{pl}}}$,,\n"
+        text += f"{pl}_f_s,0,0,uniform -1 1,$\\sqrt{{e_{pl}}} \\sin{{\\omega_{pl}}}$,,\n"
         for inst in fns:
-            text += (
-                f"ln_err_flux_{inst},-6,1,uniform -10 -3,$\\log{{\\sigma ({inst})}}$,rel. flux,\n"
-            )
-        # GP Matern32 ln(rho) upper bound = 5 → exp(5) ≈ 148 days, beyond
-        # any plausible TESS systematic or Kepler quarter, and short of
-        # the regime where the kernel is degenerate with the baseline
-        # offset (correlations >>1 yr). The previous 10 (exp(10) ≈ 60 yr)
-        # was unhelpful.
-        text += "#baseline per instrument,,,,,,\n"
-        for inst in fns:
-            text += f"#baseline_gp_offset_flux_{inst},0,1,uniform -0.1 0.1,$\\mathrm{{offset ({inst})}}$,,\n"
-            text += f"baseline_gp_matern32_lnsigma_flux_{inst},-5,1,uniform -10 -3,$\\mathrm{{gp ln \\sigma ({inst})}}$,,\n"
-            text += f"baseline_gp_matern32_lnrho_flux_{inst},0,1,uniform -1 5,$\\mathrm{{gp ln \\rho ({inst})}}$,,\n"
-        # TTV rows: when --ttv is NOT set, keep the commented-out stub for
-        # reference. When --ttv IS set, the real per-transit rows are
-        # appended after the lightcurve download (below) because we need
-        # the observed time series to count transits with data coverage.
-        if not ttv:
-            for i, _ in target_df.iterrows():
-                pl = planets[i]
-                text += f"#TTV companion {pl},,,,,\n"
-                # ±0.05 d = ±72 min; real TTV uncertainties for TESS-class
-                # transit S/N are of order minutes, so a narrower default
-                # is fine and converges faster.
-                for i in range(5):
-                    text += f"#{pl}_ttv_transit_{i + 1},0,1,uniform -0.05 0.05,TTV$_\\mathrm{{ttv;{i + 1}}}$,d,\n"
-        if debug:
-            logger.info(text)
-        fp = outdir.joinpath("params.csv")
-        np.savetxt(fp, [text], fmt="%s")
-        logger.info(f"Saved: {fp}")
+            text += f"#{pl}_sbratio_{inst},0,0,uniform 0 1,$J$,,\n"
+    text += "#dilution per instrument,,,,,,\n"
+    for inst in fns:
+        text += f"dil_{inst},0,0,uniform 0 1,$D_\\mathrm{{0; {inst}}}$,,\n"
+    # Limb-darkening coefficients are keyed by bandpass in chromatic mode
+    # and by instrument otherwise — `ldc_suffixes` already encodes this
+    # decision (unique bandpasses when --bandpass was given, fns otherwise).
+    if write_bandpass_line:
+        text += "#limb darkening coefficients per bandpass,,,,,,\n"
+    else:
+        text += "#limb darkening coefficients per instrument,,,,,,\n"
+    for suffix in ldc_suffixes:
+        text += (
+            f"#host_ldc_q1_{suffix},{q1:.2f},1,normal {q1:.2f} {q1_err:.2f},"
+            + f"$q_{{1; \\mathrm{{{suffix}}}}}$"
+            + ",,\n"
+        )
+        text += (
+            f"#host_ldc_q2_{suffix},{q2:.2f},1,normal {q2:.2f} {q2_err:.2f},"
+            + f"$q_{{2; \\mathrm{{{suffix}}}}}$"
+            + ",,\n"
+        )
+        text += f"host_ldc_q1_{suffix},0.5,1,uniform 0 1,$q_{{1; \\mathrm{{{suffix}}}}}$,,\n"
+        text += f"host_ldc_q2_{suffix},0.5,1,uniform 0 1,$q_{{2; \\mathrm{{{suffix}}}}}$,,\n"
 
-        # =====Create params_star.csv===== #
-        text3 = f"""#R_star,R_star_lerr,R_star_uerr,M_star,M_star_lerr,M_star_uerr,Teff_star,Teff_star_lerr,Teff_star_uerr
-    #R_sun,R_sun,R_sun,M_sun,M_sun,M_sun,K,K,K
-    {radius:.2f},{radius_err:.2f},{radius_err:.2f},{mass:.2f},{mass_err:.2f},{mass_err:.2f},{Teff:.0f},{Teff_err:.0f},{Teff_err:.0f}"""
-        if debug:
-            logger.info(text3)
+    # ln(err) upper bound = -3 → exp(-3) ≈ 5% relative scatter, already
+    # generous; the previous -1 (exp(-1) ≈ 37%) covered a regime where
+    # no transit signal is recoverable, so samples there were wasted.
+    text += "#errors per instrument,,,,,,\n"
+    for inst in fns:
+        text += f"ln_err_flux_{inst},-6,1,uniform -10 -3,$\\log{{\\sigma ({inst})}}$,rel. flux,\n"
+    # GP Matern32 ln(rho) upper bound = 5 → exp(5) ≈ 148 days, beyond
+    # any plausible TESS systematic or Kepler quarter, and short of
+    # the regime where the kernel is degenerate with the baseline
+    # offset (correlations >>1 yr). The previous 10 (exp(10) ≈ 60 yr)
+    # was unhelpful.
+    text += "#baseline per instrument,,,,,,\n"
+    for inst in fns:
+        text += f"#baseline_gp_offset_flux_{inst},0,1,uniform -0.1 0.1,$\\mathrm{{offset ({inst})}}$,,\n"
+        text += f"baseline_gp_matern32_lnsigma_flux_{inst},-5,1,uniform -10 -3,$\\mathrm{{gp ln \\sigma ({inst})}}$,,\n"
+        text += f"baseline_gp_matern32_lnrho_flux_{inst},0,1,uniform -1 5,$\\mathrm{{gp ln \\rho ({inst})}}$,,\n"
+    # TTV rows: when --ttv is NOT set, keep the commented-out stub for
+    # reference. When --ttv IS set, the real per-transit rows are
+    # appended after the lightcurve download (below) because we need
+    # the observed time series to count transits with data coverage.
+    if not ttv:
+        for i, _ in target_df.iterrows():
+            pl = planets[i]
+            text += f"#TTV companion {pl},,,,,\n"
+            # ±0.05 d = ±72 min; real TTV uncertainties for TESS-class
+            # transit S/N are of order minutes, so a narrower default
+            # is fine and converges faster.
+            for i in range(5):
+                text += f"#{pl}_ttv_transit_{i + 1},0,1,uniform -0.05 0.05,TTV$_\\mathrm{{ttv;{i + 1}}}$,d,\n"
+    if debug:
+        logger.info(text)
+    fp = outdir.joinpath("params.csv")
+    np.savetxt(fp, [text], fmt="%s")
+    logger.info(f"Saved: {fp}")
 
-        fp = outdir.joinpath("params_star.csv")
-        np.savetxt(fp, [text3], fmt="%s")
-        logger.info(f"Saved: {fp}")
+    # =====Create params_star.csv===== #
+    text3 = f"""#R_star,R_star_lerr,R_star_uerr,M_star,M_star_lerr,M_star_uerr,Teff_star,Teff_star_lerr,Teff_star_uerr
+#R_sun,R_sun,R_sun,M_sun,M_sun,M_sun,K,K,K
+{radius:.2f},{radius_err:.2f},{radius_err:.2f},{mass:.2f},{mass_err:.2f},{mass_err:.2f},{Teff:.0f},{Teff_err:.0f},{Teff_err:.0f}"""
+    if debug:
+        logger.info(text3)
 
-        # =====Create run.py===== #
-        # Every ns_fit / ns_output / mcmc_fit / mcmc_output call is wrapped
-        # in allesfitter.log_run so the centralized log at
-        # ~/.allesfitter/runs.jsonl (override via $ALLESFITTER_RUN_LOG)
-        # records a start/end row with absolute datadir, pid, hostname,
-        # duration, and status. Inspect with: jq . ~/.allesfitter/runs.jsonl
-        # or python -c 'import allesfitter; print(allesfitter.run_log_tail(20))'.
-        text4 = """#!/usr/bin/env python
+    fp = outdir.joinpath("params_star.csv")
+    np.savetxt(fp, [text3], fmt="%s")
+    logger.info(f"Saved: {fp}")
+
+    # =====Create run.py===== #
+    # Every ns_fit / ns_output / mcmc_fit / mcmc_output call is wrapped
+    # in allesfitter.log_run so the centralized log at
+    # ~/.allesfitter/runs.jsonl (override via $ALLESFITTER_RUN_LOG)
+    # records a start/end row with absolute datadir, pid, hostname,
+    # duration, and status. Inspect with: jq . ~/.allesfitter/runs.jsonl
+    # or python -c 'import allesfitter; print(allesfitter.run_log_tail(20))'.
+    text4 = """#!/usr/bin/env python
 import allesfitter
 #import os; os.nice(19)
 
@@ -2215,78 +2042,155 @@ fig = allesfitter.show_initial_guess(dir_path)
 #    allesfitter.ns_fit(dir_path, overwrite=False)
 #allesfitter.ns_output(dir_path, overwrite=True)"""
 
-        if debug:
-            logger.info(text4)
+    if debug:
+        logger.info(text4)
 
-        fp = outdir.joinpath("run.py")
-        np.savetxt(fp, [text4], fmt="%s")
-        logger.info(f"Saved: {fp}")
+    fp = outdir.joinpath("run.py")
+    np.savetxt(fp, [text4], fmt="%s")
+    logger.info(f"Saved: {fp}")
 
-        query_name = name
-        if toiid or ctoiid:
-            query_name = f"TIC {ticid}"
-        elif name.lower()[:2] == "k2":
-            # search epic name or coordinates
-            try:
-                logger.info("Searching for EPIC name")
-                query_name = get_name_aliases(name, key="epic")
-            except Exception as e:
-                logger.info(f"Error: {e}")
+    query_name = name
+    if toiid or ctoiid:
+        query_name = f"TIC {ticid}"
+    elif name.lower()[:2] == "k2":
+        # search epic name or coordinates
+        try:
+            logger.info("Searching for EPIC name")
+            query_name = get_name_aliases(name, key="epic")
+        except Exception as e:
+            logger.info(f"Error: {e}")
 
-        # One iteration per (fn, pipeline, exptime) triple. With the default
-        # single -p, this loop runs once for fns[0], exactly as before.
-        for fn, pipeline, exptime in zip(fns[:n_download], pipeline_list, exptimes):
-            lc_type = "sap_flux" if pipeline == "qlp" else args.lc_type + "_flux"
-            used_h5_lc = False
+    # One iteration per (fn, pipeline, exptime) triple. With the default
+    # single -p, this loop runs once for fns[0], exactly as before.
+    for fn, pipeline, exptime in zip(fns[:n_download], pipeline_list, exptimes):
+        lc_type = "sap_flux" if pipeline == "qlp" else args.lc_type + "_flux"
+        used_h5_lc = False
 
-            # search all available data for reference
-            all_lcs = lk.search_lightcurve(query_name, mission=mission)
-            logger.info(all_lcs)
-            if len(all_lcs) > 0:
-                available_pipelines = set([i.lower() for i in all_lcs.author])
-                logger.info(f"Available Pipelines: {available_pipelines}")
-            else:
-                msg = "No light curves found."
-                logger.error(msg)
-                sys.exit()
-            unique_exptimes = all_lcs.table.to_pandas().exptime.unique()
-            logger.info(f"Available Exp. times: {unique_exptimes}")
-            idx = [i == pipeline.lower() for i in available_pipelines]
-            if sum(idx) == 0:
-                msg = f"pipeline={pipeline} not in {available_pipelines}"
-                logger.error(msg)
-                sys.exit()
+        # search all available data for reference
+        all_lcs = lk.search_lightcurve(query_name, mission=mission)
+        logger.info(all_lcs)
+        if len(all_lcs) > 0:
+            available_pipelines = set([i.lower() for i in all_lcs.author])
+            logger.info(f"Available Pipelines: {available_pipelines}")
+        else:
+            msg = "No light curves found."
+            logger.error(msg)
+            sys.exit()
+        unique_exptimes = all_lcs.table.to_pandas().exptime.unique()
+        logger.info(f"Available Exp. times: {unique_exptimes}")
+        idx = [i == pipeline.lower() for i in available_pipelines]
+        if sum(idx) == 0:
+            msg = f"pipeline={pipeline} not in {available_pipelines}"
+            logger.error(msg)
+            sys.exit()
 
-            # search only requested data
-            result = lk.search_lightcurve(
-                query_name, author=pipeline, exptime=exptime, mission=mission
-            )
-            if result:
-                # K2 campaigns 11a/11b cannot cast to int. Keep labels as
-                # strings throughout and natural-sort for display.
-                sectors = [_parse_segment_label(s) for s in result.mission]
-                unique_sectors = sorted(set(sectors), key=_natural_segment_sort_key)
-                if sector_flag == "all_sector":
-                    # case: sector='all'
-                    # `sectors` mirrors `result.mission` (one row per exposure
-                    # time / flux column), so it has duplicates and is in search
-                    # order. Log the deduped+sorted view for human readability.
-                    _w_p = _segment_word(mission, plural=True)
-                    logger.info(
-                        f"Using {pipeline.upper()} pipeline in {len(unique_sectors)} {_w_p}: {unique_sectors}"
+        # search only requested data
+        result = lk.search_lightcurve(query_name, author=pipeline, exptime=exptime, mission=mission)
+        if result:
+            # K2 campaigns 11a/11b cannot cast to int. Keep labels as
+            # strings throughout and natural-sort for display.
+            sectors = [_parse_segment_label(s) for s in result.mission]
+            unique_sectors = sorted(set(sectors), key=_natural_segment_sort_key)
+            if sector_flag == "all_sector":
+                # case: sector='all'
+                # `sectors` mirrors `result.mission` (one row per exposure
+                # time / flux column), so it has duplicates and is in search
+                # order. Log the deduped+sorted view for human readability.
+                _w_p = _segment_word(mission, plural=True)
+                logger.info(
+                    f"Using {pipeline.upper()} pipeline in {len(unique_sectors)} {_w_p}: {unique_sectors}"
+                )
+                unique_exptimes = result.table.to_pandas().exptime.unique()
+                if len(unique_exptimes) > 1:
+                    result, exptime = _handle_multiple_exptimes(
+                        result,
+                        unique_exptimes,
+                        logger,
+                        context=f"all {_w_p}",
+                        expected_n=len(unique_sectors),
                     )
-                    unique_exptimes = result.table.to_pandas().exptime.unique()
-                    if len(unique_exptimes) > 1:
-                        result, exptime = _handle_multiple_exptimes(
-                            result,
-                            unique_exptimes,
-                            logger,
-                            context=f"all {_w_p}",
-                            expected_n=len(unique_sectors),
-                        )
+                exptime = unique_exptimes[0] if exptime is None else exptime
+                lc = _safe_stitch(
+                    result.download_all(flux_column=lc_type, quality_bitmask=quality_bitmask),
+                    logger=logger,
+                )
+                if lc is None:
+                    logger.error("No usable segments downloaded.")
+                    sys.exit()
+                logger.info(
+                    "The lightcurves were not flattened/de-trended to avoid removing transits."
+                )
+                # Header sanity check: only meaningful when a single segment
+                # was downloaded. After stitching multiple segments the
+                # collapsed lc.{sector,campaign,quarter} can't sensibly equal
+                # any one of them (and for K2 11a/11b the alpha suffix would
+                # never match the int the LightCurve carries).
+                _seg = (
+                    getattr(lc, "sector", None)
+                    or getattr(lc, "campaign", None)
+                    or getattr(lc, "quarter", None)
+                )
+                if _seg is not None and len(unique_sectors) == 1:
+                    assert _segments_match(_seg, unique_sectors[-1])
+                if pipeline == "spoc":
+                    _lc1_for_meta = result.download_all(
+                        quality_bitmask=quality_bitmask, flux_column="pdcsap_flux"
+                    )
+                    lc1 = _safe_stitch(_lc1_for_meta, logger=logger)
+                    lc2 = _safe_stitch(
+                        result.download_all(
+                            quality_bitmask=quality_bitmask, flux_column="sap_flux"
+                        ),
+                        logger=logger,
+                    )
+            elif sector_flag == "multi_sector":
+                # case: sector int or list
+                _w = _segment_word(mission)
+                _w_p = _segment_word(mission, plural=True)
+                idx = [any(_segments_match(i, s) for s in sector) for i in sectors]
+                msg = f"{pipeline.upper()} lightcurves for {_w}={sector} is not available. Try {_w}={unique_sectors}."
+                assert sum(idx) > 0, logger.error(msg)
+
+                filtered_result = result[idx]
+                unique_exptimes = filtered_result.table.to_pandas().exptime.unique()
+                msg = f"Using {pipeline.upper()} pipeline in {len(sector)} {_w_p}: {sector} (exptime={unique_exptimes} sec).\n"
+                if sector_flag != "all_sector":
+                    msg += f"Otherwise use {_w}=({unique_sectors}, all))."
+                logger.info(msg)
+                if len(sector) > len(filtered_result):
+                    msg = f"Not all {_w}={sector} have exptime={exptime} sec.\n"
+                    msg = f"Try to limit the {_w_p}.\n"
+                    logger.error(msg)
+                    sys.exit()
+                elif len(sector) < len(filtered_result):
+                    filtered_result, exptime = _handle_multiple_exptimes(
+                        filtered_result,
+                        unique_exptimes,
+                        logger,
+                        context=f"the given {_w_p}",
+                        expected_n=len(sector),
+                    )
+                assert len(sector) == len(filtered_result)
+                if len(sector) == 1 and _h5_lightcurve_matches_segment(
+                    h5_lightcurve, sector[0], pipeline, logger=logger
+                ):
+                    logger.info(
+                        f"Reusing the light curve embedded in {args.h5} for "
+                        f"{_w}={sector[0]} instead of re-downloading."
+                    )
+                    lc = _lightcurve_from_h5(h5_lightcurve).normalize()
+                    exptime = (
+                        h5_lightcurve["exptime"]
+                        if h5_lightcurve["exptime"] is not None
+                        else exptime
+                    )
+                    used_h5_lc = True
+                else:
                     exptime = unique_exptimes[0] if exptime is None else exptime
                     lc = _safe_stitch(
-                        result.download_all(flux_column=lc_type, quality_bitmask=quality_bitmask),
+                        filtered_result.download_all(
+                            quality_bitmask=quality_bitmask, flux_column=lc_type
+                        ),
                         logger=logger,
                     )
                     if lc is None:
@@ -2295,305 +2199,222 @@ fig = allesfitter.show_initial_guess(dir_path)
                     logger.info(
                         "The lightcurves were not flattened/de-trended to avoid removing transits."
                     )
-                    # Header sanity check: only meaningful when a single segment
-                    # was downloaded. After stitching multiple segments the
-                    # collapsed lc.{sector,campaign,quarter} can't sensibly equal
-                    # any one of them (and for K2 11a/11b the alpha suffix would
-                    # never match the int the LightCurve carries).
+                    _w = _segment_word(mission)
                     _seg = (
                         getattr(lc, "sector", None)
                         or getattr(lc, "campaign", None)
                         or getattr(lc, "quarter", None)
                     )
-                    if _seg is not None and len(unique_sectors) == 1:
-                        assert _segments_match(_seg, unique_sectors[-1])
+                    msg = f"{_w}={_seg} in header not in requested {_w}={sector}"
+                    # Skip the header check when multiple segments were stitched —
+                    # the collapsed attribute can't represent more than one.
+                    if _seg is not None and len(sector) == 1:
+                        assert any(_segments_match(_seg, s) for s in sector), logger.error(msg)
                     if pipeline == "spoc":
-                        _lc1_for_meta = result.download_all(
+                        _lc1_for_meta = filtered_result.download_all(
                             quality_bitmask=quality_bitmask, flux_column="pdcsap_flux"
                         )
                         lc1 = _safe_stitch(_lc1_for_meta, logger=logger)
                         lc2 = _safe_stitch(
-                            result.download_all(
-                                quality_bitmask=quality_bitmask, flux_column="sap_flux"
-                            ),
-                            logger=logger,
-                        )
-                elif sector_flag == "multi_sector":
-                    # case: sector int or list
-                    _w = _segment_word(mission)
-                    _w_p = _segment_word(mission, plural=True)
-                    idx = [any(_segments_match(i, s) for s in sector) for i in sectors]
-                    msg = f"{pipeline.upper()} lightcurves for {_w}={sector} is not available. Try {_w}={unique_sectors}."
-                    assert sum(idx) > 0, logger.error(msg)
-
-                    filtered_result = result[idx]
-                    unique_exptimes = filtered_result.table.to_pandas().exptime.unique()
-                    msg = f"Using {pipeline.upper()} pipeline in {len(sector)} {_w_p}: {sector} (exptime={unique_exptimes} sec).\n"
-                    if sector_flag != "all_sector":
-                        msg += f"Otherwise use {_w}=({unique_sectors}, all))."
-                    logger.info(msg)
-                    if len(sector) > len(filtered_result):
-                        msg = f"Not all {_w}={sector} have exptime={exptime} sec.\n"
-                        msg = f"Try to limit the {_w_p}.\n"
-                        logger.error(msg)
-                        sys.exit()
-                    elif len(sector) < len(filtered_result):
-                        filtered_result, exptime = _handle_multiple_exptimes(
-                            filtered_result,
-                            unique_exptimes,
-                            logger,
-                            context=f"the given {_w_p}",
-                            expected_n=len(sector),
-                        )
-                    assert len(sector) == len(filtered_result)
-                    if len(sector) == 1 and _h5_lightcurve_matches_segment(
-                        h5_lightcurve, sector[0], pipeline, logger=logger
-                    ):
-                        logger.info(
-                            f"Reusing the light curve embedded in {args.h5} for "
-                            f"{_w}={sector[0]} instead of re-downloading."
-                        )
-                        lc = _lightcurve_from_h5(h5_lightcurve).normalize()
-                        exptime = (
-                            h5_lightcurve["exptime"]
-                            if h5_lightcurve["exptime"] is not None
-                            else exptime
-                        )
-                        used_h5_lc = True
-                    else:
-                        exptime = unique_exptimes[0] if exptime is None else exptime
-                        lc = _safe_stitch(
                             filtered_result.download_all(
-                                quality_bitmask=quality_bitmask, flux_column=lc_type
+                                quality_bitmask=quality_bitmask, flux_column="sap_flux"
                             ),
                             logger=logger,
                         )
-                        if lc is None:
-                            logger.error("No usable segments downloaded.")
-                            sys.exit()
-                        logger.info(
-                            "The lightcurves were not flattened/de-trended to avoid removing transits."
-                        )
-                        _w = _segment_word(mission)
-                        _seg = (
-                            getattr(lc, "sector", None)
-                            or getattr(lc, "campaign", None)
-                            or getattr(lc, "quarter", None)
-                        )
-                        msg = f"{_w}={_seg} in header not in requested {_w}={sector}"
-                        # Skip the header check when multiple segments were stitched —
-                        # the collapsed attribute can't represent more than one.
-                        if _seg is not None and len(sector) == 1:
-                            assert any(_segments_match(_seg, s) for s in sector), logger.error(msg)
-                        if pipeline == "spoc":
-                            _lc1_for_meta = filtered_result.download_all(
-                                quality_bitmask=quality_bitmask, flux_column="pdcsap_flux"
-                            )
-                            lc1 = _safe_stitch(_lc1_for_meta, logger=logger)
-                            lc2 = _safe_stitch(
-                                filtered_result.download_all(
-                                    quality_bitmask=quality_bitmask, flux_column="sap_flux"
-                                ),
-                                logger=logger,
-                            )
-                else:
-                    if sector_flag == "first":
-                        idx = 0
-                        sector = sectors[idx]
-                    elif sector_flag == "last" or sector_flag == "default":
-                        idx = -1
-                        sector = sectors[idx]
+            else:
+                if sector_flag == "first":
+                    idx = 0
+                    sector = sectors[idx]
+                elif sector_flag == "last" or sector_flag == "default":
+                    idx = -1
+                    sector = sectors[idx]
 
-                    if _h5_lightcurve_matches_segment(
-                        h5_lightcurve, sector, pipeline, logger=logger
-                    ):
-                        logger.info(
-                            f"Reusing the light curve embedded in {args.h5} for "
-                            f"{_segment_word(mission)}={sector} instead of re-downloading."
-                        )
-                        lc = _lightcurve_from_h5(h5_lightcurve).normalize()
-                        exptime = (
-                            h5_lightcurve["exptime"]
-                            if h5_lightcurve["exptime"] is not None
-                            else exptime
-                        )
-                        used_h5_lc = True
-                    else:
-                        filtered_result = result[idx]
-                        lc = filtered_result.download(
-                            quality_bitmask=quality_bitmask, flux_column=lc_type
+                if _h5_lightcurve_matches_segment(h5_lightcurve, sector, pipeline, logger=logger):
+                    logger.info(
+                        f"Reusing the light curve embedded in {args.h5} for "
+                        f"{_segment_word(mission)}={sector} instead of re-downloading."
+                    )
+                    lc = _lightcurve_from_h5(h5_lightcurve).normalize()
+                    exptime = (
+                        h5_lightcurve["exptime"]
+                        if h5_lightcurve["exptime"] is not None
+                        else exptime
+                    )
+                    used_h5_lc = True
+                else:
+                    filtered_result = result[idx]
+                    lc = filtered_result.download(
+                        quality_bitmask=quality_bitmask, flux_column=lc_type
+                    ).normalize()
+                    unique_exptimes = filtered_result.table.to_pandas().exptime.unique()
+                    # logger.info(f"Exp times: {unique_exptimes}")
+                    exptime = unique_exptimes[0] if exptime is None else exptime
+                    _seg = (
+                        getattr(lc, "sector", None)
+                        or getattr(lc, "campaign", None)
+                        or getattr(lc, "quarter", None)
+                    )
+                    if _seg is not None:
+                        assert _segments_match(_seg, sector)
+                    logger.info(
+                        f"Using {pipeline.upper()} pipeline in {_segment_word(mission)} {sector}."
+                    )
+                    if pipeline == "spoc":
+                        lc1 = filtered_result.download(
+                            quality_bitmask=quality_bitmask, flux_column="pdcsap_flux"
                         ).normalize()
-                        unique_exptimes = filtered_result.table.to_pandas().exptime.unique()
-                        # logger.info(f"Exp times: {unique_exptimes}")
-                        exptime = unique_exptimes[0] if exptime is None else exptime
-                        _seg = (
-                            getattr(lc, "sector", None)
-                            or getattr(lc, "campaign", None)
-                            or getattr(lc, "quarter", None)
-                        )
-                        if _seg is not None:
-                            assert _segments_match(_seg, sector)
-                        logger.info(
-                            f"Using {pipeline.upper()} pipeline in {_segment_word(mission)} {sector}."
-                        )
-                        if pipeline == "spoc":
-                            lc1 = filtered_result.download(
-                                quality_bitmask=quality_bitmask, flux_column="pdcsap_flux"
-                            ).normalize()
-                            _lc1_for_meta = lc1  # single LightCurve carries its own .meta
-                            lc2 = filtered_result.download(
-                                quality_bitmask=quality_bitmask, flux_column="sap_flux"
-                            ).normalize()
-                if sigma:
-                    nbefore = len(lc)
-                    lc = lc.remove_outliers(sigma=sigma)
-                    nafter = len(lc)
-                    if nbefore > nafter:
-                        diff = nbefore - nafter
-                        logger.info(f"Removed {diff} outliers using sigma={sigma}.")
-                    if pipeline == "spoc" and not used_h5_lc:
-                        lc1 = lc1.remove_outliers(sigma=sigma)
-                        lc2 = lc2.remove_outliers(sigma=sigma)
-                if sector_flag == "all_sector":
-                    secs = "s".join(map(str, unique_sectors))
+                        _lc1_for_meta = lc1  # single LightCurve carries its own .meta
+                        lc2 = filtered_result.download(
+                            quality_bitmask=quality_bitmask, flux_column="sap_flux"
+                        ).normalize()
+            if sigma:
+                nbefore = len(lc)
+                lc = lc.remove_outliers(sigma=sigma)
+                nafter = len(lc)
+                if nbefore > nafter:
+                    diff = nbefore - nafter
+                    logger.info(f"Removed {diff} outliers using sigma={sigma}.")
+                if pipeline == "spoc" and not used_h5_lc:
+                    lc1 = lc1.remove_outliers(sigma=sigma)
+                    lc2 = lc2.remove_outliers(sigma=sigma)
+            if sector_flag == "all_sector":
+                secs = "s".join(map(str, unique_sectors))
+            else:
+                if isinstance(sector, list):
+                    secs = "s".join(map(str, sector))
                 else:
-                    if isinstance(sector, list):
-                        secs = "s".join(map(str, sector))
-                    else:
-                        secs = str(sector)
-                if pipeline == "spoc" and not used_h5_lc and len(lc1) == len(lc2):
-                    fig, axs = plt.subplots(2, 1, figsize=(8, 6), sharex=True)
-                    _ = lc1.scatter(ax=axs[0], zorder=2, label="PDCSAP", c="C0")
-                    _ = lc2.scatter(ax=axs[0], zorder=1, label="SAP", c="C1")
-                    axs[0].set_title(
-                        f"{_segment_word(mission).capitalize()}={secs}\nexptime={int(exptime)}s"
-                    )
-                    (lc1 - lc2).scatter(ax=axs[1], label="difference", c="k")
-                    fp = outdir.joinpath(
-                        f"{target_name}_{mission}_{lc_type.split('_')[0]}_s{secs}_exp{int(exptime)}s"
-                    )
-                    fig.savefig(fp.with_suffix(".png"))
-                    # Record SPOC CROWDSAP -> allesfitter dilution next to the lightcurve
-                    # so users can fill in dil_<inst> in params.csv without guessing.
-                    contam_fp = outdir.joinpath(f"{fn}_spoc_contamination.txt")
-                    try:
-                        summary = _write_spoc_contamination(_lc1_for_meta, contam_fp, mission)
-                        if summary:
-                            logger.info(f"Saved: {contam_fp}")
-                            # Prepend a commented normal-prior dilution row above the
-                            # existing uniform row so users can opt into the
-                            # SPOC-informed prior without recomputing the value.
-                            params_fp = outdir.joinpath("params.csv")
-                            if _inject_dilution_normal_prior(
-                                params_fp,
-                                fn,
-                                median=summary["median_dilution"],
-                                std=summary["std_dilution"],
-                            ):
-                                logger.info(
-                                    f"params.csv: added commented SPOC normal-prior row for dil_{fn} "
-                                    f"(median={summary['median_dilution']:.4f}, "
-                                    f"n_segments={summary['n_segments']})"
-                                )
-                        else:
-                            logger.info(
-                                "CROWDSAP not present in SPOC header — skipping spoc_contamination.txt."
-                            )
-                    except Exception as _e:
-                        logger.warning(f"Could not write spoc_contamination.txt: {_e}")
-                else:
-                    if pipeline == "spoc" and used_h5_lc:
-                        logger.info(
-                            "Skipping SPOC PDCSAP/SAP contamination comparison and "
-                            "dilution row: the h5-sourced light curve has no FITS "
-                            "header (CROWDSAP) to derive it from."
-                        )
-                    ax = lc.scatter(label=pipeline)
-                    ax.set_title(
-                        f"{_segment_word(mission).capitalize()}={secs}\nexptime={int(exptime)}s"
-                    )
-                    fp = outdir.joinpath(
-                        f"{target_name}_{mission}_{pipeline}_s{secs}_exp{int(exptime)}s"
-                    )
-                    ax.figure.savefig(fp.with_suffix(".png"))
-                logger.info(f"Saved: {fp.with_suffix('.png')}")
-                df = lc.to_pandas()
-                msg = "Somehow, the lightcurve data is empty."
-                assert len(df) > 0, logger.error(msg)
-                df["time"] = df.index + bjd_offset
-                df = df.reset_index(drop=True).sort_values(by="time")
-                cols = ["time", "flux", "flux_err"]
-                msg = f"Somehow, `flux_err` is all NaN.\n{df[cols]}\n"
-                if len(df["flux_err"].dropna(axis="index")) == 0:
-                    df["flux_err"] = 1
-                    msg += "Setting flux error column = 1 (See allesfitter documentation)."
-                    logger.error(msg)
-                df2 = df[cols].dropna(axis="index")
-                msg = "Lightcurve is all NaN. No lightcurve downloaded."
-                assert len(df2) > 0, logger.error(msg)
-                df2[cols].to_csv(fp.with_suffix(".csv"), sep=",", header=False, index=False)
-                logger.info(f"Saved: {fp.with_suffix('.csv')}")
-                # Also save under the instrument label allesfitter expects
-                # (inst_phot in settings.csv). This is the file the fit and
-                # allesclass load at runtime.
-                inst_fp = outdir.joinpath(f"{fn}.csv")
-                df2[cols].to_csv(inst_fp, sep=",", header=False, index=False)
-                logger.info(f"Saved: {inst_fp}")
-
-                # Refine the GP / noise prior bounds for this instrument using
-                # the actual cadence, baseline, and per-cadence scatter of the
-                # downloaded lightcurve. Replaces the generic, hardcoded
-                # bounds with data-aware ones (see _dataset_aware_gp_bounds).
+                    secs = str(sector)
+            if pipeline == "spoc" and not used_h5_lc and len(lc1) == len(lc2):
+                fig, axs = plt.subplots(2, 1, figsize=(8, 6), sharex=True)
+                _ = lc1.scatter(ax=axs[0], zorder=2, label="PDCSAP", c="C0")
+                _ = lc2.scatter(ax=axs[0], zorder=1, label="SAP", c="C1")
+                axs[0].set_title(
+                    f"{_segment_word(mission).capitalize()}={secs}\nexptime={int(exptime)}s"
+                )
+                (lc1 - lc2).scatter(ax=axs[1], label="difference", c="k")
+                fp = outdir.joinpath(
+                    f"{target_name}_{mission}_{lc_type.split('_')[0]}_s{secs}_exp{int(exptime)}s"
+                )
+                fig.savefig(fp.with_suffix(".png"))
+                # Record SPOC CROWDSAP -> allesfitter dilution next to the lightcurve
+                # so users can fill in dil_<inst> in params.csv without guessing.
+                contam_fp = outdir.joinpath(f"{fn}_spoc_contamination.txt")
                 try:
-                    _tdur_d = _gp_protective_tdur_days(companion_tdur_hours)
-                    _gp = _dataset_aware_gp_bounds(
-                        df2["time"].to_numpy(),
-                        df2["flux"].to_numpy(),
-                        tdur_days=_tdur_d,
-                    )
-                    if _gp is not None:
-                        _update_params_gp_bounds(
-                            outdir.joinpath("params.csv"), fn, _gp, logger=logger
+                    summary = _write_spoc_contamination(_lc1_for_meta, contam_fp, mission)
+                    if summary:
+                        logger.info(f"Saved: {contam_fp}")
+                        # Prepend a commented normal-prior dilution row above the
+                        # existing uniform row so users can opt into the
+                        # SPOC-informed prior without recomputing the value.
+                        params_fp = outdir.joinpath("params.csv")
+                        if _inject_dilution_normal_prior(
+                            params_fp,
+                            fn,
+                            median=summary["median_dilution"],
+                            std=summary["std_dilution"],
+                        ):
+                            logger.info(
+                                f"params.csv: added commented SPOC normal-prior row for dil_{fn} "
+                                f"(median={summary['median_dilution']:.4f}, "
+                                f"n_segments={summary['n_segments']})"
+                            )
+                    else:
+                        logger.info(
+                            "CROWDSAP not present in SPOC header — skipping spoc_contamination.txt."
                         )
                 except Exception as _e:
-                    logger.warning(f"Could not refine GP priors for {fn}: {_e}")
-
-                logger.info(f"Ndata: {len(df):,}")
-                logger.info(df[cols].head())
-                if debug:
-                    logger.info(df.head())
-
-                # t_exp_{inst} in settings.csv is resolved from the exptime
-                # actually used for this instrument's download, not a single
-                # global value — necessary once pipelines have different
-                # cadences (e.g. SPOC 120 s + QLP 600 s).
-                t_exp_by_inst[fn] = exptime
-
-                # TTV rows are appended at the very end of main() once all
-                # config files and the {fn}.csv lightcurve are on disk — that
-                # lets us use allesclass(outdir).BASEMENT.data to pick up the
-                # same observed-transit counts the fit will compute.
+                    logger.warning(f"Could not write spoc_contamination.txt: {_e}")
             else:
-                msg = f"No lightcurve downloaded for pipeline={pipeline}. Check inputs."
+                if pipeline == "spoc" and used_h5_lc:
+                    logger.info(
+                        "Skipping SPOC PDCSAP/SAP contamination comparison and "
+                        "dilution row: the h5-sourced light curve has no FITS "
+                        "header (CROWDSAP) to derive it from."
+                    )
+                ax = lc.scatter(label=pipeline)
+                ax.set_title(
+                    f"{_segment_word(mission).capitalize()}={secs}\nexptime={int(exptime)}s"
+                )
+                fp = outdir.joinpath(
+                    f"{target_name}_{mission}_{pipeline}_s{secs}_exp{int(exptime)}s"
+                )
+                ax.figure.savefig(fp.with_suffix(".png"))
+            logger.info(f"Saved: {fp.with_suffix('.png')}")
+            df = lc.to_pandas()
+            msg = "Somehow, the lightcurve data is empty."
+            assert len(df) > 0, logger.error(msg)
+            df["time"] = df.index + bjd_offset
+            df = df.reset_index(drop=True).sort_values(by="time")
+            cols = ["time", "flux", "flux_err"]
+            msg = f"Somehow, `flux_err` is all NaN.\n{df[cols]}\n"
+            if len(df["flux_err"].dropna(axis="index")) == 0:
+                df["flux_err"] = 1
+                msg += "Setting flux error column = 1 (See allesfitter documentation)."
                 logger.error(msg)
-                sys.exit()
+            df2 = df[cols].dropna(axis="index")
+            msg = "Lightcurve is all NaN. No lightcurve downloaded."
+            assert len(df2) > 0, logger.error(msg)
+            df2[cols].to_csv(fp.with_suffix(".csv"), sep=",", header=False, index=False)
+            logger.info(f"Saved: {fp.with_suffix('.csv')}")
+            # Also save under the instrument label allesfitter expects
+            # (inst_phot in settings.csv). This is the file the fit and
+            # allesclass load at runtime.
+            inst_fp = outdir.joinpath(f"{fn}.csv")
+            df2[cols].to_csv(inst_fp, sep=",", header=False, index=False)
+            logger.info(f"Saved: {inst_fp}")
 
-        # =====Create settings.csv===== #
-        text2 = """#name,value
+            # Refine the GP / noise prior bounds for this instrument using
+            # the actual cadence, baseline, and per-cadence scatter of the
+            # downloaded lightcurve. Replaces the generic, hardcoded
+            # bounds with data-aware ones (see _dataset_aware_gp_bounds).
+            try:
+                _tdur_d = _gp_protective_tdur_days(companion_tdur_hours)
+                _gp = _dataset_aware_gp_bounds(
+                    df2["time"].to_numpy(),
+                    df2["flux"].to_numpy(),
+                    tdur_days=_tdur_d,
+                )
+                if _gp is not None:
+                    _update_params_gp_bounds(outdir.joinpath("params.csv"), fn, _gp, logger=logger)
+            except Exception as _e:
+                logger.warning(f"Could not refine GP priors for {fn}: {_e}")
+
+            logger.info(f"Ndata: {len(df):,}")
+            logger.info(df[cols].head())
+            if debug:
+                logger.info(df.head())
+
+            # t_exp_{inst} in settings.csv is resolved from the exptime
+            # actually used for this instrument's download, not a single
+            # global value — necessary once pipelines have different
+            # cadences (e.g. SPOC 120 s + QLP 600 s).
+            t_exp_by_inst[fn] = exptime
+
+            # TTV rows are appended at the very end of main() once all
+            # config files and the {fn}.csv lightcurve are on disk — that
+            # lets us use allesclass(outdir).BASEMENT.data to pick up the
+            # same observed-transit counts the fit will compute.
+        else:
+            msg = f"No lightcurve downloaded for pipeline={pipeline}. Check inputs."
+            logger.error(msg)
+            sys.exit()
+
+    # =====Create settings.csv===== #
+    text2 = """#name,value
 ###############################################################################,
 # General settings,
 ###############################################################################,\n"""
 
-        phot_companions = planets[: len(target_df)]
-        text2 += f"companions_phot,{' '.join(phot_companions)}"
-        # When --bandpass is provided, emit a real `bandpass,...` row so the
-        # parser activates chromatic mode (one rr per unique bandpass). When
-        # omitted, leave a commented stub so users can see where to add one.
-        if write_bandpass_line:
-            _bandpass_row = f"bandpass,{' '.join(bp_list)}"
-        else:
-            _bandpass_row = f"#bandpass,{' '.join(fns)}"
-        text2 += f"""
+    phot_companions = planets[: len(target_df)]
+    text2 += f"companions_phot,{' '.join(phot_companions)}"
+    # When --bandpass is provided, emit a real `bandpass,...` row so the
+    # parser activates chromatic mode (one rr per unique bandpass). When
+    # omitted, leave a commented stub so users can see where to add one.
+    if write_bandpass_line:
+        _bandpass_row = f"bandpass,{' '.join(bp_list)}"
+    else:
+        _bandpass_row = f"#bandpass,{' '.join(fns)}"
+    text2 += f"""
 companions_rv,
 inst_phot,{" ".join(fns)}
 inst_rv,
@@ -2613,11 +2434,11 @@ fast_fit_width,0.3333333333333333
 secondary_eclipse,False
 phase_curve,False
 shift_epoch,True\n"""
-        for i, _ in target_df.iterrows():
-            pl = planets[i]
-            text2 += f"inst_for_{pl}_epoch,all\n"
-            text2 += f"#inst_for_{pl}_epoch,{' '.join(fns)}\n"
-        text2 += """###############################################################################,
+    for i, _ in target_df.iterrows():
+        pl = planets[i]
+        text2 += f"inst_for_{pl}_epoch,all\n"
+        text2 += f"#inst_for_{pl}_epoch,{' '.join(fns)}\n"
+    text2 += """###############################################################################,
 # MCMC settings,
 ###############################################################################,
 mcmc_nwalkers,100
@@ -2637,41 +2458,41 @@ ns_tol,100
 # Limb darkening law per object and instrument,
 # if 'quad' two corresponding parameter called 'ldc_q1_inst' and 'ldc_q2_inst' have to be given in params.csv,
 ###############################################################################,\n"""
-        for inst in fns:
-            text2 += f"host_ld_law_{inst},quad\n"
-        text2 += """#####################################,
+    for inst in fns:
+        text2 += f"host_ld_law_{inst},quad\n"
+    text2 += """#####################################,
 # Exposure interpolation settings,
 #####################################,\n"""
-        # Resolve exposure time strictly from input: --exptime (in seconds)
-        # when supplied, else the value lightkurve reported for the selected
-        # data (also in seconds). Each downloaded instrument keeps its own
-        # resolved exptime (t_exp_by_inst) — necessary once pipelines have
-        # different cadences (e.g. SPOC 120 s + QLP 600 s). An instrument
-        # declared via --filename but not downloaded here (the single -p
-        # case, where only fns[0] is fetched) falls back to fns[0]'s
-        # exptime, matching pre-multi-pipeline behaviour. We never derive
-        # exptime from np.diff(time) — that conflates sampling cadence with
-        # actual exposure and corrupts ellc's exposure-time integration.
-        text2 += _exposure_interpolation_settings(fns, t_exp_by_inst)
-        text2 += """###############################################################################,
+    # Resolve exposure time strictly from input: --exptime (in seconds)
+    # when supplied, else the value lightkurve reported for the selected
+    # data (also in seconds). Each downloaded instrument keeps its own
+    # resolved exptime (t_exp_by_inst) — necessary once pipelines have
+    # different cadences (e.g. SPOC 120 s + QLP 600 s). An instrument
+    # declared via --filename but not downloaded here (the single -p
+    # case, where only fns[0] is fetched) falls back to fns[0]'s
+    # exptime, matching pre-multi-pipeline behaviour. We never derive
+    # exptime from np.diff(time) — that conflates sampling cadence with
+    # actual exposure and corrupts ellc's exposure-time integration.
+    text2 += _exposure_interpolation_settings(fns, t_exp_by_inst)
+    text2 += """###############################################################################,
 # Baseline settings per instrument: sample / hybrid,
 # if 'sample_offset' one corresponding parameter called 'baseline_offset_key_inst' has to be given in params.csv,
 # if 'sample_linear' two corresponding parameters called 'baseline_offset_key_inst' and 'baseline_slope_key_inst' have to be given in params.csv,
 # if 'sample_GP' two corresponding parameters called 'baseline_gp1_key_inst' and 'baseline_gp2_key_inst' have to be given in params.csv,
 ###############################################################################,\n"""
-        for inst in fns:
-            text2 += f"#baseline_flux_{inst},sample_offset\n"
-            text2 += f"#baseline_flux_{inst},sample_linear\n"
-            text2 += f"#baseline_flux_{inst},hybrid_spline\n"
-            text2 += f"#baseline_flux_{inst},hybrid_poly_2\n"
-            text2 += f"baseline_flux_{inst},sample_GP_Matern32\n"
-        text2 += """###############################################################################,
+    for inst in fns:
+        text2 += f"#baseline_flux_{inst},sample_offset\n"
+        text2 += f"#baseline_flux_{inst},sample_linear\n"
+        text2 += f"#baseline_flux_{inst},hybrid_spline\n"
+        text2 += f"#baseline_flux_{inst},hybrid_poly_2\n"
+        text2 += f"baseline_flux_{inst},sample_GP_Matern32\n"
+    text2 += """###############################################################################,
 # Error settings (overall scaling) per instrument: sample / hybrid,
 # if 'sample' one corresponding parameter called 'ln_err_key_inst' (photometry) or 'ln_jitter_key_inst' (RV) has to be given in params.csv,
 ###############################################################################,\n"""
-        for inst in fns:
-            text2 += f"error_flux_{inst},sample\n"
-        text2 += """###############################################################################,
+    for inst in fns:
+        text2 += f"error_flux_{inst},sample\n"
+    text2 += """###############################################################################,
 # Flares,
 # if N>0 4xN corresponding parameters has to be given in params.csv,
 # See https://github.com/MNGuenther/allesfitter/blob/master/paper/GJ_1243/allesfit_0/params.csv,
@@ -2681,13 +2502,13 @@ ns_tol,100
 # Number of spots per object and instrument,
 # if N>0 3xN corresponding parameters has to be given in params.csv,
 ###############################################################################,\n"""
-        for inst in fns:
-            text2 += f"#host_N_spots_{inst},0\n"
-        text2 += """###############################################################################,
+    for inst in fns:
+        text2 += f"#host_N_spots_{inst},0\n"
+    text2 += """###############################################################################,
 # Host density prior,
 ###############################################################################,\n"""
-        text2 += f"use_host_density_prior,{rhostar_prior}"
-        text2 += """
+    text2 += f"use_host_density_prior,{rhostar_prior}"
+    text2 += """
 ###############################################################################,
 # Stellar variability: sample_GP_SHO / _real / _complex / matern32,
 # if 'sample_GP_SHO' three corresponding parameters has to be given in params.csv,
@@ -2702,101 +2523,101 @@ fit_ttvs,False
 ###############################################################################,
 # Stellar grid per object and instrument,
 ###############################################################################,\n"""
+    for inst in fns:
+        text2 += f"host_grid_{inst},sparse\n"
+    for i, _ in target_df.iterrows():
+        pl = planets[i]
         for inst in fns:
-            text2 += f"host_grid_{inst},sparse\n"
-        for i, _ in target_df.iterrows():
-            pl = planets[i]
-            for inst in fns:
-                text2 += f"#{pl}_grid_{inst},sparse\n"
-                text2 += f"#{pl}_shape_{inst},sphere\n"
-                text2 += f"#{pl}_flux_weighted_{inst},False\n"
+            text2 += f"#{pl}_grid_{inst},sparse\n"
+            text2 += f"#{pl}_shape_{inst},sphere\n"
+            text2 += f"#{pl}_flux_weighted_{inst},False\n"
 
-        if debug:
-            logger.info(text2)
+    if debug:
+        logger.info(text2)
 
-        fp = outdir.joinpath("settings.csv")
-        np.savetxt(fp, [text2], fmt="%s")
-        logger.info(f"Saved: {fp}")
+    fp = outdir.joinpath("settings.csv")
+    np.savetxt(fp, [text2], fmt="%s")
+    logger.info(f"Saved: {fp}")
 
-        # ===== Append TTV rows to params.csv using allesclass ===== #
-        # allesclass loads params.csv + settings.csv + {inst}.csv and,
-        # during BASEMENT init, may populate
-        #   BASEMENT.data[f'{c}_tmid_observed_transits']
-        # for every companion in companions_phot. That list holds exactly
-        # the transits the fit will see, so len(...) is the right count
-        # for {c}_ttv_transit_N (N indexes the N-th observed transit).
-        # If the cache is missing for a companion, replicate what
-        # afplot_per_transit does in allesfitter/general_output.py
-        # (lines ~887-892): build times_combined across inst_phot and
-        # call get_tmid_observed_transits with a window of fast_fit_width
-        # (= T_tra_tot equivalent in days).
-        if ttv:
-            try:
-                alles = allesclass(str(outdir))
-                _settings = alles.BASEMENT.settings
-                _params = alles.BASEMENT.params
-                _data = alles.BASEMENT.data
-                _fast_fit_width = float(_settings.get("fast_fit_width", 0.3333333333333333))
-                ttv_text = ""
-                for _c in _settings.get("companions_phot", []):
-                    _key = f"{_c}_tmid_observed_transits"
-                    _tmids = _data.get(_key)
-                    if _tmids is None or len(_tmids) == 0:
-                        # Fallback: compute on the fly, mirroring
-                        # afplot_per_transit in general_output.py.
-                        _times = []
-                        for _inst in _settings.get("inst_phot", []):
-                            _times += list(_data[_inst]["time"])
-                        _times = np.sort(np.asarray(_times, dtype=float))
-                        _epoch = float(_params[f"{_c}_epoch"])
-                        _period = float(_params[f"{_c}_period"])
-                        _T_tra_tot = _fast_fit_width  # days
-                        _tmids = get_tmid_observed_transits(
-                            _times,
-                            _epoch,
-                            _period,
-                            _T_tra_tot,
-                        )
-                        logger.info(
-                            f"TTV: {_c} cache miss; recomputed via "
-                            f"get_tmid_observed_transits (width={_T_tra_tot:.4f} d)"
-                        )
-                    _n_obs = len(_tmids)
-                    logger.info(f"TTV: {_c} has {_n_obs} transits with data")
-                    if _n_obs == 0:
-                        continue
-                    ttv_text += f"#TTV companion {_c},,,,,\n"
-                    for _j in range(_n_obs):
-                        # ±0.05 d = ±72 min — matches the comment-out
-                        # default and the early-TTV emission block.
-                        ttv_text += (
-                            f"{_c}_ttv_transit_{_j + 1},0,1,uniform -0.05 0.05,"
-                            f"TTV$_\\mathrm{{ttv;{_j + 1}}}$,d,\n"
-                        )
-                if ttv_text:
-                    params_fp = outdir.joinpath("params.csv")
-                    with open(params_fp, "a") as _f:
-                        _f.write(ttv_text)
-                    logger.info(f"Appended TTV rows to {params_fp}")
-                else:
-                    logger.error(
-                        "TTV: no companion had observed transits; nothing appended to params.csv"
-                    )
-            except Exception as e:
-                logger.error(f"TTV append via allesclass failed: {e}")
-
-        # ===== Prior-bound sanity checks =====
-        # Surface obvious problems with GP/noise priors (e.g. GP amplitude
-        # large enough to swallow the transit, GP timescale longer than the
-        # observation baseline) before the user kicks off a multi-hour fit.
+    # ===== Append TTV rows to params.csv using allesclass ===== #
+    # allesclass loads params.csv + settings.csv + {inst}.csv and,
+    # during BASEMENT init, may populate
+    #   BASEMENT.data[f'{c}_tmid_observed_transits']
+    # for every companion in companions_phot. That list holds exactly
+    # the transits the fit will see, so len(...) is the right count
+    # for {c}_ttv_transit_N (N indexes the N-th observed transit).
+    # If the cache is missing for a companion, replicate what
+    # afplot_per_transit does in allesfitter/general_output.py
+    # (lines ~887-892): build times_combined across inst_phot and
+    # call get_tmid_observed_transits with a window of fast_fit_width
+    # (= T_tra_tot equivalent in days).
+    if ttv:
         try:
-            from allesfitter.validation import validate_gp_priors
-
-            warnings = validate_gp_priors(outdir, log=logger.warning)
-            if not warnings:
-                logger.info("Prior sanity: GP / noise bounds look reasonable.")
+            alles = allesclass(str(outdir))
+            _settings = alles.BASEMENT.settings
+            _params = alles.BASEMENT.params
+            _data = alles.BASEMENT.data
+            _fast_fit_width = float(_settings.get("fast_fit_width", 0.3333333333333333))
+            ttv_text = ""
+            for _c in _settings.get("companions_phot", []):
+                _key = f"{_c}_tmid_observed_transits"
+                _tmids = _data.get(_key)
+                if _tmids is None or len(_tmids) == 0:
+                    # Fallback: compute on the fly, mirroring
+                    # afplot_per_transit in general_output.py.
+                    _times = []
+                    for _inst in _settings.get("inst_phot", []):
+                        _times += list(_data[_inst]["time"])
+                    _times = np.sort(np.asarray(_times, dtype=float))
+                    _epoch = float(_params[f"{_c}_epoch"])
+                    _period = float(_params[f"{_c}_period"])
+                    _T_tra_tot = _fast_fit_width  # days
+                    _tmids = get_tmid_observed_transits(
+                        _times,
+                        _epoch,
+                        _period,
+                        _T_tra_tot,
+                    )
+                    logger.info(
+                        f"TTV: {_c} cache miss; recomputed via "
+                        f"get_tmid_observed_transits (width={_T_tra_tot:.4f} d)"
+                    )
+                _n_obs = len(_tmids)
+                logger.info(f"TTV: {_c} has {_n_obs} transits with data")
+                if _n_obs == 0:
+                    continue
+                ttv_text += f"#TTV companion {_c},,,,,\n"
+                for _j in range(_n_obs):
+                    # ±0.05 d = ±72 min — matches the comment-out
+                    # default and the early-TTV emission block.
+                    ttv_text += (
+                        f"{_c}_ttv_transit_{_j + 1},0,1,uniform -0.05 0.05,"
+                        f"TTV$_\\mathrm{{ttv;{_j + 1}}}$,d,\n"
+                    )
+            if ttv_text:
+                params_fp = outdir.joinpath("params.csv")
+                with open(params_fp, "a") as _f:
+                    _f.write(ttv_text)
+                logger.info(f"Appended TTV rows to {params_fp}")
+            else:
+                logger.error(
+                    "TTV: no companion had observed transits; nothing appended to params.csv"
+                )
         except Exception as e:
-            logger.warning(f"Prior sanity check skipped: {e}")
+            logger.error(f"TTV append via allesclass failed: {e}")
+
+    # ===== Prior-bound sanity checks =====
+    # Surface obvious problems with GP/noise priors (e.g. GP amplitude
+    # large enough to swallow the transit, GP timescale longer than the
+    # observation baseline) before the user kicks off a multi-hour fit.
+    try:
+        from allesfitter.validation import validate_gp_priors
+
+        warnings = validate_gp_priors(outdir, log=logger.warning)
+        if not warnings:
+            logger.info("Prior sanity: GP / noise bounds look reasonable.")
+    except Exception as e:
+        logger.warning(f"Prior sanity check skipped: {e}")
 
 
 if __name__ == "__main__":
