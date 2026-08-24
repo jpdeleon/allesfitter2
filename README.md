@@ -170,7 +170,7 @@ command.
 | `prepare` | Download TESS/Kepler/K2 data and prepare configuration files |
 | `grid <grid-dir>` | Run models from a `grid.csv` manifest |
 | `show-initial-guess <dir>` | Plot data with the current `params.csv` values |
-| `optimize <dir>` | Globally optimize parameters to warm-start inference |
+| `optimize <dir>` | Globally optimize parameters to warm-start inference; when the result is accepted, `show-initial-guess` runs automatically so the plots reflect the optimized `params.csv` values |
 | `mcmc-fit <dir>` | Run or resume emcee MCMC sampling |
 | `mcmc-output <dir>` | Generate MCMC posteriors, plots, and summaries |
 | `ns-fit <dir>` | Run nested sampling |

@@ -276,9 +276,10 @@ def optimize(
     quiet: bool = typer.Option(False, "--quiet", "-q"),
 ):
     """Global optimization to warm-start MCMC / nested sampling."""
+    from allesfitter.general_output import show_initial_guess as _show
     from allesfitter.optimize import optimize as _optimize
 
-    _optimize(
+    result = _optimize(
         dir_path,
         method=method,
         refine=not no_refine,
@@ -288,6 +289,11 @@ def optimize(
         maxfevals=maxfevals,
         quiet=quiet,
     )
+
+    if getattr(result, "accepted", False):
+        if not quiet:
+            typer.echo("Optimization accepted; refreshing initial-guess plots.")
+        _show(dir_path, quiet=quiet)
 
 
 @app.command()

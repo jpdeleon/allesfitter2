@@ -133,6 +133,55 @@ def test_optimize_forwards_workers_and_maxfevals_overrides(monkeypatch, tmp_path
     assert received["maxfevals"] == 200
 
 
+def test_optimize_refreshes_initial_guess_plots_when_accepted(monkeypatch, tmp_path):
+    class FakeResult:
+        accepted = True
+
+    def fake_optimize(dir_path, **kwargs):
+        return FakeResult()
+
+    show_calls = []
+
+    optimize_submodule = importlib.import_module("allesfitter.optimize")
+    monkeypatch.setattr(optimize_submodule, "optimize", fake_optimize)
+    general_output_submodule = importlib.import_module("allesfitter.general_output")
+    monkeypatch.setattr(
+        general_output_submodule,
+        "show_initial_guess",
+        lambda datadir, **kwargs: show_calls.append((datadir, kwargs)),
+    )
+
+    result = CliRunner().invoke(app, ["optimize", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    assert len(show_calls) == 1
+    assert show_calls[0][0] == str(tmp_path)
+
+
+def test_optimize_skips_show_initial_guess_when_rejected(monkeypatch, tmp_path):
+    class FakeResult:
+        accepted = False
+
+    def fake_optimize(dir_path, **kwargs):
+        return FakeResult()
+
+    show_calls = []
+
+    optimize_submodule = importlib.import_module("allesfitter.optimize")
+    monkeypatch.setattr(optimize_submodule, "optimize", fake_optimize)
+    general_output_submodule = importlib.import_module("allesfitter.general_output")
+    monkeypatch.setattr(
+        general_output_submodule,
+        "show_initial_guess",
+        lambda datadir, **kwargs: show_calls.append((datadir, kwargs)),
+    )
+
+    result = CliRunner().invoke(app, ["optimize", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    assert show_calls == []
+
+
 def test_transit_search_forwards_arguments(monkeypatch, tmp_path):
     received = {}
     blind_search_submodule = importlib.import_module("allesfitter.detection.blind_search")
