@@ -14,6 +14,8 @@ results there instead of scattering them across the filesystem.
 
 from __future__ import annotations
 
+import csv
+import math
 import os
 from pathlib import Path
 
@@ -86,3 +88,115 @@ def use_results_directory(basement, sampler, *, for_write=False):
     """Select and return ``basement.outdir`` for a sampler."""
     basement.outdir = results_directory(basement.datadir, sampler, for_write=for_write)
     return basement.outdir
+
+
+def find_result_file(root: Path, sampler: str, filename: str) -> Path | None:
+    """Locate ``filename`` under the per-target output ``root``.
+
+    Checks the modern ``<sampler>_results`` directory first, then the
+    legacy ``results`` directory used by pre-refactor allesfitter runs.
+    """
+    try:
+        dirname = RESULTS_DIR_NAMES[sampler]
+    except KeyError as exc:
+        choices = ", ".join(sorted(RESULTS_DIR_NAMES))
+        raise ValueError(f"sampler must be one of: {choices}") from exc
+
+    for directory in (root / dirname, root / "results"):
+        candidate = directory / filename
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def find_result_table(root: Path, sampler: str) -> Path | None:
+    """Locate ``<sampler>_table.csv`` under the per-target output ``root``."""
+    return find_result_file(root, sampler, f"{sampler}_table.csv")
+
+
+def read_result_rows(path: Path, first_column: str) -> list[dict[str, str]]:
+    """Read an allesfitter result CSV whose header is prefixed with ``#``."""
+    header: list[str] | None = None
+    rows: list[dict[str, str]] = []
+    with path.open(newline="", encoding="utf-8") as handle:
+        for fields in csv.reader(handle):
+            if not fields or not any(field.strip() for field in fields):
+                continue
+            first = fields[0].strip()
+            if first.startswith("#"):
+                candidate = first.lstrip("# ").strip()
+                if candidate == first_column:
+                    fields[0] = candidate
+                    header = [field.strip() for field in fields]
+                continue
+            if header is None:
+                continue
+            values = [field.strip() for field in fields]
+            # Historical tables were written without CSV quoting. Rebuild the
+            # two known schemas explicitly so commas inside LaTeX labels do
+            # not shift numeric fields into the wrong columns.
+            if first_column == "name" and len(values) >= 6:
+                rows.append(
+                    {
+                        "name": values[0],
+                        "median": values[1],
+                        "lower_error": values[2],
+                        "upper_error": values[3],
+                        "label": ",".join(values[4:-1]),
+                        "unit": values[-1],
+                    }
+                )
+            elif first_column == "property" and len(values) >= 5:
+                rows.append(
+                    {
+                        "property": ",".join(values[:-4]),
+                        "value": values[-4],
+                        "lower_error": values[-3],
+                        "upper_error": values[-2],
+                        "source": values[-1],
+                    }
+                )
+            else:
+                rows.append(dict(zip(header, values)))
+    return rows
+
+
+def as_finite_float(value: str) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def format_result_values(
+    value: str, lower_error: str, upper_error: str
+) -> tuple[str, str, str, bool]:
+    """Format a posterior triplet with precision set by its uncertainty."""
+    median = as_finite_float(value)
+    lower = as_finite_float(lower_error)
+    upper = as_finite_float(upper_error)
+    fixed = lower is None or upper is None
+    if fixed:
+        formatted = f"{median:.12g}" if median is not None else value
+        return formatted, "—", "—", True
+
+    positive_errors = [abs(error) for error in (lower, upper) if error != 0]
+    if not positive_errors:
+        formatted = f"{median:.12g}" if median is not None else value
+        return formatted, "−0", "+0", False
+    else:
+        exponent = math.floor(math.log10(min(positive_errors)))
+        decimals = max(0, 1 - exponent)  # two significant digits in the errors
+
+    use_scientific = decimals > 10 or (median is not None and median != 0 and abs(median) < 1e-5)
+    if use_scientific:
+        formatted_value = f"{median:.6e}" if median is not None else value
+        formatted_lower = f"−{abs(lower):.2e}"
+        formatted_upper = f"+{abs(upper):.2e}"
+    else:
+        decimals = min(decimals, 10)
+        formatted_value = f"{median:.{decimals}f}" if median is not None else value
+        formatted_lower = f"−{abs(lower):.{decimals}f}"
+        formatted_upper = f"+{abs(upper):.{decimals}f}"
+    return formatted_value, formatted_lower, formatted_upper, False

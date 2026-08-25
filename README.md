@@ -178,6 +178,7 @@ command.
 | `show-settings <dir>` | Display `settings.csv` as grouped Rich tables |
 | `show-params <dir>` | Display fitted and fixed parameters from `params.csv` |
 | `show-results <dir>` | Display available MCMC/NS posterior and derived-result tables |
+| `compare <dir1> <dir2> ...` | Overplot NS posteriors from two or more fit directories (corner plot + side-by-side table + logZ) |
 | `transit-search <results-dir>` | Blind TLS search for un-modeled transits, after detrending with the best fit and masking known planets |
 | `update-params <results-dir>` | Regenerate `params2.csv` from a completed fit's posterior, as a warm-start prior for a follow-up fit |
 | `gui` | Run the target, job, configuration, and results workbench |
@@ -311,6 +312,36 @@ candidate close to the search's upper period bound can be leftover,
 un-flattened stellar variability rather than a real transit; the raw and
 flattened light-curve panels in each candidate's figure make that easy to
 check directly.
+
+### Comparing posteriors across fits (`compare`)
+
+```bash
+uv run allesfitter compare <dir1> <dir2> [<dir3> ...] [--label NAME]... [--param NAME]... [--out DIR]
+```
+
+Overplots nested-sampling posteriors from two or more fit directories —
+each must already have `save_ns.pickle.gz` and `ns_table.csv` from `ns-fit`
+/ `ns-output`. Typical use: does a model change (an extra free parameter,
+a different baseline kind, an added prior) actually move the posterior, and
+is it worth its added complexity?
+
+- `compare_corner<ext>`: one corner plot per fit parameter shared by every
+  directory, contours overlaid in different colors with a legend. Directory
+  order sets the default axis order and color; `--param` selects a subset.
+- `compare_table.csv`: median ± error side by side for every parameter name
+  that appears in any directory (including ones only present in a subset,
+  or fixed in all of them).
+- A log-evidence (ΔlogZ) comparison table, printed and derived the same way
+  as `nested_sampling_compare_logZ.compare_logz` — the standard way to judge
+  whether an extra free parameter is actually supported by the data, as
+  opposed to just checking whether its posterior excludes zero.
+
+`--label` supplies one name per directory (default: each directory's
+basename); `--out` sets the output directory (default:
+`./compare_<label1>_vs_<label2>[...]`). Reads only already-written output
+files, so directories with different `params.csv`/`settings.csv` (e.g. one
+fit with a free GP baseline offset the other doesn't have) compare safely
+side by side.
 
 ### Regenerating priors from a completed fit (`update-params`)
 

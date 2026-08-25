@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import csv
-import math
 import os
 import sys
 from pathlib import Path
@@ -721,104 +719,6 @@ def show_params(
     _console.print(f"[dim]{fitted} fitted, {fixed} fixed parameters[/]")
 
 
-def _find_result_table(root: Path, sampler: str) -> Path | None:
-    """Locate ``<sampler>_table.csv`` under the per-target output ``root``."""
-    filename = f"{sampler}_table.csv"
-    for directory in (root / f"{sampler}_results", root / "results"):
-        candidate = directory / filename
-        if candidate.is_file():
-            return candidate
-    return None
-
-
-def _read_result_rows(path: Path, first_column: str) -> list[dict[str, str]]:
-    """Read an allesfitter result CSV whose header is prefixed with ``#``."""
-    header: list[str] | None = None
-    rows: list[dict[str, str]] = []
-    with path.open(newline="", encoding="utf-8") as handle:
-        for fields in csv.reader(handle):
-            if not fields or not any(field.strip() for field in fields):
-                continue
-            first = fields[0].strip()
-            if first.startswith("#"):
-                candidate = first.lstrip("# ").strip()
-                if candidate == first_column:
-                    fields[0] = candidate
-                    header = [field.strip() for field in fields]
-                continue
-            if header is None:
-                continue
-            values = [field.strip() for field in fields]
-            # Historical tables were written without CSV quoting. Rebuild the
-            # two known schemas explicitly so commas inside LaTeX labels do
-            # not shift numeric fields into the wrong columns.
-            if first_column == "name" and len(values) >= 6:
-                rows.append(
-                    {
-                        "name": values[0],
-                        "median": values[1],
-                        "lower_error": values[2],
-                        "upper_error": values[3],
-                        "label": ",".join(values[4:-1]),
-                        "unit": values[-1],
-                    }
-                )
-            elif first_column == "property" and len(values) >= 5:
-                rows.append(
-                    {
-                        "property": ",".join(values[:-4]),
-                        "value": values[-4],
-                        "lower_error": values[-3],
-                        "upper_error": values[-2],
-                        "source": values[-1],
-                    }
-                )
-            else:
-                rows.append(dict(zip(header, values)))
-    return rows
-
-
-def _as_finite_float(value: str) -> float | None:
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return None
-    return number if math.isfinite(number) else None
-
-
-def _format_result_values(
-    value: str, lower_error: str, upper_error: str
-) -> tuple[str, str, str, bool]:
-    """Format a posterior triplet with precision set by its uncertainty."""
-    median = _as_finite_float(value)
-    lower = _as_finite_float(lower_error)
-    upper = _as_finite_float(upper_error)
-    fixed = lower is None or upper is None
-    if fixed:
-        formatted = f"{median:.12g}" if median is not None else value
-        return formatted, "—", "—", True
-
-    positive_errors = [abs(error) for error in (lower, upper) if error != 0]
-    if not positive_errors:
-        formatted = f"{median:.12g}" if median is not None else value
-        return formatted, "−0", "+0", False
-    else:
-        exponent = math.floor(math.log10(min(positive_errors)))
-        decimals = max(0, 1 - exponent)  # two significant digits in the errors
-
-    use_scientific = decimals > 10 or (median is not None and median != 0 and abs(median) < 1e-5)
-    if use_scientific:
-        formatted_value = f"{median:.6e}" if median is not None else value
-        formatted_lower = f"−{abs(lower):.2e}"
-        formatted_upper = f"+{abs(upper):.2e}"
-    else:
-        decimals = min(decimals, 10)
-        formatted_value = f"{median:.{decimals}f}" if median is not None else value
-        formatted_lower = f"−{abs(lower):.{decimals}f}"
-        formatted_upper = f"+{abs(upper):.{decimals}f}"
-    return formatted_value, formatted_lower, formatted_upper, False
-
-
 @app.command()
 def show_results(
     dir_path: str = typer.Argument(..., help="path to the data directory"),
@@ -828,7 +728,12 @@ def show_results(
     from rich.console import Console
     from rich.table import Table
 
-    from allesfitter.results import target_output_directory
+    from allesfitter.results import (
+        find_result_table,
+        format_result_values,
+        read_result_rows,
+        target_output_directory,
+    )
 
     console = Console()
     root = target_output_directory(dir_path)
@@ -838,11 +743,11 @@ def show_results(
         ("mcmc", "MCMC", "magenta"),
         ("ns", "Nested Sampling", "cyan"),
     ):
-        table_path = _find_result_table(root, sampler)
+        table_path = find_result_table(root, sampler)
         if table_path is None:
             continue
         discovered = True
-        rows = _read_result_rows(table_path, "name")
+        rows = read_result_rows(table_path, "name")
         relative_path = table_path.relative_to(root)
         table = Table(
             title=f"{label} Posterior Results",
@@ -862,7 +767,7 @@ def show_results(
 
         fixed_count = 0
         for row in rows:
-            value, lower, upper, fixed = _format_result_values(
+            value, lower, upper, fixed = format_result_values(
                 row.get("median", ""),
                 row.get("lower_error", ""),
                 row.get("upper_error", ""),
@@ -887,7 +792,7 @@ def show_results(
         derived_path = table_path.with_name(f"{sampler}_derived_table.csv")
         if not derived_path.is_file():
             continue
-        derived_rows = _read_result_rows(derived_path, "property")
+        derived_rows = read_result_rows(derived_path, "property")
         derived_table = Table(
             title=f"{label} Derived Results",
             caption=str(derived_path.relative_to(root)),
@@ -903,7 +808,7 @@ def show_results(
         derived_table.add_column("+ error", justify="right", style="green", no_wrap=True)
         derived_table.add_column("Source", style="dim", no_wrap=True)
         for row in derived_rows:
-            value, lower, upper, _ = _format_result_values(
+            value, lower, upper, _ = format_result_values(
                 row.get("value", ""),
                 row.get("lower_error", ""),
                 row.get("upper_error", ""),
@@ -925,6 +830,129 @@ def show_results(
             "[dim]Run `allesfitter mcmc-output <dir>` or `allesfitter ns-output <dir>` first.[/]"
         )
         raise typer.Exit(1)
+
+
+@app.command()
+def compare(
+    dirs: list[str] = typer.Argument(
+        ..., help="two or more allesfitter data directories, each already run through `ns-fit`"
+    ),
+    labels: list[str] | None = typer.Option(
+        None,
+        "--label",
+        "-l",
+        help="label per directory, in the same order as DIRS (default: directory basename); "
+        "repeat once per directory",
+    ),
+    params: list[str] | None = typer.Option(
+        None,
+        "--param",
+        "-p",
+        help="fit-parameter name to include (default: every fit parameter shared by all "
+        "directories); repeat to select several",
+    ),
+    out: str | None = typer.Option(
+        None,
+        "--out",
+        "-o",
+        help="output directory for compare_corner/compare_table.csv "
+        "(default: ./compare_<label1>_vs_<label2>[...])",
+    ),
+    file_extension: str = typer.Option(
+        ".pdf",
+        "--file-extension",
+        "-e",
+        help="corner-plot figure format: pdf, png, jpg, svg, or webp",
+    ),
+    max_samples: int = typer.Option(
+        5000, "--max-samples", help="per-directory posterior subsample cap for the corner plot"
+    ),
+):
+    """Overplot NS posteriors from multiple fit directories (corner plot + summary table)."""
+    from rich import box
+    from rich.console import Console
+    from rich.table import Table
+
+    from allesfitter.compare import CompareError
+    from allesfitter.compare import compare as _compare
+
+    if len(dirs) < 2:
+        typer.echo("Error: need at least 2 directories to compare.")
+        raise typer.Exit(1)
+
+    console = Console()
+    try:
+        result = _compare(
+            dirs,
+            labels=labels,
+            params=params,
+            out_dir=out,
+            file_extension=file_extension,
+            max_samples=max_samples,
+        )
+    except CompareError as exc:
+        console.print(f"[red]Error:[/] {exc}")
+        raise typer.Exit(1) from None
+
+    table = Table(
+        title="Shared Posterior Parameters",
+        caption=str(result.table_csv_path),
+        caption_style="dim",
+        box=box.ROUNDED,
+        title_justify="left",
+        header_style="bold cyan",
+        collapse_padding=True,
+    )
+    table.add_column("Parameter", style="cyan", no_wrap=True)
+    for label in result.labels:
+        table.add_column(f"{label}\nmedian", justify="right", style="bold white", no_wrap=True)
+        table.add_column(f"{label}\n− err", justify="right", style="yellow", no_wrap=True)
+        table.add_column(f"{label}\n+ err", justify="right", style="green", no_wrap=True)
+
+    from allesfitter.results import format_result_values
+
+    for name in result.shared_params:
+        row = [name]
+        for dir_result in result.results:
+            entry = dir_result.table_rows.get(name, {})
+            value, lower, upper, _fixed = format_result_values(
+                entry.get("median", ""), entry.get("lower_error", ""), entry.get("upper_error", "")
+            )
+            row += [value, lower, upper]
+        table.add_row(*row)
+    console.print(table)
+    console.print(f"[dim]{len(result.shared_params)} parameters shared by all directories[/]")
+    console.print()
+
+    for label, names in result.extra_params.items():
+        if names:
+            console.print(f"[dim]{label}: only in this fit — {', '.join(names)}[/]")
+    console.print()
+
+    logz_table = Table(
+        title="Log-Evidence",
+        box=box.SIMPLE_HEAVY,
+        title_justify="left",
+        header_style="bold magenta",
+        collapse_padding=True,
+    )
+    logz_table.add_column("Fit", style="cyan", no_wrap=True)
+    logz_table.add_column("logZ", justify="right", style="bold white", no_wrap=True)
+    logz_table.add_column("± err", justify="right", style="yellow", no_wrap=True)
+    logz_table.add_column(f"Δ vs {result.labels[0]}", justify="right", style="green", no_wrap=True)
+    logz_table.add_column("± err", justify="right", style="yellow", no_wrap=True)
+    for row in result.logz_rows:
+        logz_table.add_row(
+            row["label"],
+            f"{row['logz']:.3f}",
+            f"{row['logzerr']:.3f}",
+            f"{row['delta_logz']:+.3f}",
+            f"{row['delta_logzerr']:.3f}",
+        )
+    console.print(logz_table)
+    console.print()
+    console.print(f"[dim]Corner plot:[/] {result.corner_path}")
+    console.print(f"[dim]Summary table:[/] {result.table_csv_path}")
 
 
 def _run_script(script_name: str, argv: list[str]) -> None:
