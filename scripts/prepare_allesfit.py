@@ -149,6 +149,21 @@ def _segment_word(mission, plural=False):
     return base + ("s" if plural else "")
 
 
+def _resolve_instrument_filenames(filename_arg, mission):
+    """Resolve ``--filename`` into the list of instrument labels used for
+    saved lightcurve filenames (``<label>.csv``) and inst_phot naming.
+
+    When ``--filename`` isn't given, the label defaults to the ``--mission``
+    name (e.g. ``k2``) rather than always being ``tess`` — otherwise a K2/
+    Kepler run would still save its lightcurve as ``tess.csv``.
+    """
+    if filename_arg is None:
+        return [mission]
+    if isinstance(filename_arg, list):
+        return filename_arg
+    return [filename_arg]
+
+
 def _transit_requirement_settings(companions):
     """Return explicit per-companion transit-support settings rows."""
     return "".join(f"require_{companion}_transit,True\n" for companion in companions)
@@ -1176,11 +1191,12 @@ def main():
     ap.add_argument(
         "-f",
         "--filename",
-        help="filename(s) of lightcurve used as inst_phot (default='tess'). "
-        "Accepts multiple, e.g. -f kepler tess",
+        help="filename(s) of lightcurve used as inst_phot (default: the "
+        "--mission name, e.g. 'tess', 'k2', 'kepler'). Accepts multiple, "
+        "e.g. -f kepler tess",
         type=str,
         nargs="+",
-        default=["tess"],
+        default=None,
     )
     ap.add_argument(
         "-m",
@@ -1447,7 +1463,7 @@ def main():
     sigma = args.sigma
     interactive = args.interactive
     ttv = args.ttv
-    fns = args.filename if isinstance(args.filename, list) else [args.filename]
+    fns = _resolve_instrument_filenames(args.filename, mission)
     fn = fns[0]  # first instrument (used where a single filename is needed)
 
     # -p/-e each accept multiple values. A single -p (the default) keeps

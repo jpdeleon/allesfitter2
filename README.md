@@ -467,7 +467,7 @@ When `-f` has ≥2 distinct instruments and `-bp` is omitted, the script warns t
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `-f, --filename <NAME>` | Output filename prefix; accepts multiple instruments | `tess` |
+| `-f, --filename <NAME>` | Output filename prefix; accepts multiple instruments | `--mission` name (e.g. `k2`) |
 | `-dir <PATH>` | Base directory | current |
 | `-o, --overwrite` | Overwrite existing files | False |
 | `--lc-only` | Only download the light curve, skip config generation | False |

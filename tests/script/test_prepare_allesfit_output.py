@@ -117,6 +117,25 @@ def test_segment_word_per_mission_singular_and_plural():
     assert prep._segment_word(" groundbased") == "sector"
 
 
+def test_resolve_instrument_filenames_defaults_to_mission_name():
+    # No -f given: the saved lightcurve/instrument label must match the
+    # mission actually queried, not always fall back to 'tess'.
+    assert prep._resolve_instrument_filenames(None, "k2") == ["k2"]
+    assert prep._resolve_instrument_filenames(None, "kepler") == ["kepler"]
+    assert prep._resolve_instrument_filenames(None, "tess") == ["tess"]
+
+
+def test_resolve_instrument_filenames_respects_explicit_filename():
+    # An explicit -f overrides the mission-based default, whether it was
+    # parsed as a list (nargs='+') or, defensively, a bare string.
+    assert prep._resolve_instrument_filenames(["kepler"], "k2") == ["kepler"]
+    assert prep._resolve_instrument_filenames(["spoc120", "qlp600"], "tess") == [
+        "spoc120",
+        "qlp600",
+    ]
+    assert prep._resolve_instrument_filenames("custom", "tess") == ["custom"]
+
+
 def test_transit_requirement_settings_are_explicit_per_companion():
     assert prep._transit_requirement_settings(["b", "c"]) == (
         "require_b_transit,True\nrequire_c_transit,True\n"
