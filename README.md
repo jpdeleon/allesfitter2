@@ -463,6 +463,12 @@ comparison is skipped for a reused light curve (no FITS header to read
 
 When `-f` has ≥2 distinct instruments and `-bp` is omitted, the script warns that the run stays achromatic and prints the command to enable chromatic mode. See [Chromatic transit modeling](notes.md#chromatic-transit-modeling-per-band-rprs).
 
+### Stellar variability
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--stellar-var-gp-sho` (`--stellar_var_gp_sho`) | Model intrinsic stellar variability (rotation/pulsation) as a shared celerite SHO-kernel GP: sets `stellar_var_flux,sample_GP_SHO` in `settings.csv` and adds `stellar_var_gp_sho_{lnS0,lnQ,lnomega0}_flux` (`uniform -12 12`, matching allesfitter's own tutorial convention) to `params.csv`. Since a GP baseline can't coexist with a GP stellar-var model, every `baseline_flux_<inst>` is emitted as `hybrid_spline` instead of the default `sample_GP_Matern32` (kept commented for reference). | False |
+
 ### File management
 
 | Option | Description | Default |
