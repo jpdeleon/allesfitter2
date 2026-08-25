@@ -2104,15 +2104,6 @@ def main():
     # reference. When --ttv IS set, the real per-transit rows are
     # appended after the lightcurve download (below) because we need
     # the observed time series to count transits with data coverage.
-    if not ttv:
-        for i, _ in target_df.iterrows():
-            pl = planets[i]
-            text += f"#TTV companion {pl},,,,,\n"
-            # ±0.05 d = ±72 min; real TTV uncertainties for TESS-class
-            # transit S/N are of order minutes, so a narrower default
-            # is fine and converges faster.
-            for i in range(5):
-                text += f"#{pl}_ttv_transit_{i + 1},0,1,uniform -0.05 0.05,TTV$_\\mathrm{{ttv;{i + 1}}}$,d,\n"
     if debug:
         logger.info(text)
     fp = outdir.joinpath("params.csv")

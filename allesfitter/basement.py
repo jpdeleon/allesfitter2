@@ -47,7 +47,7 @@ from .exoworlds_rdx.lightcurves.index_transits import (
 from .priors.simulate_PDF import simulate_PDF
 from .utils.interactive import ask_choice
 from .utils.mcmc_move_translator import translate_str_to_move
-from .validation import validate_params_settings
+from .validation import ConfigError, validate_params_settings
 from .validation.physical_limits import eccentricity_error, lookup_limit
 
 sns.set(
@@ -983,11 +983,14 @@ class Basement:
             "error_flux_",
             "error_rv_",
             "error_rv2_",
-            "t_exp_",
             "t_exp_n_int_",
+            "t_exp_",
             "stellar_var_flux_",
             "stellar_var_rv_",
         )
+        # Match the most specific (longest) prefix first, so that e.g.
+        # ``t_exp_n_int_<inst>`` is not mis-parsed as ``t_exp_`` + ``n_int_<inst>``.
+        _per_inst_prefixes = tuple(sorted(_per_inst_prefixes, key=len, reverse=True))
         _known_insts = set(self.settings["inst_all"])
         _known_bands = unique_bandpasses
         #::: host_ld_law is keyed by BANDPASS, not instrument: it carries the
@@ -3536,6 +3539,38 @@ class Basement:
                 self.params[companion + "_period"],
                 window,
             )
+
+            #::: params.csv must carry exactly one `{companion}_ttv_transit_N` row
+            #::: per transit found above, since flux_fct_piecewise() (computer.py)
+            #::: indexes into that list by position. Those rows are written once,
+            #::: by prepare_ttv_fit / update_params --ttv, using whatever
+            #::: fast_fit_width / epoch / period were active at the time; if
+            #::: settings.csv or params.csv changes afterwards without
+            #::: regenerating them, this recomputation silently finds a different
+            #::: transit count and every model evaluation that reaches a
+            #::: now-missing (or now-extra) index fails with a bare KeyError deep
+            #::: inside ellc.lc(). Catch the mismatch here instead, with enough
+            #::: context to fix it.
+            n_observed = len(self.data[companion + "_tmid_observed_transits"])
+            ttv_prefix = companion + "_ttv_transit_"
+            n_ttv_rows = sum(
+                1
+                for key in self.allkeys
+                if key.startswith(ttv_prefix) and key[len(ttv_prefix) :].isdigit()
+            )
+            if n_ttv_rows and n_ttv_rows != n_observed:
+                raise ConfigError(
+                    f"fit_ttvs=True: params.csv has {n_ttv_rows} '{ttv_prefix}N' rows "
+                    f"for companion '{companion}', but recomputing observed transits "
+                    f"from the current data with fast_fit_width={window} finds "
+                    f"{n_observed}. These must match exactly (one row per observed "
+                    f"transit). This almost always means the '{ttv_prefix}N' rows were "
+                    f"generated with a different fast_fit_width (or epoch/period) than "
+                    f"what settings.csv/params.csv now specify. Regenerate them (e.g. "
+                    f"`allesfitter2 update-params <dir> --ttv` after a completed fit, "
+                    f"or prepare_ttv_fit) with the current settings, or revert "
+                    f"fast_fit_width to whatever generated the existing rows."
+                )
 
             for inst in self.settings["inst_phot"]:
                 time = self.data[inst]["time"]
