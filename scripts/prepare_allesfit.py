@@ -169,6 +169,89 @@ def _transit_requirement_settings(companions):
     return "".join(f"require_{companion}_transit,True\n" for companion in companions)
 
 
+def _baseline_flux_settings_block(fns, stellar_var_gp_sho):
+    """Return the ``baseline_flux_<inst>`` block for settings.csv.
+
+    Defaults to a per-instrument GP (Matern32) baseline, active with the
+    non-GP alternatives listed as commented stubs. When
+    ``stellar_var_gp_sho`` is set, a GP baseline can't coexist with the
+    GP stellar-variability term (allesfitter's config validator rejects
+    that combination), so ``hybrid_spline`` becomes the active choice
+    instead and the GP is kept commented for reference.
+    """
+    lines = []
+    for inst in fns:
+        lines.append(f"#baseline_flux_{inst},sample_offset")
+        lines.append(f"#baseline_flux_{inst},sample_linear")
+        if stellar_var_gp_sho:
+            lines.append(f"#baseline_flux_{inst},hybrid_poly_2")
+            lines.append(f"#baseline_flux_{inst},sample_GP_Matern32")
+            lines.append(f"baseline_flux_{inst},hybrid_spline")
+        else:
+            lines.append(f"#baseline_flux_{inst},hybrid_spline")
+            lines.append(f"#baseline_flux_{inst},hybrid_poly_2")
+            lines.append(f"baseline_flux_{inst},sample_GP_Matern32")
+    return "".join(line + "\n" for line in lines)
+
+
+def _baseline_gp_matern32_params_block(fns, stellar_var_gp_sho):
+    """Return the per-instrument GP-Matern32 baseline rows for params.csv.
+
+    The ``lnsigma``/``lnrho`` rows are commented out (reference only)
+    when ``stellar_var_gp_sho`` is set, matching
+    :func:`_baseline_flux_settings_block` switching that instrument's
+    active baseline to ``hybrid_spline`` (a non-GP method takes no
+    params.csv rows at all).
+    """
+    prefix = "#" if stellar_var_gp_sho else ""
+    lines = []
+    for inst in fns:
+        lines.append(
+            f"#baseline_gp_offset_flux_{inst},0,1,uniform -0.1 0.1,$\\mathrm{{offset ({inst})}}$,,"
+        )
+        lines.append(
+            f"{prefix}baseline_gp_matern32_lnsigma_flux_{inst},-5,1,uniform -10 -3,"
+            f"$\\mathrm{{gp ln \\sigma ({inst})}}$,,"
+        )
+        lines.append(
+            f"{prefix}baseline_gp_matern32_lnrho_flux_{inst},0,1,uniform -1 5,"
+            f"$\\mathrm{{gp ln \\rho ({inst})}}$,,"
+        )
+    return "".join(line + "\n" for line in lines)
+
+
+def _stellar_var_flux_settings_line(stellar_var_gp_sho):
+    """Return the ``stellar_var_flux`` settings.csv line: active SHO-GP
+    when ``stellar_var_gp_sho`` is set, else the commented stub."""
+    if stellar_var_gp_sho:
+        return "stellar_var_flux,sample_GP_SHO\n"
+    return "#stellar_var_flux,sample_GP_SHO\n"
+
+
+def _stellar_var_gp_sho_params_block(stellar_var_gp_sho):
+    """Return the shared stellar-variability GP-SHO rows for params.csv,
+    or ``''`` when not requested.
+
+    Bounds/labels mirror allesfitter's own reference tutorial
+    (``tutorials/06_transits_and_rvs_with_stellar_variability/allesfit/
+    params.csv``): a flat ``uniform -12 12`` prior on all three
+    log-parameters, since no data-driven refinement (unlike
+    :func:`_dataset_aware_gp_bounds` for the per-instrument Matern32
+    baseline) is available for a shared, multi-instrument stellar term.
+    """
+    if not stellar_var_gp_sho:
+        return ""
+    return (
+        "#stellar variability (shared GP across all inst_phot instruments; "
+        "SHO term ~ rotation/pulsation),,,,,,\n"
+        "stellar_var_gp_sho_lnS0_flux,-8,1,uniform -12 12,"
+        "$\\ln{S_\\mathrm{0;\\star}}$,,\n"
+        "stellar_var_gp_sho_lnQ_flux,1,1,uniform -12 12,$\\ln{Q_\\star}$,,\n"
+        "stellar_var_gp_sho_lnomega0_flux,-1.5,1,uniform -12 12,"
+        "$\\ln{\\omega_\\mathrm{0;\\star}}$,,\n"
+    )
+
+
 def _exposure_interpolation_settings(fns, t_exp_by_inst):
     """Return the per-instrument ``t_exp_<inst>``/``binning_<inst>`` rows.
 
@@ -1318,6 +1401,25 @@ def main():
         nargs="+",
         default=None,
     )
+    ap.add_argument(
+        "--stellar-var-gp-sho",
+        "--stellar_var_gp_sho",
+        dest="stellar_var_gp_sho",
+        help=(
+            "model intrinsic stellar variability (rotation/pulsation) as a "
+            "shared celerite SHO-kernel GP: sets stellar_var_flux,"
+            "sample_GP_SHO in settings.csv and adds "
+            "stellar_var_gp_sho_{lnS0,lnQ,lnomega0}_flux (uniform -12 12, "
+            "matching allesfitter's own tutorial convention) to params.csv. "
+            "allesfitter rejects a GP stellar-var model running alongside a "
+            "GP baseline on the same instrument, so every "
+            "baseline_flux_<inst> is emitted as hybrid_spline instead of "
+            "the default sample_GP_Matern32 (the GP alternative is kept "
+            "commented for reference)."
+        ),
+        action="store_true",
+        default=False,
+    )
 
     args = ap.parse_args(None if sys.argv[1:] else ["-h"])
 
@@ -1463,6 +1565,7 @@ def main():
     sigma = args.sigma
     interactive = args.interactive
     ttv = args.ttv
+    stellar_var_gp_sho = args.stellar_var_gp_sho
     fns = _resolve_instrument_filenames(args.filename, mission)
     fn = fns[0]  # first instrument (used where a single filename is needed)
 
@@ -1995,10 +2098,8 @@ def main():
     # offset (correlations >>1 yr). The previous 10 (exp(10) ≈ 60 yr)
     # was unhelpful.
     text += "#baseline per instrument,,,,,,\n"
-    for inst in fns:
-        text += f"#baseline_gp_offset_flux_{inst},0,1,uniform -0.1 0.1,$\\mathrm{{offset ({inst})}}$,,\n"
-        text += f"baseline_gp_matern32_lnsigma_flux_{inst},-5,1,uniform -10 -3,$\\mathrm{{gp ln \\sigma ({inst})}}$,,\n"
-        text += f"baseline_gp_matern32_lnrho_flux_{inst},0,1,uniform -1 5,$\\mathrm{{gp ln \\rho ({inst})}}$,,\n"
+    text += _baseline_gp_matern32_params_block(fns, stellar_var_gp_sho)
+    text += _stellar_var_gp_sho_params_block(stellar_var_gp_sho)
     # TTV rows: when --ttv is NOT set, keep the commented-out stub for
     # reference. When --ttv IS set, the real per-transit rows are
     # appended after the lightcurve download (below) because we need
@@ -2496,12 +2597,7 @@ ns_tol,100
 # if 'sample_linear' two corresponding parameters called 'baseline_offset_key_inst' and 'baseline_slope_key_inst' have to be given in params.csv,
 # if 'sample_GP' two corresponding parameters called 'baseline_gp1_key_inst' and 'baseline_gp2_key_inst' have to be given in params.csv,
 ###############################################################################,\n"""
-    for inst in fns:
-        text2 += f"#baseline_flux_{inst},sample_offset\n"
-        text2 += f"#baseline_flux_{inst},sample_linear\n"
-        text2 += f"#baseline_flux_{inst},hybrid_spline\n"
-        text2 += f"#baseline_flux_{inst},hybrid_poly_2\n"
-        text2 += f"baseline_flux_{inst},sample_GP_Matern32\n"
+    text2 += _baseline_flux_settings_block(fns, stellar_var_gp_sho)
     text2 += """###############################################################################,
 # Error settings (overall scaling) per instrument: sample / hybrid,
 # if 'sample' one corresponding parameter called 'ln_err_key_inst' (photometry) or 'ln_jitter_key_inst' (RV) has to be given in params.csv,
@@ -2530,8 +2626,9 @@ ns_tol,100
 # if 'sample_GP_SHO' three corresponding parameters has to be given in params.csv,
 # See https://github.com/MNGuenther/allesfitter/blob/master/tutorials/06_transits_and_rvs_with_stellar_variability/allesfit/params.csv,
 ###############################################################################,
-#stellar_var_flux,sample_GP_SHO
-#stellar_var_rv,sample_GP_real
+"""
+    text2 += _stellar_var_flux_settings_line(stellar_var_gp_sho)
+    text2 += """#stellar_var_rv,sample_GP_real
 ###################################################,
 # Fit TTV,
 ###################################################,

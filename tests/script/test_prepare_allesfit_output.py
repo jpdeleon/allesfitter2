@@ -136,6 +136,57 @@ def test_resolve_instrument_filenames_respects_explicit_filename():
     assert prep._resolve_instrument_filenames("custom", "tess") == ["custom"]
 
 
+def test_baseline_flux_settings_block_defaults_to_active_gp_matern32():
+    text = prep._baseline_flux_settings_block(["tess"], False)
+    assert "baseline_flux_tess,sample_GP_Matern32\n" in text
+    assert "#baseline_flux_tess,hybrid_spline\n" in text
+    # The GP row itself must not be commented out.
+    assert "\n#baseline_flux_tess,sample_GP_Matern32" not in text
+
+
+def test_baseline_flux_settings_block_switches_to_hybrid_spline_for_stellar_var():
+    # allesfitter rejects a GP stellar-var model alongside a GP baseline, so
+    # every instrument's active baseline must become the non-GP hybrid_spline.
+    text = prep._baseline_flux_settings_block(["tess", "k2"], True)
+    for inst in ("tess", "k2"):
+        assert f"baseline_flux_{inst},hybrid_spline\n" in text
+        assert f"#baseline_flux_{inst},sample_GP_Matern32\n" in text
+        assert f"\nbaseline_flux_{inst},sample_GP_Matern32" not in text
+
+
+def test_baseline_gp_matern32_params_block_active_rows_by_default():
+    text = prep._baseline_gp_matern32_params_block(["tess"], False)
+    assert "baseline_gp_matern32_lnsigma_flux_tess,-5,1,uniform -10 -3" in text
+    assert "#baseline_gp_matern32_lnsigma_flux_tess" not in text
+
+
+def test_baseline_gp_matern32_params_block_commented_when_stellar_var_gp_sho():
+    text = prep._baseline_gp_matern32_params_block(["tess", "k2"], True)
+    for inst in ("tess", "k2"):
+        assert f"#baseline_gp_matern32_lnsigma_flux_{inst}" in text
+        assert f"#baseline_gp_matern32_lnrho_flux_{inst}" in text
+
+
+def test_stellar_var_flux_settings_line_toggles_the_active_row():
+    assert prep._stellar_var_flux_settings_line(False) == "#stellar_var_flux,sample_GP_SHO\n"
+    assert prep._stellar_var_flux_settings_line(True) == "stellar_var_flux,sample_GP_SHO\n"
+
+
+def test_stellar_var_gp_sho_params_block_empty_unless_requested():
+    assert prep._stellar_var_gp_sho_params_block(False) == ""
+    text = prep._stellar_var_gp_sho_params_block(True)
+    rows = {
+        line.split(",")[0]: line for line in text.splitlines() if line and not line.startswith("#")
+    }
+    for name in (
+        "stellar_var_gp_sho_lnS0_flux",
+        "stellar_var_gp_sho_lnQ_flux",
+        "stellar_var_gp_sho_lnomega0_flux",
+    ):
+        assert name in rows, f"missing row: {name}"
+        assert rows[name].split(",")[3] == "uniform -12 12"
+
+
 def test_transit_requirement_settings_are_explicit_per_companion():
     assert prep._transit_requirement_settings(["b", "c"]) == (
         "require_b_transit,True\nrequire_c_transit,True\n"

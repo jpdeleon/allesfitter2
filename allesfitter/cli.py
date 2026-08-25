@@ -80,6 +80,15 @@ def prepare(
     debug: bool = typer.Option(False, "--debug"),
     lc_only: bool = typer.Option(False, "--lc-only", help="only download and save lightcurve"),
     ttv: bool = typer.Option(False, "--ttv", help="emit per-transit TTV parameters"),
+    stellar_var_gp_sho: bool = typer.Option(
+        False,
+        "--stellar-var-gp-sho",
+        "--stellar_var_gp_sho",
+        help="model stellar variability as a shared celerite SHO-kernel GP "
+        "(stellar_var_flux); switches every baseline_flux_<inst> to "
+        "hybrid_spline since a GP baseline can't coexist with a GP "
+        "stellar-var model",
+    ),
     bandpass: list[str] | None = typer.Option(
         None,
         "-bp",
@@ -159,6 +168,8 @@ def prepare(
         argv += ["--lc-only"]
     if ttv:
         argv += ["--ttv"]
+    if stellar_var_gp_sho:
+        argv += ["--stellar-var-gp-sho"]
     if bandpass:
         argv += ["-bp"] + bandpass
     for flag, value in (
