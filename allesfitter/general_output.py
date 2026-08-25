@@ -234,6 +234,23 @@ def draw_initial_guess_samples(Nsamples=1):
 
 
 ###############################################################################
+#::: annotate plots with per-instrument binning, when settings.csv used it
+###############################################################################
+def _binning_label(base, inst):
+    """`" (binned N.NN min)"` if `binning_<inst>` is set in settings.csv, else ``""``.
+
+    Only the per-instrument override is reported here (not the global
+    `binning` fallback), since that override is the setting a reader would
+    need to notice to understand why one instrument's panel looks coarser
+    than another's.
+    """
+    binning_days = base.settings.get("binning_" + inst)
+    if not binning_days:
+        return ""
+    return f" (binned {binning_days * 24 * 60:.2f} min)"
+
+
+###############################################################################
 #::: plot all data in one panel
 ###############################################################################
 def plot_panel(datadir):
@@ -269,7 +286,7 @@ def plot_panel(datadir):
             config.BASEMENT.data[inst]["flux"],
             marker=".",
             ls="none",
-            label=inst,
+            label=inst + _binning_label(config.BASEMENT, inst),
             rasterized=True,
         )
         ax.legend()
@@ -875,7 +892,7 @@ def plot_1(
     # ==========================================================================
     def set_title(title1):
         if kwargs_ax["title"] is None:
-            return title1
+            return title1 + _binning_label(base, inst)
         else:
             return kwargs_ax["title"]
 
@@ -1848,7 +1865,7 @@ def afplot_per_transit(samples, inst, companion, base=None, kwargs_dict=None):
             #::: every panel carries the instrument, not just the top one: the
             #::: per-companion PDFs concatenate several instruments into one
             #::: file, where the instrument is no longer part of the filename.
-            ax.set(xlabel="Time", ylabel=ylabel, title=inst)
+            ax.set(xlabel="Time", ylabel=ylabel, title=inst + _binning_label(base, inst))
             ax.text(
                 0.95,
                 0.95,
