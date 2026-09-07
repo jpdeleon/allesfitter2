@@ -46,10 +46,19 @@ from ..results import target_output_directory
 from ..tls_h5 import write_h5_tls_result
 from ..validation.prior_checks import transit_duration_days
 from .gpu_tls import run_tls as _run_tls_engine
+from .notch_locor import locor_flatten, notch_flatten
 from .transit_search import mask, tls_search
 
 #: Maps a results directory's basename to the sampler that produced it.
 _SAMPLER_BY_DIRNAME = {"mcmc_results": "mcmc", "ns_results": "ns"}
+
+#: Alternatives to the default best-fit-baseline detrending, ported from
+#: quicklook's ``notch_locor`` module (Rizzuto et al. 2017).
+_FLATTEN_METHODS = ("baseline", "notch", "locor")
+
+#: Sliding-window width (days) used by "notch" when --flatten-window-length
+#: isn't given; matches the upstream Notch default for short-cadence data.
+_DEFAULT_NOTCH_WINDOW_LENGTH = 0.5
 
 
 def _resolve_sampler(results_dir: str) -> tuple[str, Path]:
@@ -109,14 +118,89 @@ def _known_companion_windows(
     return windows
 
 
-def _detrend_full_lightcurve(
-    base, params_median: dict
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Detrend every photometric instrument's full raw light curve with the
-    best-fit baseline and concatenate them into one time-sorted series.
+def _estimate_locor_period(base, quiet: bool) -> float:
+    """Auto-estimate a rotation period for LOCoR via a Lomb-Scargle
+    periodogram over every instrument's concatenated raw flux.
 
-    Returns ``(time, flux_raw, flux_detrended, flux_err)`` — ``flux_raw`` is
-    kept alongside the detrended flux so plots can show both."""
+    ``clip=False`` deliberately skips ``periodicity.estimate_period``'s
+    default slide-clip pass, which requires the optional ``wotan``
+    package — auto-estimating a period for LOCoR shouldn't drag in a
+    dependency that Notch/LOCoR themselves don't need.
+    """
+    from .periodicity import estimate_period
+
+    times = [
+        np.asarray(base.fulldata[inst]["time"], dtype=float) for inst in base.settings["inst_phot"]
+    ]
+    fluxes = [
+        np.asarray(base.fulldata[inst]["flux"], dtype=float) for inst in base.settings["inst_phot"]
+    ]
+    time = np.concatenate(times)
+    flux = np.concatenate(fluxes)
+    order = np.argsort(time)
+    try:
+        period, _fap = estimate_period(time[order], flux[order], None, clip=False, plot=False)
+        period = float(period)
+        if not np.isfinite(period) or period <= 0:
+            raise ValueError(f"estimate_period returned a non-positive period ({period}).")
+    except Exception as exc:
+        period = 1.0
+        if not quiet:
+            print(
+                f"[transit-search] could not auto-estimate a rotation period for LOCoR "
+                f"({exc}); falling back to period={period:.2f} d. Pass "
+                "--flatten-window-length to set it explicitly."
+            )
+    return period
+
+
+def _detrend_full_lightcurve(
+    base,
+    params_median: dict,
+    flatten_method: str = "baseline",
+    flatten_window_length: float | None = None,
+    quiet: bool = False,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Detrend every photometric instrument's full raw light curve and
+    concatenate them into one time-sorted series.
+
+    Parameters
+    ----------
+    flatten_method : str
+        ``"baseline"`` (default) subtracts the fit's best-fit baseline
+        model (:func:`allesfitter.computer.calculate_baseline` — whatever
+        GP/spline/polynomial baseline the fit itself used). ``"notch"`` and
+        ``"locor"`` instead run the Notch filter / LOCoR detrending
+        (Rizzuto et al. 2017), ported from quicklook's ``notch_locor``
+        module, directly on each instrument's raw flux — useful when the
+        fit's own baseline model doesn't track the systematics well enough
+        for a clean blind search (e.g. strong stellar rotation).
+    flatten_window_length : float, optional
+        For ``"notch"``: the sliding window width in days (default 0.5).
+        For ``"locor"``: the stellar rotation period in days; if omitted,
+        it's auto-estimated once (across all instruments) via a
+        Lomb-Scargle periodogram. Ignored for ``"baseline"``.
+    quiet : bool
+        Silence the auto-period-estimation fallback message.
+
+    Returns
+    -------
+    ``(time, flux_raw, flux_detrended, flux_err)`` — ``flux_raw`` is kept
+    alongside the detrended flux so plots can show both.
+    """
+    if flatten_method not in _FLATTEN_METHODS:
+        raise ValueError(
+            f"flatten_method={flatten_method!r} is not recognized; expected one of "
+            f"{_FLATTEN_METHODS}."
+        )
+
+    window_length = flatten_window_length
+    if flatten_method == "notch" and window_length is None:
+        window_length = _DEFAULT_NOTCH_WINDOW_LENGTH
+    period = flatten_window_length
+    if flatten_method == "locor" and period is None:
+        period = _estimate_locor_period(base, quiet)
+
     times, fluxes_raw, fluxes_detrended, errs = [], [], [], []
     for inst in base.settings["inst_phot"]:
         full = base.fulldata[inst]
@@ -124,8 +208,15 @@ def _detrend_full_lightcurve(
         flux_full = np.asarray(full["flux"], dtype=float)
         flux_err_full = full["err_scales_flux"] * float(params_median[f"err_flux_{inst}"])
 
-        baseline_full = calculate_baseline(params_median, inst, "flux", xx=time_full)
-        flux_detrended = flux_full - baseline_full
+        if flatten_method == "baseline":
+            baseline_full = calculate_baseline(params_median, inst, "flux", xx=time_full)
+            flux_detrended = flux_full - baseline_full
+        elif flatten_method == "notch":
+            flux_detrended, _trend = notch_flatten(
+                time_full, flux_full, window_length=window_length
+            )
+        else:  # "locor"
+            flux_detrended, _trend = locor_flatten(time_full, flux_full, period=period)
 
         times.append(time_full)
         fluxes_raw.append(flux_full)
@@ -792,6 +883,8 @@ def transit_search(
     min_points_per_transit: int = 5,
     consistency_sigma: float = 3.0,
     min_depth_ppt: float = 1.0,
+    flatten_method: str = "baseline",
+    flatten_window_length: float | None = None,
     quiet: bool = False,
 ) -> dict:
     """Blind TLS search for un-modeled transits in a fitted target.
@@ -874,6 +967,19 @@ def transit_search(
         many parts per thousand (1 ppt = 1000 ppm). SDE/SNR alone can clear
         the bar on noise for long periods with only a couple of marginal
         transits; this is a direct floor on the physical depth itself.
+    flatten_method : str
+        How to detrend the raw light curve before the blind search:
+        ``"baseline"`` (default) subtracts the fit's own best-fit baseline
+        model. ``"notch"`` and ``"locor"`` instead apply the Notch filter /
+        LOCoR detrending (Rizzuto et al. 2017) directly to the raw flux —
+        an alternative worth trying when the fit's baseline model doesn't
+        track the systematics well enough (e.g. strong stellar rotation
+        that the fit's own GP/spline wasn't tuned for).
+    flatten_window_length : float, optional
+        For ``flatten_method="notch"``: the sliding window width in days
+        (default 0.5). For ``"locor"``: the stellar rotation period in
+        days; if omitted, it's auto-estimated via a Lomb-Scargle
+        periodogram. Ignored for ``"baseline"``.
 
     Returns
     -------
@@ -891,7 +997,13 @@ def transit_search(
     companions = base.settings["companions_phot"]
     known_windows = _known_companion_windows(params_median, companions, mask_width_factor)
 
-    time, flux_raw, flux, flux_err = _detrend_full_lightcurve(base, params_median)
+    time, flux_raw, flux, flux_err = _detrend_full_lightcurve(
+        base,
+        params_median,
+        flatten_method=flatten_method,
+        flatten_window_length=flatten_window_length,
+        quiet=quiet,
+    )
     full_lightcurve = {"time": time.copy(), "flux": flux.copy(), "flux_err": flux_err.copy()}
 
     tls_kwargs = _tls_stellar_kwargs(base, params_median)

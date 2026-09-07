@@ -225,6 +225,10 @@ def test_transit_search_forwards_arguments(monkeypatch, tmp_path):
             "4.0",
             "--min-depth-ppt",
             "2.5",
+            "--flatten-method",
+            "locor",
+            "--flatten-window-length",
+            "1.2",
         ],
     )
 
@@ -244,6 +248,8 @@ def test_transit_search_forwards_arguments(monkeypatch, tmp_path):
     assert received["min_points_per_transit"] == 10
     assert received["consistency_sigma"] == 4.0
     assert received["min_depth_ppt"] == 2.5
+    assert received["flatten_method"] == "locor"
+    assert received["flatten_window_length"] == 1.2
     assert received["quiet"] is False
 
 
@@ -277,6 +283,8 @@ def test_transit_search_defaults(monkeypatch, tmp_path):
     assert received["min_points_per_transit"] == 5
     assert received["consistency_sigma"] == 3.0
     assert received["min_depth_ppt"] == 1.0
+    assert received["flatten_method"] == "baseline"
+    assert received["flatten_window_length"] is None
 
 
 def test_update_params_forwards_arguments(monkeypatch, tmp_path):

@@ -218,6 +218,115 @@ class TestDetrendFullLightcurve:
         np.testing.assert_allclose(flux, [1.0, 0.9, 1.1])  # zero baseline -> unchanged
         np.testing.assert_allclose(flux_err, [0.01, 0.04, 0.01])
 
+    def test_rejects_unrecognized_flatten_method(self):
+        base = self._FakeBase({"tess": {}}, ["tess"])
+
+        with pytest.raises(ValueError, match="flatten_method"):
+            _detrend_full_lightcurve(base, {}, flatten_method="wotan")
+
+    def test_notch_flatten_method_calls_notch_flatten_per_instrument(self, monkeypatch):
+        import allesfitter.detection.blind_search as blind_search
+
+        calls = []
+
+        def fake_notch_flatten(time, flux, window_length):
+            calls.append((tuple(time), window_length))
+            return flux * 0.0 + 1.0, flux  # trivial, deterministic flat/trend
+
+        monkeypatch.setattr(blind_search, "notch_flatten", fake_notch_flatten)
+
+        fulldata = {
+            "tess": {
+                "time": np.array([0.0, 1.0]),
+                "flux": np.array([1.0, 1.1]),
+                "err_scales_flux": np.array([1.0, 1.0]),
+            }
+        }
+        base = self._FakeBase(fulldata, ["tess"])
+        params_median = {"err_flux_tess": 0.01}
+
+        time, flux_raw, flux, flux_err = _detrend_full_lightcurve(
+            base, params_median, flatten_method="notch", flatten_window_length=0.25
+        )
+
+        assert calls == [((0.0, 1.0), 0.25)]
+        np.testing.assert_allclose(flux, [1.0, 1.0])
+
+    def test_notch_flatten_method_defaults_window_length(self, monkeypatch):
+        import allesfitter.detection.blind_search as blind_search
+
+        received = {}
+
+        def fake_notch_flatten(time, flux, window_length):
+            received["window_length"] = window_length
+            return flux, flux
+
+        monkeypatch.setattr(blind_search, "notch_flatten", fake_notch_flatten)
+
+        fulldata = {
+            "tess": {
+                "time": np.array([0.0, 1.0]),
+                "flux": np.array([1.0, 1.1]),
+                "err_scales_flux": np.array([1.0, 1.0]),
+            }
+        }
+        base = self._FakeBase(fulldata, ["tess"])
+
+        _detrend_full_lightcurve(base, {"err_flux_tess": 0.01}, flatten_method="notch")
+
+        assert received["window_length"] == blind_search._DEFAULT_NOTCH_WINDOW_LENGTH
+
+    def test_locor_flatten_method_uses_explicit_period(self, monkeypatch):
+        import allesfitter.detection.blind_search as blind_search
+
+        received = {}
+
+        def fake_locor_flatten(time, flux, period):
+            received["period"] = period
+            return flux, flux
+
+        monkeypatch.setattr(blind_search, "locor_flatten", fake_locor_flatten)
+
+        fulldata = {
+            "tess": {
+                "time": np.array([0.0, 1.0]),
+                "flux": np.array([1.0, 1.1]),
+                "err_scales_flux": np.array([1.0, 1.0]),
+            }
+        }
+        base = self._FakeBase(fulldata, ["tess"])
+
+        _detrend_full_lightcurve(
+            base, {"err_flux_tess": 0.01}, flatten_method="locor", flatten_window_length=3.3
+        )
+
+        assert received["period"] == 3.3
+
+    def test_locor_flatten_method_auto_estimates_period_when_omitted(self, monkeypatch):
+        import allesfitter.detection.blind_search as blind_search
+
+        monkeypatch.setattr(blind_search, "_estimate_locor_period", lambda base, quiet: 7.5)
+        received = {}
+
+        def fake_locor_flatten(time, flux, period):
+            received["period"] = period
+            return flux, flux
+
+        monkeypatch.setattr(blind_search, "locor_flatten", fake_locor_flatten)
+
+        fulldata = {
+            "tess": {
+                "time": np.array([0.0, 1.0]),
+                "flux": np.array([1.0, 1.1]),
+                "err_scales_flux": np.array([1.0, 1.0]),
+            }
+        }
+        base = self._FakeBase(fulldata, ["tess"])
+
+        _detrend_full_lightcurve(base, {"err_flux_tess": 0.01}, flatten_method="locor")
+
+        assert received["period"] == 7.5
+
 
 def test_write_summary_csv_writes_header_and_rows(tmp_path):
     path = tmp_path / "candidates_summary.csv"

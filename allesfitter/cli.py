@@ -478,6 +478,22 @@ def transit_search(
         "thousand (1 ppt = 1000 ppm) — SDE/SNR alone can clear threshold on noise "
         "for long periods with only a couple of marginal transits",
     ),
+    flatten_method: str = typer.Option(
+        "baseline",
+        "--flatten-method",
+        help="how to detrend the raw light curve before searching: 'baseline' (default) "
+        "subtracts the fit's own best-fit baseline model; 'notch' and 'locor' instead "
+        "apply the Notch filter / LOCoR detrending (Rizzuto et al. 2017) directly to "
+        "the raw flux — try these when the fit's baseline model doesn't track the "
+        "systematics well enough (e.g. strong stellar rotation)",
+    ),
+    flatten_window_length: float | None = typer.Option(
+        None,
+        "--flatten-window-length",
+        help="for --flatten-method=notch: sliding window width in days (default 0.5); "
+        "for =locor: stellar rotation period in days (auto-estimated via a "
+        "Lomb-Scargle periodogram if omitted); ignored for 'baseline'",
+    ),
     quiet: bool = typer.Option(False, "--quiet", "-q"),
 ):
     """Detrend with the best-fit baseline, mask known planets, and blind-search
@@ -502,6 +518,8 @@ def transit_search(
         min_points_per_transit=min_points_per_transit,
         consistency_sigma=consistency_sigma,
         min_depth_ppt=min_depth_ppt,
+        flatten_method=flatten_method,
+        flatten_window_length=flatten_window_length,
         quiet=quiet,
     )
 

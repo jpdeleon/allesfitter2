@@ -192,7 +192,17 @@ un-modeled transiting signals in the residual light curve:
    `ns_results` directory — the best-fit baseline (GP or otherwise) and
    every known companion's ephemeris.
 2. Reconstructs each instrument's full raw light curve (before any
-   `fast_fit` windowing) and subtracts the best-fit baseline model from it.
+   `fast_fit` windowing) and detrends it with `--flatten-method` (default
+   `baseline`, which subtracts the fit's own best-fit baseline model).
+   `notch` and `locor` instead apply the Notch filter / LOCoR detrending
+   (Rizzuto et al. 2017), ported from
+   [quicklook](https://github.com/jpdeleon/quicklook)'s `notch_locor`
+   module, directly to the raw flux — worth trying when the fit's own
+   baseline model (e.g. its GP) doesn't track the systematics well enough
+   for a clean blind search, such as strong stellar rotation the fit wasn't
+   tuned for. `--flatten-window-length` sets the Notch sliding-window width
+   in days (default `0.5`) or the LOCoR rotation period in days
+   (auto-estimated via a Lomb-Scargle periodogram if omitted).
 3. Before masking anything, checks each known companion's own
    recoverability: isolates it (masks every *other* known companion, but not
    itself) and runs a narrow TLS scan bracketing its own period (±5% by
@@ -300,6 +310,8 @@ For each blind-search candidate above threshold, it writes:
 | `--min-points-per-transit` | Minimum in-transit points for an epoch to count as well-covered by the consistency check | `5` |
 | `--consistency-sigma` | Reject a candidate if any well-covered epoch shows no dip at this significance | `3.0` |
 | `--min-depth-ppt` | Reject a candidate whose transit depth is below this many parts per thousand | `1.0` |
+| `--flatten-method` | Detrending used before the search: `baseline` (fit's best-fit baseline), `notch`, or `locor` | `baseline` |
+| `--flatten-window-length` | Notch sliding-window width (days), or LOCoR rotation period (days, auto-estimated if omitted) | `0.5` (notch); auto (locor) |
 | `-o, --outdir <DIR>` | Output directory | `<target>/transit_search_results` |
 | `-e, --file-extension` | Figure format (`pdf`, `png`, `jpg`, `svg`, `webp`) | `.pdf` |
 | `--max-candidates` | Safety cap on the number of candidates kept | `20` |
